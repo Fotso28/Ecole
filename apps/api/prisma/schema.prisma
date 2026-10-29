@@ -663,6 +663,8 @@ model Payment {
   cashSessionId     String?
   receivedById      String?
   initiatedByUserId String?
+  /// Échéances choisies au moment de la demande (imputées en priorité à la confirmation).
+  requestedLineIds  String[]      @default([])
   failureReason     String?
   createdAt         DateTime      @default(now())
   confirmedAt       DateTime?

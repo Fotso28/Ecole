@@ -58,7 +58,9 @@ export class AuthService {
   ) {}
 
   static hashPassword(password: string): Promise<string> {
-    return argon2.hash(password, { type: argon2.argon2id });
+    // Paramètres allégés uniquement pour les tests automatisés ; argon2id par défaut sinon.
+    const light = process.env.NODE_ENV === 'test' ? { memoryCost: 4096, timeCost: 2 } : {};
+    return argon2.hash(password, { type: argon2.argon2id, ...light });
   }
 
   async loginStaff(email: string, password: string, userAgent?: string): Promise<LoginResult> {

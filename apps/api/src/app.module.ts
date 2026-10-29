@@ -6,10 +6,25 @@ import { AuthGuard } from './common/auth.guard';
 import { CoreModule } from './common/core.module';
 import { ErrorsFilter } from './common/errors.filter';
 import { PrismaModule } from './common/prisma';
+import { HealthController } from './health.controller';
+import { AcademicModule } from './modules/academic/academic.module';
+import { AttendanceModule } from './modules/attendance/attendance.module';
+import { AuditModule } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { CommunicationModule } from './modules/communication/communication.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { FinanceModule } from './modules/finance/finance.module';
+import { GradesModule } from './modules/grades/grades.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { PlatformModule } from './modules/platform/platform.module';
-import { HealthController } from './health.controller';
+import { PortalModule } from './modules/portal/portal.module';
+import { ReportCardsModule } from './modules/report-cards/report-cards.module';
+import { SettingsModule } from './modules/settings/settings.module';
+import { StaffModule } from './modules/staff/staff.module';
+import { StudentsModule } from './modules/students/students.module';
+import { TeacherModule } from './modules/teacher/teacher.module';
+import { TimetableModule } from './modules/timetable/timetable.module';
+import { VerifyModule } from './modules/verify/verify.module';
 
 @Module({
   imports: [
@@ -24,6 +39,21 @@ import { HealthController } from './health.controller';
     }),
     AuthModule,
     PlatformModule,
+    AcademicModule,
+    StaffModule,
+    StudentsModule,
+    AttendanceModule,
+    GradesModule,
+    ReportCardsModule,
+    FinanceModule,
+    DashboardModule,
+    PortalModule,
+    TeacherModule,
+    CommunicationModule,
+    AuditModule,
+    SettingsModule,
+    TimetableModule,
+    VerifyModule,
   ],
   controllers: [HealthController],
   providers: [

@@ -3,6 +3,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { env } from '../config/env';
 import { AuditService } from './audit.service';
 import { CountersService } from './counters.service';
+import { ScopeService } from './scope.service';
 
 @Global()
 @Module({
@@ -16,7 +17,7 @@ import { CountersService } from './counters.service';
       }),
     }),
   ],
-  providers: [AuditService, CountersService],
-  exports: [AuditService, CountersService],
+  providers: [AuditService, CountersService, ScopeService],
+  exports: [AuditService, CountersService, ScopeService],
 })
 export class CoreModule {}

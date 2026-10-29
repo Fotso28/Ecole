@@ -8,19 +8,19 @@ Un outil de travail calme : fond papier chaud, vert profond pour l'action, safra
 
 ### Couleurs (tokens du thème shadcn/ui)
 
-| Token | Valeur | Usage |
-|---|---|---|
-| `--primary` | `#0B6447` | Action principale, lien, sélection (7,2:1 sur blanc) |
-| `--primary-soft` | `#E3F0EA` | Fond des états « succès », éléments sélectionnés |
-| `--sidebar` | `#0E2A20` | Barre latérale, en-têtes de documents |
-| `--accent` | `#E8A317` | Élément actif, badge de compteur. Jamais en texte |
-| `--foreground` | `#14201A` | Texte principal |
-| `--muted-foreground` | `#55615A` | Texte secondaire (5,9:1 sur le fond) |
-| `--background` | `#F6F5F0` | Fond d'application ; surfaces en `#FFFFFF` |
-| `--border` | `#E4E2DA` | Bordures des cartes ; `#D5D3CA` pour les champs |
-| `--warning` / `--warning-soft` | `#8A5A00` / `#FDF3DC` | Partiel, retard, seuil atteint |
-| `--destructive` / `--destructive-soft` | `#B3261E` / `#FBE9E7` | Impayé, absence, erreur |
-| `--info` / `--info-soft` | `#1F5FBF` / `#E7EEFA` | Justifié, transféré, en attente |
+| Token                                  | Valeur                | Usage                                                |
+| -------------------------------------- | --------------------- | ---------------------------------------------------- |
+| `--primary`                            | `#0B6447`             | Action principale, lien, sélection (7,2:1 sur blanc) |
+| `--primary-soft`                       | `#E3F0EA`             | Fond des états « succès », éléments sélectionnés     |
+| `--sidebar`                            | `#0E2A20`             | Barre latérale, en-têtes de documents                |
+| `--accent`                             | `#E8A317`             | Élément actif, badge de compteur. Jamais en texte    |
+| `--foreground`                         | `#14201A`             | Texte principal                                      |
+| `--muted-foreground`                   | `#55615A`             | Texte secondaire (5,9:1 sur le fond)                 |
+| `--background`                         | `#F6F5F0`             | Fond d'application ; surfaces en `#FFFFFF`           |
+| `--border`                             | `#E4E2DA`             | Bordures des cartes ; `#D5D3CA` pour les champs      |
+| `--warning` / `--warning-soft`         | `#8A5A00` / `#FDF3DC` | Partiel, retard, seuil atteint                       |
+| `--destructive` / `--destructive-soft` | `#B3261E` / `#FBE9E7` | Impayé, absence, erreur                              |
+| `--info` / `--info-soft`               | `#1F5FBF` / `#E7EEFA` | Justifié, transféré, en attente                      |
 
 Tous les couples texte/fond dépassent 4,5:1. Un statut n'est jamais porté par la couleur seule : il a toujours un libellé.
 
@@ -71,21 +71,21 @@ Règles transverses :
 
 ## 4. Inventaire des écrans maquettés
 
-| Écran | Rôle | Points clés |
-|---|---|---|
-| Tableau de bord | Direction | Indicateurs, encaissements par semaine (bascule graphique/tableau), liste « À traiter », classes les moins à jour, activité récente liée au journal d'audit |
-| Élèves | Secrétariat | Filtres par statut, sélection multiple et actions groupées, import CSV/Excel |
-| Fiche élève | Tous (selon droits) | Situation financière, résultats, assiduité, parents, parcours, pièces du dossier, accès restreint à la fiche santé |
-| Admission | Secrétariat | Assistant en 5 étapes, détection de doublon à la saisie (nom, date et lieu de naissance) |
-| Saisie des notes | Enseignant, censeur | Grille type tableur, moyennes, rangs avec ex aequo et appréciations calculés en direct, validation 0–20, soumission bloquée tant qu'une note manque |
-| Bulletin | Direction | Modèle A4 bilingue, groupes de matières, bilan, décision du conseil, QR de vérification et numéro de version |
-| Appel | Enseignant (tablette) | Boutons P/A/R de 48 px, compteurs en direct, « Tous présents », SMS automatique aux parents à 10:00 |
-| Emploi du temps | Censeur | Grille par classe, enseignant ou salle, conflits signalés immédiatement avec correction proposée, contrôle de la charge horaire |
-| Caisse | Comptable | Choix des échéances, espèces avec monnaie à rendre, Mobile Money, banque, récapitulatif avant validation, reçu |
-| Connexion parent | Parent | Numéro +237, code SMS à 6 chiffres (`autocomplete="one-time-code"`), repli par appel vocal, FR/EN |
-| Accueil parent | Parent | Changement d'enfant (plusieurs écoles), reste à payer, absence à justifier, dernières notes, annonce |
-| Paiement Mobile Money | Parent | Montant (échéance, solde, autre), opérateur, attente de validation, confirmation et nouveau solde |
-| Notes sur mobile | Enseignant | Un élève par ligne, clavier numérique, bouton « Abs », progression 44/46 |
+| Écran                 | Rôle                  | Points clés                                                                                                                                                 |
+| --------------------- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tableau de bord       | Direction             | Indicateurs, encaissements par semaine (bascule graphique/tableau), liste « À traiter », classes les moins à jour, activité récente liée au journal d'audit |
+| Élèves                | Secrétariat           | Filtres par statut, sélection multiple et actions groupées, import CSV/Excel                                                                                |
+| Fiche élève           | Tous (selon droits)   | Situation financière, résultats, assiduité, parents, parcours, pièces du dossier, accès restreint à la fiche santé                                          |
+| Admission             | Secrétariat           | Assistant en 5 étapes, détection de doublon à la saisie (nom, date et lieu de naissance)                                                                    |
+| Saisie des notes      | Enseignant, censeur   | Grille type tableur, moyennes, rangs avec ex aequo et appréciations calculés en direct, validation 0–20, soumission bloquée tant qu'une note manque         |
+| Bulletin              | Direction             | Modèle A4 bilingue, groupes de matières, bilan, décision du conseil, QR de vérification et numéro de version                                                |
+| Appel                 | Enseignant (tablette) | Boutons P/A/R de 48 px, compteurs en direct, « Tous présents », SMS automatique aux parents à 10:00                                                         |
+| Emploi du temps       | Censeur               | Grille par classe, enseignant ou salle, conflits signalés immédiatement avec correction proposée, contrôle de la charge horaire                             |
+| Caisse                | Comptable             | Choix des échéances, espèces avec monnaie à rendre, Mobile Money, banque, récapitulatif avant validation, reçu                                              |
+| Connexion parent      | Parent                | Numéro +237, code SMS à 6 chiffres (`autocomplete="one-time-code"`), repli par appel vocal, FR/EN                                                           |
+| Accueil parent        | Parent                | Changement d'enfant (plusieurs écoles), reste à payer, absence à justifier, dernières notes, annonce                                                        |
+| Paiement Mobile Money | Parent                | Montant (échéance, solde, autre), opérateur, attente de validation, confirmation et nouveau solde                                                           |
+| Notes sur mobile      | Enseignant            | Un élève par ligne, clavier numérique, bouton « Abs », progression 44/46                                                                                    |
 
 ## 5. Règles d'interaction
 

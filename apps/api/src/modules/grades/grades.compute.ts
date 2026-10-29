@@ -42,7 +42,10 @@ export function compactGrade(grade: Pick<Grade, 'status' | 'valueCenti'> | undef
 }
 
 /** Convertit une saisie en valeur à stocker ; `null` = supprimer la note. */
-export function toStored(raw: string, maxScore: number): { status: GradeStatus; valueCenti: number | null } | null | 'invalid' {
+export function toStored(
+  raw: string,
+  maxScore: number,
+): { status: GradeStatus; valueCenti: number | null } | null | 'invalid' {
   const parsed = parseGradeInput(raw, maxScore);
   switch (parsed.kind) {
     case 'empty':
@@ -74,7 +77,11 @@ export function computeSheet(
       return { evaluationId: e.id, value: compactGrade(g), grade: toParsed(g) };
     });
     const result = subjectAverage(
-      evaluations.map((e, i) => ({ weight: e.weight, maxScore: e.maxScore, grade: cells[i]?.grade ?? { kind: 'empty' } })),
+      evaluations.map((e, i) => ({
+        weight: e.weight,
+        maxScore: e.maxScore,
+        grade: cells[i]?.grade ?? { kind: 'empty' },
+      })),
     );
     return { student: s, cells, ...result };
   });

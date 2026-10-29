@@ -54,7 +54,10 @@ export class SimulatorMobileMoneyProvider implements MobileMoneyProvider {
 export class HttpMobileMoneyProvider implements MobileMoneyProvider {
   private headers() {
     const token = env().MOBILE_MONEY_HTTP_TOKEN;
-    return { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) };
+    return {
+      'content-type': 'application/json',
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    };
   }
 
   async requestPayment(req: CollectRequest): Promise<{ reference: string }> {
@@ -82,7 +85,10 @@ export class HttpMobileMoneyProvider implements MobileMoneyProvider {
   async checkStatus(reference: string): Promise<OperatorStatus> {
     const url = env().MOBILE_MONEY_HTTP_URL;
     if (!url) throw new Error('MOBILE_MONEY_HTTP_URL manquant');
-    const res = await fetch(`${url}/status/${encodeURIComponent(reference)}`, { headers: this.headers(), signal: AbortSignal.timeout(15000) });
+    const res = await fetch(`${url}/status/${encodeURIComponent(reference)}`, {
+      headers: this.headers(),
+      signal: AbortSignal.timeout(15000),
+    });
     if (!res.ok) throw new Error(`Passerelle Mobile Money : HTTP ${res.status}`);
     const body = (await res.json()) as { status?: string };
     return body.status === 'SUCCESS' || body.status === 'FAILED' ? body.status : 'PENDING';
@@ -90,10 +96,15 @@ export class HttpMobileMoneyProvider implements MobileMoneyProvider {
 }
 
 export function createMobileMoneyProvider(): MobileMoneyProvider {
-  return env().MOBILE_MONEY_PROVIDER === 'http' ? new HttpMobileMoneyProvider() : new SimulatorMobileMoneyProvider();
+  return env().MOBILE_MONEY_PROVIDER === 'http'
+    ? new HttpMobileMoneyProvider()
+    : new SimulatorMobileMoneyProvider();
 }
 
 /** Signature attendue d'un webhook : HMAC-SHA256 hexadécimal du corps brut. */
-export function signWebhook(rawBody: string | Buffer, secret = env().MOBILE_MONEY_WEBHOOK_SECRET): string {
+export function signWebhook(
+  rawBody: string | Buffer,
+  secret = env().MOBILE_MONEY_WEBHOOK_SECRET,
+): string {
   return `sha256=${createHmac('sha256', secret).update(rawBody).digest('hex')}`;
 }

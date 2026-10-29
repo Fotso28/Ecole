@@ -50,14 +50,44 @@ export interface ReportCardData {
   school: { name: string; city: string };
   year: string;
   term: { id: string; name: string; order: number };
-  student: { id: string; matricule: string; firstName: string; lastName: string; gender: string; birthDate: string; birthPlace: string | null; repeating: boolean };
+  student: {
+    id: string;
+    matricule: string;
+    firstName: string;
+    lastName: string;
+    gender: string;
+    birthDate: string;
+    birthPlace: string | null;
+    repeating: boolean;
+  };
   class: { id: string; name: string; size: number; mainTeacher: string | null };
   sequences: { id: string; name: string }[];
-  groups: { group: SubjectGroup; label: string; subjects: ReportCardSubject[]; totalCoefficient: number; totalPointsCenti: number; averageCenti: number | null }[];
-  totals: { totalCoefficient: number; totalPointsCenti: number; generalAverageCenti: number | null; rank: number | null; rankLabel: string; tied: boolean; ranked: number; appreciation: string | null };
+  groups: {
+    group: SubjectGroup;
+    label: string;
+    subjects: ReportCardSubject[];
+    totalCoefficient: number;
+    totalPointsCenti: number;
+    averageCenti: number | null;
+  }[];
+  totals: {
+    totalCoefficient: number;
+    totalPointsCenti: number;
+    generalAverageCenti: number | null;
+    rank: number | null;
+    rankLabel: string;
+    tied: boolean;
+    ranked: number;
+    appreciation: string | null;
+  };
   sequenceGeneralAverages: (number | null)[];
   classStats: { averageCenti: number | null; minCenti: number | null; maxCenti: number | null };
-  attendance: { justifiedHours: number; unjustifiedHours: number; lates: number; incidents: number };
+  attendance: {
+    justifiedHours: number;
+    unjustifiedHours: number;
+    lates: number;
+    incidents: number;
+  };
   decision: { type: CouncilDecisionType; label: string; comment: string | null } | null;
   generatedAt: string;
 }
@@ -75,25 +105,52 @@ export class ReportCardsService {
 
   /** Calcule et enregistre les bulletins (brouillons) d'une classe pour un trimestre. */
   async generate(classId: string, termId: string) {
-    const cls = await this.db.class.findUnique({ where: { id: classId }, include: { academicYear: true } });
+    const cls = await this.db.class.findUnique({
+      where: { id: classId },
+      include: { academicYear: true },
+    });
     if (!cls) throw new NotFoundException('Classe introuvable');
-    const term = await this.db.term.findUnique({ where: { id: termId }, include: { sequences: { orderBy: { order: 'asc' } } } });
-    if (!term || term.academicYearId !== cls.academicYearId) throw new NotFoundException('Trimestre introuvable pour cette classe');
-    const school = await this.db.school.findUniqueOrThrow({ where: { id: currentSchoolId() }, select: { name: true, city: true } });
+    const term = await this.db.term.findUnique({
+      where: { id: termId },
+      include: { sequences: { orderBy: { order: 'asc' } } },
+    });
+    if (!term || term.academicYearId !== cls.academicYearId)
+      throw new NotFoundException('Trimestre introuvable pour cette classe');
+    const school = await this.db.school.findUniqueOrThrow({
+      where: { id: currentSchoolId() },
+      select: { name: true, city: true },
+    });
 
     const [students, enrollments, classSubjects] = await Promise.all([
       this.scope.classStudents(classId),
-      this.db.enrollment.findMany({ where: { classId }, select: { studentId: true, status: true } }),
+      this.db.enrollment.findMany({
+        where: { classId },
+        select: { studentId: true, status: true },
+      }),
       this.db.classSubject.findMany({ where: { classId }, include: { subject: true } }),
     ]);
     if (students.length === 0) throw new ConflictException('Aucun élève inscrit dans cette classe');
     const evaluations = await this.db.evaluation.findMany({
-      where: { classSubjectId: { in: classSubjects.map((c) => c.id) }, sequenceId: { in: term.sequences.map((s) => s.id) }, status: { in: ['SUBMITTED', 'LOCKED'] } },
+      where: {
+        classSubjectId: { in: classSubjects.map((c) => c.id) },
+        sequenceId: { in: term.sequences.map((s) => s.id) },
+        status: { in: ['SUBMITTED', 'LOCKED'] },
+      },
       include: { grades: true },
     });
-    if (evaluations.length === 0) throw new ConflictException('Aucune note soumise pour ce trimestre');
-    const teacherIds = [...new Set([cls.mainTeacherId, ...classSubjects.map((c) => c.teacherId)].filter((x): x is string => !!x))];
-    const teachers = await this.db.user.findMany({ where: { id: { in: teacherIds } }, select: { id: true, firstName: true, lastName: true } });
+    if (evaluations.length === 0)
+      throw new ConflictException('Aucune note soumise pour ce trimestre');
+    const teacherIds = [
+      ...new Set(
+        [cls.mainTeacherId, ...classSubjects.map((c) => c.teacherId)].filter(
+          (x): x is string => !!x,
+        ),
+      ),
+    ];
+    const teachers = await this.db.user.findMany({
+      where: { id: { in: teacherIds } },
+      select: { id: true, firstName: true, lastName: true },
+    });
     const teacherName = (id: string | null) => {
       const t = teachers.find((u) => u.id === id);
       return t ? `${t.lastName} ${t.firstName.charAt(0)}.` : null;
@@ -105,10 +162,16 @@ export class ReportCardsService {
     for (const s of students) {
       for (const cs of classSubjects) {
         const seq = term.sequences.map((sq) => {
-          const evs = evaluations.filter((e) => e.classSubjectId === cs.id && e.sequenceId === sq.id);
+          const evs = evaluations.filter(
+            (e) => e.classSubjectId === cs.id && e.sequenceId === sq.id,
+          );
           if (evs.length === 0) return null;
           const r = subjectAverage(
-            evs.map((e) => ({ weight: e.weight, maxScore: e.maxScore, grade: toParsed(e.grades.find((g) => g.studentId === s.id)) })),
+            evs.map((e) => ({
+              weight: e.weight,
+              maxScore: e.maxScore,
+              grade: toParsed(e.grades.find((g) => g.studentId === s.id)),
+            })),
           );
           return r.averageCenti;
         });
@@ -118,31 +181,60 @@ export class ReportCardsService {
     const general = new Map(
       students.map((s) => [
         s.id,
-        generalAverage(classSubjects.map((cs) => ({ coefficient: cs.coefficient, averageCenti: cell.get(`${s.id}:${cs.id}`)?.term ?? null }))),
+        generalAverage(
+          classSubjects.map((cs) => ({
+            coefficient: cs.coefficient,
+            averageCenti: cell.get(`${s.id}:${cs.id}`)?.term ?? null,
+          })),
+        ),
       ]),
     );
-    const generalRanks = rankWithTies(students.map((s) => ({ id: s.id, valueCenti: general.get(s.id)?.averageCenti ?? null })));
+    const generalRanks = rankWithTies(
+      students.map((s) => ({ id: s.id, valueCenti: general.get(s.id)?.averageCenti ?? null })),
+    );
     const subjectRanks = new Map(
-      classSubjects.map((cs) => [cs.id, rankWithTies(students.map((s) => ({ id: s.id, valueCenti: cell.get(`${s.id}:${cs.id}`)?.term ?? null })))]),
+      classSubjects.map((cs) => [
+        cs.id,
+        rankWithTies(
+          students.map((s) => ({
+            id: s.id,
+            valueCenti: cell.get(`${s.id}:${cs.id}`)?.term ?? null,
+          })),
+        ),
+      ]),
     );
     const stats = classStatistics(students.map((s) => general.get(s.id)?.averageCenti ?? null));
 
     // Assiduité sur la période du trimestre.
     const records = await this.db.attendanceRecord.findMany({
-      where: { studentId: { in: students.map((s) => s.id) }, session: { classId, date: { gte: term.startDate, lte: term.endDate } } },
-      include: { session: { select: { startTime: true, endTime: true } }, justification: { select: { status: true } } },
+      where: {
+        studentId: { in: students.map((s) => s.id) },
+        session: { classId, date: { gte: term.startDate, lte: term.endDate } },
+      },
+      include: {
+        session: { select: { startTime: true, endTime: true } },
+        justification: { select: { status: true } },
+      },
     });
     const incidents = await this.db.incident.groupBy({
       by: ['studentId'],
-      where: { studentId: { in: students.map((s) => s.id) }, date: { gte: term.startDate, lte: term.endDate } },
+      where: {
+        studentId: { in: students.map((s) => s.id) },
+        date: { gte: term.startDate, lte: term.endDate },
+      },
       _count: { _all: true },
     });
-    const decisions = await this.db.councilDecision.findMany({ where: { termId, studentId: { in: students.map((s) => s.id) } } });
-    const existing = await this.db.reportCard.findMany({ where: { termId, studentId: { in: students.map((s) => s.id) } } });
+    const decisions = await this.db.councilDecision.findMany({
+      where: { termId, studentId: { in: students.map((s) => s.id) } },
+    });
+    const existing = await this.db.reportCard.findMany({
+      where: { termId, studentId: { in: students.map((s) => s.id) } },
+    });
 
     const groupOrder: SubjectGroup[] = ['LITERARY', 'SCIENTIFIC', 'OTHER'];
     const generatedAt = new Date().toISOString();
-    const results: { studentId: string; version: number; generalAverageCenti: number | null }[] = [];
+    const results: { studentId: string; version: number; generalAverageCenti: number | null }[] =
+      [];
 
     await this.db.$transaction(async (tx) => {
       for (const s of students) {
@@ -174,7 +266,12 @@ export class ReportCardsService {
             birthPlace: s.birthPlace,
             repeating: enrollments.find((e) => e.studentId === s.id)?.status === 'REPEATING',
           },
-          class: { id: cls.id, name: cls.name, size: students.length, mainTeacher: teacherName(cls.mainTeacherId) },
+          class: {
+            id: cls.id,
+            name: cls.name,
+            size: students.length,
+            mainTeacher: teacherName(cls.mainTeacherId),
+          },
           sequences: term.sequences.map((sq) => ({ id: sq.id, name: sq.name })),
           groups: groupOrder
             .map((group) => {
@@ -196,8 +293,17 @@ export class ReportCardsService {
                     appreciation: avg === null ? null : appreciation(avg),
                   };
                 });
-              const sub = generalAverage(subjects.map((x) => ({ coefficient: x.coefficient, averageCenti: x.averageCenti })));
-              return { group, label: GROUP_LABELS[group], subjects, totalCoefficient: sub.totalCoefficient, totalPointsCenti: sub.totalPointsCenti, averageCenti: sub.averageCenti };
+              const sub = generalAverage(
+                subjects.map((x) => ({ coefficient: x.coefficient, averageCenti: x.averageCenti })),
+              );
+              return {
+                group,
+                label: GROUP_LABELS[group],
+                subjects,
+                totalCoefficient: sub.totalCoefficient,
+                totalPointsCenti: sub.totalPointsCenti,
+                averageCenti: sub.averageCenti,
+              };
             })
             .filter((grp) => grp.subjects.length > 0),
           totals: {
@@ -212,21 +318,37 @@ export class ReportCardsService {
           },
           sequenceGeneralAverages: term.sequences.map(
             (_, i) =>
-              generalAverage(classSubjects.map((cs) => ({ coefficient: cs.coefficient, averageCenti: cell.get(`${s.id}:${cs.id}`)?.seq[i] ?? null }))).averageCenti,
+              generalAverage(
+                classSubjects.map((cs) => ({
+                  coefficient: cs.coefficient,
+                  averageCenti: cell.get(`${s.id}:${cs.id}`)?.seq[i] ?? null,
+                })),
+              ).averageCenti,
           ),
-          classStats: { averageCenti: stats.averageCenti, minCenti: stats.minCenti, maxCenti: stats.maxCenti },
+          classStats: {
+            averageCenti: stats.averageCenti,
+            minCenti: stats.minCenti,
+            maxCenti: stats.maxCenti,
+          },
           attendance: {
             justifiedHours: hours(justified),
             unjustifiedHours: hours(unjustified),
             lates,
             incidents: incidents.find((i) => i.studentId === s.id)?._count._all ?? 0,
           },
-          decision: decision ? { type: decision.decision, label: DECISION_LABELS[decision.decision], comment: decision.comment } : null,
+          decision: decision
+            ? {
+                type: decision.decision,
+                label: DECISION_LABELS[decision.decision],
+                comment: decision.comment,
+              }
+            : null,
           generatedAt,
         };
         const mine = existing.filter((r) => r.studentId === s.id);
         await tx.reportCard.deleteMany({ where: { termId, studentId: s.id, status: 'DRAFT' } });
-        const version = Math.max(0, ...mine.filter((r) => r.status !== 'DRAFT').map((r) => r.version)) + 1;
+        const version =
+          Math.max(0, ...mine.filter((r) => r.status !== 'DRAFT').map((r) => r.version)) + 1;
         await tx.reportCard.create({
           data: {
             schoolId: currentSchoolId(),
@@ -245,22 +367,42 @@ export class ReportCardsService {
         });
         results.push({ studentId: s.id, version, generalAverageCenti: g?.averageCenti ?? null });
       }
-      await this.audit.log({ action: 'reportcards.generated', entity: 'Class', entityId: classId, after: { termId, count: students.length } }, tx);
+      await this.audit.log(
+        {
+          action: 'reportcards.generated',
+          entity: 'Class',
+          entityId: classId,
+          after: { termId, count: students.length },
+        },
+        tx,
+      );
     });
     return { generated: results.length, results };
   }
 
   /** Publie les brouillons : ils deviennent définitifs, la version précédente est remplacée. */
   async publish(classId: string, termId: string) {
-    const drafts = await this.db.reportCard.findMany({ where: { classId, termId, status: 'DRAFT' } });
+    const drafts = await this.db.reportCard.findMany({
+      where: { classId, termId, status: 'DRAFT' },
+    });
     if (drafts.length === 0) throw new ConflictException('Aucun bulletin en brouillon à publier');
     const actorId = staffContext().userId;
     const term = await this.db.term.findUniqueOrThrow({ where: { id: termId } });
     await this.db.$transaction(async (tx) => {
       for (const d of drafts) {
-        await tx.reportCard.updateMany({ where: { studentId: d.studentId, termId, status: 'PUBLISHED' }, data: { status: 'SUPERSEDED' } });
-        await tx.reportCard.update({ where: { id: d.id }, data: { status: 'PUBLISHED', publishedAt: new Date(), publishedById: actorId } });
-        const links = await tx.studentGuardian.findMany({ where: { studentId: d.studentId }, include: { guardian: true }, orderBy: { isPrimary: 'desc' } });
+        await tx.reportCard.updateMany({
+          where: { studentId: d.studentId, termId, status: 'PUBLISHED' },
+          data: { status: 'SUPERSEDED' },
+        });
+        await tx.reportCard.update({
+          where: { id: d.id },
+          data: { status: 'PUBLISHED', publishedAt: new Date(), publishedById: actorId },
+        });
+        const links = await tx.studentGuardian.findMany({
+          where: { studentId: d.studentId },
+          include: { guardian: true },
+          orderBy: { isPrimary: 'desc' },
+        });
         const phone = links[0]?.guardian.phone;
         const data = d.data as unknown as ReportCardData;
         if (phone) {
@@ -269,14 +411,26 @@ export class ReportCardsService {
               schoolId: d.schoolId,
               recipient: phone,
               template: 'reportCardPublished',
-              body: templates.reportCardPublished({ student: `${data.student.firstName} ${data.student.lastName}`, term: term.name.toLowerCase(), average: d.generalAverageCenti }),
+              body: templates.reportCardPublished({
+                student: `${data.student.firstName} ${data.student.lastName}`,
+                term: term.name.toLowerCase(),
+                average: d.generalAverageCenti,
+              }),
               payload: { reportCardId: d.id },
             },
             tx,
           );
         }
       }
-      await this.audit.log({ action: 'reportcards.published', entity: 'Class', entityId: classId, after: { termId, count: drafts.length } }, tx);
+      await this.audit.log(
+        {
+          action: 'reportcards.published',
+          entity: 'Class',
+          entityId: classId,
+          after: { termId, count: drafts.length },
+        },
+        tx,
+      );
     });
     return { published: drafts.length };
   }
@@ -286,7 +440,18 @@ export class ReportCardsService {
     const cards = await this.db.reportCard.findMany({
       where: { classId, termId },
       orderBy: [{ studentId: 'asc' }, { version: 'desc' }],
-      select: { id: true, studentId: true, version: true, status: true, generalAverageCenti: true, rank: true, rankTied: true, classSize: true, publishedAt: true, data: true },
+      select: {
+        id: true,
+        studentId: true,
+        version: true,
+        status: true,
+        generalAverageCenti: true,
+        rank: true,
+        rankTied: true,
+        classSize: true,
+        publishedAt: true,
+        data: true,
+      },
     });
     const latest = new Map<string, (typeof cards)[number]>();
     for (const c of cards) if (!latest.has(c.studentId)) latest.set(c.studentId, c);
@@ -308,7 +473,9 @@ export class ReportCardsService {
           decision: data.decision?.label ?? null,
         };
       })
-      .sort((a, b) => (a.rank ?? 9999) - (b.rank ?? 9999) || a.student.localeCompare(b.student, 'fr'));
+      .sort(
+        (a, b) => (a.rank ?? 9999) - (b.rank ?? 9999) || a.student.localeCompare(b.student, 'fr'),
+      );
   }
 
   async get(id: string) {
@@ -317,7 +484,12 @@ export class ReportCardsService {
     return card;
   }
 
-  async setDecision(studentId: string, termId: string, decision: CouncilDecisionType, comment?: string) {
+  async setDecision(
+    studentId: string,
+    termId: string,
+    decision: CouncilDecisionType,
+    comment?: string,
+  ) {
     await this.db.student.findUniqueOrThrow({ where: { id: studentId } });
     await this.db.term.findUniqueOrThrow({ where: { id: termId } });
     const decidedById = staffContext().userId;
@@ -326,7 +498,12 @@ export class ReportCardsService {
       create: { schoolId: currentSchoolId(), studentId, termId, decision, comment, decidedById },
       update: { decision, comment, decidedById },
     });
-    await this.audit.log({ action: 'reportcards.decision', entity: 'CouncilDecision', entityId: result.id, after: { decision, comment } });
+    await this.audit.log({
+      action: 'reportcards.decision',
+      entity: 'CouncilDecision',
+      entityId: result.id,
+      after: { decision, comment },
+    });
     return result;
   }
 }

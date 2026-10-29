@@ -30,20 +30,45 @@ export class CommunicationService {
     if (input.scope !== 'SCHOOL' && !input.targetId) throw new Error('Cible obligatoire');
     const year = await this.scope.currentYear();
     const announcement = await this.db.announcement.create({
-      data: { schoolId: currentSchoolId(), title: input.title, body: input.body, scope: input.scope, targetId: input.targetId, authorId: staffContext().userId },
+      data: {
+        schoolId: currentSchoolId(),
+        title: input.title,
+        body: input.body,
+        scope: input.scope,
+        targetId: input.targetId,
+        authorId: staffContext().userId,
+      },
     });
     let sms = 0;
     if (input.sendSms) {
       const classFilter: Prisma.ClassWhereInput =
-        input.scope === 'CLASS' ? { id: input.targetId } : input.scope === 'LEVEL' ? { levelId: input.targetId } : input.scope === 'CYCLE' ? { level: { cycleId: input.targetId } } : {};
+        input.scope === 'CLASS'
+          ? { id: input.targetId }
+          : input.scope === 'LEVEL'
+            ? { levelId: input.targetId }
+            : input.scope === 'CYCLE'
+              ? { level: { cycleId: input.targetId } }
+              : {};
       const links = await this.db.studentGuardian.findMany({
         where: {
           isPrimary: true,
-          student: { deletedAt: null, enrollments: { some: { academicYearId: year.id, status: { in: ['ENROLLED', 'REPEATING'] }, class: classFilter } } },
+          student: {
+            deletedAt: null,
+            enrollments: {
+              some: {
+                academicYearId: year.id,
+                status: { in: ['ENROLLED', 'REPEATING'] },
+                class: classFilter,
+              },
+            },
+          },
         },
         include: { guardian: { select: { phone: true } } },
       });
-      const school = await this.db.school.findUniqueOrThrow({ where: { id: currentSchoolId() }, select: { name: true } });
+      const school = await this.db.school.findUniqueOrThrow({
+        where: { id: currentSchoolId() },
+        select: { name: true },
+      });
       const phones = [...new Set(links.map((l) => l.guardian.phone))];
       for (const phone of phones) {
         await this.notifications.enqueue({
@@ -56,7 +81,12 @@ export class CommunicationService {
       }
       sms = phones.length;
     }
-    await this.audit.log({ action: 'communication.announcement', entity: 'Announcement', entityId: announcement.id, after: { ...input, sms } });
+    await this.audit.log({
+      action: 'communication.announcement',
+      entity: 'Announcement',
+      entityId: announcement.id,
+      after: { ...input, sms },
+    });
     return { ...announcement, sms };
   }
 }
@@ -76,7 +106,9 @@ export class CommunicationController {
 
   @RequirePermissions('communication.write')
   @Post()
-  create(@Body(new ZodPipe(announcementCreateSchema)) body: z.infer<typeof announcementCreateSchema>) {
+  create(
+    @Body(new ZodPipe(announcementCreateSchema)) body: z.infer<typeof announcementCreateSchema>,
+  ) {
     return this.communication.create(body);
   }
 }

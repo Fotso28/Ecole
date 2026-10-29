@@ -1,4 +1,15 @@
-import { Body, Controller, ForbiddenException, Get, Injectable, Module, NotFoundException, Param, Post, Res } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  ForbiddenException,
+  Get,
+  Injectable,
+  Module,
+  NotFoundException,
+  Param,
+  Post,
+  Res,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { formatGrade, justificationCreateSchema, portalPaymentSchema } from '@ecole/shared';
@@ -52,7 +63,11 @@ export class PortalService {
           student: {
             include: {
               school: { select: { id: true, name: true, city: true } },
-              enrollments: { orderBy: { createdAt: 'desc' }, take: 1, include: { class: { select: { name: true } } } },
+              enrollments: {
+                orderBy: { createdAt: 'desc' },
+                take: 1,
+                include: { class: { select: { name: true } } },
+              },
             },
           },
         },
@@ -60,7 +75,11 @@ export class PortalService {
     );
     const result = [];
     for (const l of links) {
-      const account = await runAsSystem('portal-account', () => this.finance.account(l.studentId), l.schoolId);
+      const account = await runAsSystem(
+        'portal-account',
+        () => this.finance.account(l.studentId),
+        l.schoolId,
+      );
       result.push({
         id: l.student.id,
         firstName: l.student.firstName,
@@ -93,7 +112,11 @@ export class PortalService {
             where: { studentId, evaluation: { status: { in: ['SUBMITTED', 'LOCKED'] } } },
             orderBy: { updatedAt: 'desc' },
             take: 8,
-            include: { evaluation: { include: { classSubject: { include: { subject: true } }, sequence: true } } },
+            include: {
+              evaluation: {
+                include: { classSubject: { include: { subject: true } }, sequence: true },
+              },
+            },
           }),
           this.db.attendanceRecord.findMany({
             where: { studentId, status: { in: ['ABSENT', 'LATE'] } },
@@ -104,7 +127,15 @@ export class PortalService {
           this.db.reportCard.findMany({
             where: { studentId, status: 'PUBLISHED' },
             orderBy: { publishedAt: 'desc' },
-            select: { id: true, version: true, generalAverageCenti: true, rank: true, classSize: true, publishedAt: true, data: true },
+            select: {
+              id: true,
+              version: true,
+              generalAverageCenti: true,
+              rank: true,
+              classSize: true,
+              publishedAt: true,
+              data: true,
+            },
           }),
           this.db.announcement.findMany({
             where: {
@@ -124,9 +155,19 @@ export class PortalService {
           }),
         ]);
         return {
-          student: { id: link.student.id, firstName: link.student.firstName, lastName: link.student.lastName, matricule: link.student.matricule },
+          student: {
+            id: link.student.id,
+            firstName: link.student.firstName,
+            lastName: link.student.lastName,
+            matricule: link.student.matricule,
+          },
           className: enrollment?.class.name ?? null,
-          finance: { totals: account.totals, nextDue: account.nextDue, lines: account.lines, payments: account.payments.slice(0, 10) },
+          finance: {
+            totals: account.totals,
+            nextDue: account.nextDue,
+            lines: account.lines,
+            payments: account.payments.slice(0, 10),
+          },
           grades: grades.map((g) => {
             const parsed = toParsed(g);
             return {
@@ -135,7 +176,14 @@ export class PortalService {
               evaluation: g.evaluation.name,
               sequence: g.evaluation.sequence.name,
               maxScore: g.evaluation.maxScore,
-              value: parsed.kind === 'score' ? formatGrade(parsed.centi) : parsed.kind === 'absent' ? 'Absent' : parsed.kind === 'exempt' ? 'Dispensé' : '—',
+              value:
+                parsed.kind === 'score'
+                  ? formatGrade(parsed.centi)
+                  : parsed.kind === 'absent'
+                    ? 'Absent'
+                    : parsed.kind === 'exempt'
+                      ? 'Dispensé'
+                      : '—',
             };
           }),
           absences: absences.map((r) => ({
@@ -155,7 +203,12 @@ export class PortalService {
             classSize: r.classSize,
             publishedAt: r.publishedAt,
           })),
-          announcements: announcements.map((a) => ({ id: a.id, title: a.title, body: a.body, publishedAt: a.publishedAt })),
+          announcements: announcements.map((a) => ({
+            id: a.id,
+            title: a.title,
+            body: a.body,
+            publishedAt: a.publishedAt,
+          })),
         };
       },
       schoolId,
@@ -165,34 +218,53 @@ export class PortalService {
   async justify(input: z.infer<typeof justificationCreateSchema>) {
     const link = await this.childLink(input.studentId);
     const userId = parentContext().userId;
-    return runAsSystem('portal-justify', () => this.attendance.createJustification(input, userId), link.schoolId);
+    return runAsSystem(
+      'portal-justify',
+      () => this.attendance.createJustification(input, userId),
+      link.schoolId,
+    );
   }
 
   async pay(input: z.infer<typeof portalPaymentSchema>) {
     const link = await this.childLink(input.studentId);
     const userId = parentContext().userId;
-    return runAsSystem('portal-payment', () => this.finance.createPayment({ ...input }, { initiatedByUserId: userId }), link.schoolId);
+    return runAsSystem(
+      'portal-payment',
+      () => this.finance.createPayment({ ...input }, { initiatedByUserId: userId }),
+      link.schoolId,
+    );
   }
 
   async payment(paymentId: string) {
     const userId = parentContext().userId;
-    const payment = await runAsSystem('portal-payment-lookup', () => this.db.payment.findUnique({ where: { id: paymentId }, include: { receipt: true } }));
+    const payment = await runAsSystem('portal-payment-lookup', () =>
+      this.db.payment.findUnique({ where: { id: paymentId }, include: { receipt: true } }),
+    );
     if (!payment) throw new NotFoundException('Paiement introuvable');
     await this.childLink(payment.studentId);
-    if (payment.initiatedByUserId && payment.initiatedByUserId !== userId) throw new ForbiddenException();
-    const balance = await runAsSystem('portal-balance', () => this.finance.account(payment.studentId), payment.schoolId);
+    if (payment.initiatedByUserId && payment.initiatedByUserId !== userId)
+      throw new ForbiddenException();
+    const balance = await runAsSystem(
+      'portal-balance',
+      () => this.finance.account(payment.studentId),
+      payment.schoolId,
+    );
     return { ...this.finance.presentPayment(payment), balance: balance.totals.outstanding };
   }
 
   async reportCardPdf(reportCardId: string): Promise<Buffer> {
-    const card = await runAsSystem('portal-report-card', () => this.db.reportCard.findUnique({ where: { id: reportCardId } }));
+    const card = await runAsSystem('portal-report-card', () =>
+      this.db.reportCard.findUnique({ where: { id: reportCardId } }),
+    );
     if (!card || card.status !== 'PUBLISHED') throw new NotFoundException('Bulletin introuvable');
     await this.childLink(card.studentId);
     return runAsSystem('portal-report-card-pdf', () => this.pdf.reportCard(card.id), card.schoolId);
   }
 
   async receiptPdf(paymentId: string): Promise<Buffer> {
-    const payment = await runAsSystem('portal-receipt', () => this.db.payment.findUnique({ where: { id: paymentId } }));
+    const payment = await runAsSystem('portal-receipt', () =>
+      this.db.payment.findUnique({ where: { id: paymentId } }),
+    );
     if (!payment) throw new NotFoundException('Reçu introuvable');
     await this.childLink(payment.studentId);
     return runAsSystem('portal-receipt-pdf', () => this.pdf.receipt(payment.id), payment.schoolId);
@@ -219,7 +291,9 @@ export class PortalController {
 
   @ParentRoute()
   @Post('justifications')
-  justify(@Body(new ZodPipe(justificationCreateSchema)) body: z.infer<typeof justificationCreateSchema>) {
+  justify(
+    @Body(new ZodPipe(justificationCreateSchema)) body: z.infer<typeof justificationCreateSchema>,
+  ) {
     return this.portal.justify(body);
   }
 
@@ -251,5 +325,9 @@ export class PortalController {
   }
 }
 
-@Module({ imports: [FinanceModule, AttendanceModule, PdfModule], controllers: [PortalController], providers: [PortalService] })
+@Module({
+  imports: [FinanceModule, AttendanceModule, PdfModule],
+  controllers: [PortalController],
+  providers: [PortalService],
+})
 export class PortalModule {}

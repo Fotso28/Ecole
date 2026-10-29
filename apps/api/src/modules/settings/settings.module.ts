@@ -37,7 +37,17 @@ export class SettingsController {
   get() {
     return this.db.school.findUniqueOrThrow({
       where: { id: currentSchoolId() },
-      select: { id: true, name: true, slug: true, city: true, address: true, phone: true, matriculePrefix: true, modules: true, settings: true },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        city: true,
+        address: true,
+        phone: true,
+        matriculePrefix: true,
+        modules: true,
+        settings: true,
+      },
     });
   }
 
@@ -45,12 +55,26 @@ export class SettingsController {
   @Patch()
   async update(@Body(new ZodPipe(settingsSchema)) body: z.infer<typeof settingsSchema>) {
     const before = await this.db.school.findUniqueOrThrow({ where: { id: currentSchoolId() } });
-    const merged = { ...((before.settings ?? {}) as Record<string, unknown>), ...(body.settings ?? {}) };
+    const merged = {
+      ...((before.settings ?? {}) as Record<string, unknown>),
+      ...(body.settings ?? {}),
+    };
     const after = await this.db.school.update({
       where: { id: before.id },
-      data: { name: body.name, address: body.address, phone: body.phone, settings: merged as Prisma.InputJsonValue },
+      data: {
+        name: body.name,
+        address: body.address,
+        phone: body.phone,
+        settings: merged as Prisma.InputJsonValue,
+      },
     });
-    await this.audit.log({ action: 'settings.updated', entity: 'School', entityId: before.id, before: before.settings, after: merged });
+    await this.audit.log({
+      action: 'settings.updated',
+      entity: 'School',
+      entityId: before.id,
+      before: before.settings,
+      after: merged,
+    });
     return after;
   }
 }

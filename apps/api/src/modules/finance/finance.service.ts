@@ -31,7 +31,11 @@ import { addDays, fromDbDate, todayInCameroon, toDbDate } from '../../common/dat
 import { Db, InjectDb, Tx } from '../../common/prisma';
 import { NotificationsService } from '../notifications/notifications.service';
 import { templates } from '../notifications/templates';
-import { MOBILE_MONEY_PROVIDER, MobileMoneyProvider, OperatorStatus } from './mobile-money.provider';
+import {
+  MOBILE_MONEY_PROVIDER,
+  MobileMoneyProvider,
+  OperatorStatus,
+} from './mobile-money.provider';
 
 export interface LineState {
   id: string;
@@ -59,7 +63,9 @@ export interface SchoolFinanceSettings {
 
 const lineInclude = {
   invoice: { select: { studentId: true, academicYearId: true } },
-  allocations: { select: { amount: true, payment: { select: { status: true, reversedAt: true } } } },
+  allocations: {
+    select: { amount: true, payment: { select: { status: true, reversedAt: true } } },
+  },
 } satisfies Prisma.InvoiceLineInclude;
 
 type LineWithAllocations = Prisma.InvoiceLineGetPayload<{ include: typeof lineInclude }>;
@@ -109,7 +115,10 @@ export class FinanceService {
   // ---------------------------------------------------------------- Grille de frais
 
   listFeeItems(academicYearId: string) {
-    return this.db.feeItem.findMany({ where: { academicYearId }, orderBy: [{ dueDate: 'asc' }, { order: 'asc' }] });
+    return this.db.feeItem.findMany({
+      where: { academicYearId },
+      orderBy: [{ dueDate: 'asc' }, { order: 'asc' }],
+    });
   }
 
   async createFeeItem(input: z.infer<typeof feeItemCreateSchema>) {
@@ -118,13 +127,21 @@ export class FinanceService {
     const item = await this.db.feeItem.create({
       data: { schoolId: currentSchoolId(), ...input, dueDate: toDbDate(input.dueDate) },
     });
-    await this.audit.log({ action: 'finance.fee_item_created', entity: 'FeeItem', entityId: item.id, after: input });
+    await this.audit.log({
+      action: 'finance.fee_item_created',
+      entity: 'FeeItem',
+      entityId: item.id,
+      after: input,
+    });
     return item;
   }
 
   async deleteFeeItem(id: string) {
     const used = await this.db.invoiceLine.count({ where: { feeItemId: id } });
-    if (used > 0) throw new ConflictException('Ce frais figure déjà sur des échéanciers : il ne peut plus être supprimé');
+    if (used > 0)
+      throw new ConflictException(
+        'Ce frais figure déjà sur des échéanciers : il ne peut plus être supprimé',
+      );
     await this.db.feeItem.delete({ where: { id } });
     await this.audit.log({ action: 'finance.fee_item_deleted', entity: 'FeeItem', entityId: id });
     return { ok: true };
@@ -142,7 +159,8 @@ export class FinanceService {
     const run = async (tx: Tx) => {
       const schoolId = currentSchoolId();
       const existing = await tx.invoice.findFirst({ where: { studentId, academicYearId } });
-      if (existing) throw new ConflictException('L’échéancier de cet élève existe déjà pour cette année');
+      if (existing)
+        throw new ConflictException('L’échéancier de cet élève existe déjà pour cette année');
       const enrollment = await tx.enrollment.findFirst({
         where: { studentId, academicYearId },
         include: { class: { select: { levelId: true } } },
@@ -152,11 +170,13 @@ export class FinanceService {
         where: { academicYearId, OR: [{ levelId: null }, { levelId: enrollment.class.levelId }] },
         orderBy: [{ dueDate: 'asc' }, { order: 'asc' }],
       });
-      if (items.length === 0) throw new ConflictException('Aucun frais n’est défini pour ce niveau');
+      if (items.length === 0)
+        throw new ConflictException('Aucun frais n’est défini pour ce niveau');
       for (const d of discounts) {
         const item = items.find((i) => i.id === d.feeItemId);
         if (!item) throw new BadRequestException('Remise sur un frais inconnu');
-        if (d.amount > item.amount) throw new BadRequestException(`La remise dépasse le montant de « ${item.name} »`);
+        if (d.amount > item.amount)
+          throw new BadRequestException(`La remise dépasse le montant de « ${item.name} »`);
       }
       const invoice = await tx.invoice.create({ data: { schoolId, studentId, academicYearId } });
       const createdById = this.actorId();
@@ -200,7 +220,15 @@ export class FinanceService {
           });
         }
       }
-      await this.audit.log({ action: 'finance.invoice_created', entity: 'Invoice', entityId: invoice.id, after: { studentId, academicYearId, discounts } }, tx);
+      await this.audit.log(
+        {
+          action: 'finance.invoice_created',
+          entity: 'Invoice',
+          entityId: invoice.id,
+          after: { studentId, academicYearId, discounts },
+        },
+        tx,
+      );
       return invoice;
     };
     return outerTx ? run(outerTx) : this.db.$transaction(run);
@@ -212,10 +240,14 @@ export class FinanceService {
       const line = await tx.invoiceLine.findUnique({ where: { id: lineId }, include: lineInclude });
       if (!line) throw new NotFoundException('Échéance introuvable');
       const state = toLineState(line, todayInCameroon());
-      if (amount > state.outstanding) throw new ConflictException('La remise dépasse le reste dû sur cette échéance');
+      if (amount > state.outstanding)
+        throw new ConflictException('La remise dépasse le reste dû sur cette échéance');
       await tx.invoiceLine.update({
         where: { id: lineId },
-        data: { discount: line.discount + amount, discountReason: [line.discountReason, reason].filter(Boolean).join(' ; ') },
+        data: {
+          discount: line.discount + amount,
+          discountReason: [line.discountReason, reason].filter(Boolean).join(' ; '),
+        },
       });
       await tx.ledgerEntry.create({
         data: {
@@ -228,7 +260,17 @@ export class FinanceService {
           createdById: this.actorId(),
         },
       });
-      await this.audit.log({ action: 'finance.discount', entity: 'InvoiceLine', entityId: lineId, before: { discount: line.discount }, after: { discount: line.discount + amount }, reason }, tx);
+      await this.audit.log(
+        {
+          action: 'finance.discount',
+          entity: 'InvoiceLine',
+          entityId: lineId,
+          before: { discount: line.discount },
+          after: { discount: line.discount + amount },
+          reason,
+        },
+        tx,
+      );
       return { ok: true };
     });
   }
@@ -254,7 +296,10 @@ export class FinanceService {
         include: { receipt: { select: { number: true, verificationCode: true } } },
       }),
       this.db.ledgerEntry.findMany({ where: { studentId }, select: { type: true, amount: true } }),
-      this.db.invoice.findMany({ where: { studentId }, select: { id: true, academicYearId: true } }),
+      this.db.invoice.findMany({
+        where: { studentId },
+        select: { id: true, academicYearId: true },
+      }),
     ]);
     const balance = ledgerBalance(ledger);
     const outstanding = lines.reduce((s, l) => s + l.outstanding, 0);
@@ -272,7 +317,9 @@ export class FinanceService {
       invoices,
       lines,
       totals,
-      nextDue: next ? { lineId: next.id, label: next.label, dueDate: next.dueDate, amount: next.outstanding } : null,
+      nextDue: next
+        ? { lineId: next.id, label: next.label, dueDate: next.dueDate, amount: next.outstanding }
+        : null,
       payments: payments.map((p) => this.presentPayment(p)),
     };
   }
@@ -291,7 +338,9 @@ export class FinanceService {
       failureReason: p.failureReason,
       createdAt: p.createdAt,
       confirmedAt: p.confirmedAt,
-      receipt: p.receipt ? { number: p.receipt.number, verificationCode: p.receipt.verificationCode } : null,
+      receipt: p.receipt
+        ? { number: p.receipt.number, verificationCode: p.receipt.verificationCode }
+        : null,
     };
   }
 
@@ -304,22 +353,35 @@ export class FinanceService {
    */
   async createPayment(input: PaymentInput, opts: { initiatedByUserId?: string } = {}) {
     const schoolId = currentSchoolId();
-    const existing = await this.db.payment.findFirst({ where: { idempotencyKey: input.idempotencyKey }, include: { receipt: true } });
+    const existing = await this.db.payment.findFirst({
+      where: { idempotencyKey: input.idempotencyKey },
+      include: { receipt: true },
+    });
     if (existing) return this.replayPayment(existing, input);
 
     const student = await this.db.student.findUnique({ where: { id: input.studentId } });
     if (!student || student.deletedAt) throw new NotFoundException('Élève introuvable');
     if (input.lineIds?.length) {
-      const owned = await this.db.invoiceLine.count({ where: { id: { in: input.lineIds }, invoice: { studentId: input.studentId } } });
-      if (owned !== input.lineIds.length) throw new BadRequestException('Échéance inconnue pour cet élève');
+      const owned = await this.db.invoiceLine.count({
+        where: { id: { in: input.lineIds }, invoice: { studentId: input.studentId } },
+      });
+      if (owned !== input.lineIds.length)
+        throw new BadRequestException('Échéance inconnue pour cet élève');
     }
 
     const ctx = currentContext();
     const receivedById = ctx?.kind === 'staff' ? ctx.userId : null;
     let cashSessionId: string | null = null;
     if (input.method === 'CASH') {
-      const session = await this.db.cashSession.findFirst({ where: { status: 'OPEN', openedById: receivedById ?? '' } });
-      if (!session) throw new ConflictException({ statusCode: 409, code: 'CASH_SESSION_REQUIRED', message: 'Ouvrez votre caisse avant d’encaisser des espèces' });
+      const session = await this.db.cashSession.findFirst({
+        where: { status: 'OPEN', openedById: receivedById ?? '' },
+      });
+      if (!session)
+        throw new ConflictException({
+          statusCode: 409,
+          code: 'CASH_SESSION_REQUIRED',
+          message: 'Ouvrez votre caisse avant d’encaisser des espèces',
+        });
       cashSessionId = session.id;
     }
 
@@ -349,21 +411,36 @@ export class FinanceService {
       });
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
-        const replay = await this.db.payment.findFirst({ where: { idempotencyKey: input.idempotencyKey }, include: { receipt: true } });
+        const replay = await this.db.payment.findFirst({
+          where: { idempotencyKey: input.idempotencyKey },
+          include: { receipt: true },
+        });
         if (replay) return this.replayPayment(replay, input);
       }
       throw e;
     }
   }
 
-  private async replayPayment(existing: Payment & { receipt: { number: string; verificationCode: string } | null }, input: { studentId: string; amount: number; method: PaymentMethod }) {
-    if (existing.studentId !== input.studentId || existing.amount !== input.amount || existing.method !== input.method) {
+  private async replayPayment(
+    existing: Payment & { receipt: { number: string; verificationCode: string } | null },
+    input: { studentId: string; amount: number; method: PaymentMethod },
+  ) {
+    if (
+      existing.studentId !== input.studentId ||
+      existing.amount !== input.amount ||
+      existing.method !== input.method
+    ) {
       throw new ConflictException('Cette clé d’idempotence a déjà servi pour un autre paiement');
     }
     return { ...this.presentPayment(existing), replayed: true };
   }
 
-  private async startMobileMoney(input: PaymentInput, schoolId: string, receivedById: string | null, initiatedByUserId?: string) {
+  private async startMobileMoney(
+    input: PaymentInput,
+    schoolId: string,
+    receivedById: string | null,
+    initiatedByUserId?: string,
+  ) {
     const payment = await this.db.payment.create({
       data: {
         schoolId,
@@ -386,13 +463,26 @@ export class FinanceService {
         method: input.method,
         description: 'Scolarité',
       });
-      const updated = await this.db.payment.update({ where: { id: payment.id }, data: { operatorReference: reference } });
-      await this.audit.log({ action: 'finance.mobile_money_requested', entity: 'Payment', entityId: payment.id, after: { amount: input.amount, method: input.method } });
+      const updated = await this.db.payment.update({
+        where: { id: payment.id },
+        data: { operatorReference: reference },
+      });
+      await this.audit.log({
+        action: 'finance.mobile_money_requested',
+        entity: 'Payment',
+        entityId: payment.id,
+        after: { amount: input.amount, method: input.method },
+      });
       return { ...this.presentPayment({ ...updated, receipt: null }), replayed: false };
     } catch (e) {
-      await this.db.payment.update({ where: { id: payment.id }, data: { status: 'FAILED', failureReason: 'Opérateur injoignable' } });
+      await this.db.payment.update({
+        where: { id: payment.id },
+        data: { status: 'FAILED', failureReason: 'Opérateur injoignable' },
+      });
       this.logger.warn(`Demande Mobile Money impossible : ${e instanceof Error ? e.message : e}`);
-      throw new BadGatewayException('L’opérateur Mobile Money ne répond pas. Réessayez dans un instant.');
+      throw new BadGatewayException(
+        'L’opérateur Mobile Money ne répond pas. Réessayez dans un instant.',
+      );
     }
   }
 
@@ -403,9 +493,14 @@ export class FinanceService {
     await tx.$queryRaw`
       SELECT l."id" FROM "InvoiceLine" l JOIN "Invoice" i ON i."id" = l."invoiceId"
       WHERE l."schoolId" = ${schoolId} AND i."studentId" = ${payment.studentId} ORDER BY l."id" FOR UPDATE OF l`;
-    const lines = (await this.lineStates({ invoice: { studentId: payment.studentId } }, tx)).filter((l) => l.outstanding > 0);
+    const lines = (await this.lineStates({ invoice: { studentId: payment.studentId } }, tx)).filter(
+      (l) => l.outstanding > 0,
+    );
     const requested = new Set(payment.requestedLineIds);
-    const ordered = [...lines.filter((l) => requested.has(l.id)), ...lines.filter((l) => !requested.has(l.id))];
+    const ordered = [
+      ...lines.filter((l) => requested.has(l.id)),
+      ...lines.filter((l) => !requested.has(l.id)),
+    ];
     let left = payment.amount;
     const allocations: { lineId: string; amount: number }[] = [];
     for (const l of ordered) {
@@ -415,9 +510,14 @@ export class FinanceService {
       left -= take;
     }
     for (const a of allocations) {
-      await tx.paymentAllocation.create({ data: { schoolId, paymentId: payment.id, invoiceLineId: a.lineId, amount: a.amount } });
+      await tx.paymentAllocation.create({
+        data: { schoolId, paymentId: payment.id, invoiceLineId: a.lineId, amount: a.amount },
+      });
     }
-    const confirmed = await tx.payment.update({ where: { id: payment.id }, data: { status: 'SUCCESS', confirmedAt: new Date() } });
+    const confirmed = await tx.payment.update({
+      where: { id: payment.id },
+      data: { status: 'SUCCESS', confirmedAt: new Date() },
+    });
     await tx.ledgerEntry.create({
       data: {
         schoolId,
@@ -432,12 +532,23 @@ export class FinanceService {
     const year = new Date().getUTCFullYear();
     const seq = await this.counters.next(`receipt:${year}`, tx);
     const receipt = await tx.receipt.create({
-      data: { schoolId, paymentId: payment.id, number: `R-${year}-${String(seq).padStart(6, '0')}`, verificationCode: verificationCode() },
+      data: {
+        schoolId,
+        paymentId: payment.id,
+        number: `R-${year}-${String(seq).padStart(6, '0')}`,
+        verificationCode: verificationCode(),
+      },
     });
-    const ledger = await tx.ledgerEntry.findMany({ where: { studentId: payment.studentId }, select: { type: true, amount: true } });
+    const ledger = await tx.ledgerEntry.findMany({
+      where: { studentId: payment.studentId },
+      select: { type: true, amount: true },
+    });
     const balance = ledgerBalance(ledger);
     const [student, school, phone] = await Promise.all([
-      tx.student.findUniqueOrThrow({ where: { id: payment.studentId }, select: { firstName: true, lastName: true } }),
+      tx.student.findUniqueOrThrow({
+        where: { id: payment.studentId },
+        select: { firstName: true, lastName: true },
+      }),
       tx.school.findUniqueOrThrow({ where: { id: schoolId }, select: { name: true } }),
       this.guardianPhone(payment.studentId, tx),
     ]);
@@ -459,8 +570,27 @@ export class FinanceService {
         tx,
       );
     }
-    await this.audit.log({ action: 'finance.payment_received', entity: 'Payment', entityId: payment.id, after: { amount: payment.amount, method: payment.method, receipt: receipt.number, allocations } }, tx);
-    return { ...this.presentPayment({ ...confirmed, receipt }), allocations, unallocated: left, balance, replayed: false };
+    await this.audit.log(
+      {
+        action: 'finance.payment_received',
+        entity: 'Payment',
+        entityId: payment.id,
+        after: {
+          amount: payment.amount,
+          method: payment.method,
+          receipt: receipt.number,
+          allocations,
+        },
+      },
+      tx,
+    );
+    return {
+      ...this.presentPayment({ ...confirmed, receipt }),
+      allocations,
+      unallocated: left,
+      balance,
+      replayed: false,
+    };
   }
 
   /**
@@ -468,12 +598,20 @@ export class FinanceService {
    * finalisé n'est pas retraité. Le montant doit correspondre à la demande.
    */
   async confirmMobileMoney(reference: string, status: OperatorStatus, amount?: number) {
-    const payment = await runAsSystem('mobile-money-lookup', () => this.db.payment.findFirst({ where: { operatorReference: reference } }));
+    const payment = await runAsSystem('mobile-money-lookup', () =>
+      this.db.payment.findFirst({ where: { operatorReference: reference } }),
+    );
     if (!payment) throw new NotFoundException('Paiement inconnu');
     if (amount !== undefined && amount !== payment.amount) {
       await runAsSystem(
         'mobile-money-mismatch',
-        () => this.audit.log({ action: 'finance.mobile_money_amount_mismatch', entity: 'Payment', entityId: payment.id, after: { expected: payment.amount, received: amount } }),
+        () =>
+          this.audit.log({
+            action: 'finance.mobile_money_amount_mismatch',
+            entity: 'Payment',
+            entityId: payment.id,
+            after: { expected: payment.amount, received: amount },
+          }),
         payment.schoolId,
       );
       throw new ConflictException('Montant différent de la demande');
@@ -483,17 +621,28 @@ export class FinanceService {
       'mobile-money-confirm',
       () =>
         this.db.$transaction(async (tx) => {
-          const locked = await tx.$queryRaw<{ status: string }[]>`SELECT "status" FROM "Payment" WHERE "id" = ${payment.id} FOR UPDATE`;
-          if (locked[0]?.status !== 'PENDING') return { status: locked[0]?.status ?? payment.status, changed: false };
+          const locked = await tx.$queryRaw<
+            { status: string }[]
+          >`SELECT "status" FROM "Payment" WHERE "id" = ${payment.id} FOR UPDATE`;
+          if (locked[0]?.status !== 'PENDING')
+            return { status: locked[0]?.status ?? payment.status, changed: false };
           if (status === 'SUCCESS') {
             const fresh = await tx.payment.findUniqueOrThrow({ where: { id: payment.id } });
             const result = await this.settle(tx, fresh);
             return { status: result.status, changed: true };
           }
-          await tx.payment.update({ where: { id: payment.id }, data: { status: 'FAILED', failureReason: 'Refusé ou annulé par le payeur' } });
+          await tx.payment.update({
+            where: { id: payment.id },
+            data: { status: 'FAILED', failureReason: 'Refusé ou annulé par le payeur' },
+          });
           const [student, phone] = await Promise.all([
-            tx.student.findUniqueOrThrow({ where: { id: payment.studentId }, select: { firstName: true, lastName: true } }),
-            payment.payerPhone ? Promise.resolve(payment.payerPhone) : this.guardianPhone(payment.studentId, tx),
+            tx.student.findUniqueOrThrow({
+              where: { id: payment.studentId },
+              select: { firstName: true, lastName: true },
+            }),
+            payment.payerPhone
+              ? Promise.resolve(payment.payerPhone)
+              : this.guardianPhone(payment.studentId, tx),
           ]);
           if (phone) {
             await this.notifications.enqueue(
@@ -501,13 +650,19 @@ export class FinanceService {
                 schoolId: payment.schoolId,
                 recipient: phone,
                 template: 'paymentFailed',
-                body: templates.paymentFailed({ student: `${student.firstName} ${student.lastName}`, amount: payment.amount }),
+                body: templates.paymentFailed({
+                  student: `${student.firstName} ${student.lastName}`,
+                  amount: payment.amount,
+                }),
                 payload: { paymentId: payment.id },
               },
               tx,
             );
           }
-          await this.audit.log({ action: 'finance.mobile_money_failed', entity: 'Payment', entityId: payment.id }, tx);
+          await this.audit.log(
+            { action: 'finance.mobile_money_failed', entity: 'Payment', entityId: payment.id },
+            tx,
+          );
           return { status: 'FAILED', changed: true };
         }),
       payment.schoolId,
@@ -518,7 +673,11 @@ export class FinanceService {
   async reconcilePending(now = new Date()) {
     const pending = await runAsSystem('reconcile', () =>
       this.db.payment.findMany({
-        where: { status: 'PENDING', method: { in: ['MTN_MOMO', 'ORANGE_MONEY'] }, createdAt: { lt: new Date(now.getTime() - 10 * 60_000) } },
+        where: {
+          status: 'PENDING',
+          method: { in: ['MTN_MOMO', 'ORANGE_MONEY'] },
+          createdAt: { lt: new Date(now.getTime() - 10 * 60_000) },
+        },
         take: 200,
       }),
     );
@@ -537,13 +696,19 @@ export class FinanceService {
         if (p.createdAt < new Date(now.getTime() - 24 * 3600_000)) {
           await runAsSystem(
             'reconcile-expire',
-            () => this.db.payment.updateMany({ where: { id: p.id, status: 'PENDING' }, data: { status: 'CANCELLED', failureReason: 'Délai de confirmation dépassé' } }),
+            () =>
+              this.db.payment.updateMany({
+                where: { id: p.id, status: 'PENDING' },
+                data: { status: 'CANCELLED', failureReason: 'Délai de confirmation dépassé' },
+              }),
             p.schoolId,
           );
           expired++;
         }
       } catch (e) {
-        this.logger.warn(`Réconciliation du paiement ${p.id} impossible : ${e instanceof Error ? e.message : e}`);
+        this.logger.warn(
+          `Réconciliation du paiement ${p.id} impossible : ${e instanceof Error ? e.message : e}`,
+        );
       }
     }
     return { checked: pending.length, settled, expired };
@@ -552,13 +717,19 @@ export class FinanceService {
   /** Annulation d'un paiement par une écriture de correction ; le paiement d'origine reste intact. */
   async reversePayment(id: string, reason: string) {
     return this.db.$transaction(async (tx) => {
-      const locked = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Payment" WHERE "id" = ${id} AND "schoolId" = ${currentSchoolId()} FOR UPDATE`;
+      const locked = await tx.$queryRaw<
+        { id: string }[]
+      >`SELECT "id" FROM "Payment" WHERE "id" = ${id} AND "schoolId" = ${currentSchoolId()} FOR UPDATE`;
       if (locked.length === 0) throw new NotFoundException('Paiement introuvable');
       const payment = await tx.payment.findUniqueOrThrow({ where: { id } });
-      if (payment.status !== 'SUCCESS') throw new ConflictException('Seul un paiement encaissé peut être annulé');
+      if (payment.status !== 'SUCCESS')
+        throw new ConflictException('Seul un paiement encaissé peut être annulé');
       if (payment.reversedAt) throw new ConflictException('Ce paiement a déjà été annulé');
       const actorId = this.actorId();
-      await tx.payment.update({ where: { id }, data: { reversedAt: new Date(), reversalReason: reason, reversedById: actorId } });
+      await tx.payment.update({
+        where: { id },
+        data: { reversedAt: new Date(), reversalReason: reason, reversedById: actorId },
+      });
       await tx.ledgerEntry.create({
         data: {
           schoolId: payment.schoolId,
@@ -570,7 +741,17 @@ export class FinanceService {
           createdById: actorId,
         },
       });
-      await this.audit.log({ action: 'finance.payment_reversed', entity: 'Payment', entityId: id, before: { reversed: false }, after: { reversed: true }, reason }, tx);
+      await this.audit.log(
+        {
+          action: 'finance.payment_reversed',
+          entity: 'Payment',
+          entityId: id,
+          before: { reversed: false },
+          after: { reversed: true },
+          reason,
+        },
+        tx,
+      );
       return { ok: true };
     });
   }
@@ -581,7 +762,12 @@ export class FinanceService {
     return this.presentPayment(p);
   }
 
-  async journal(filters: { from?: string; to?: string; method?: PaymentMethod; status?: Payment['status'] }) {
+  async journal(filters: {
+    from?: string;
+    to?: string;
+    method?: PaymentMethod;
+    status?: Payment['status'];
+  }) {
     const payments = await this.db.payment.findMany({
       where: {
         method: filters.method,
@@ -600,7 +786,10 @@ export class FinanceService {
       select: { id: true, firstName: true, lastName: true, matricule: true },
     });
     const byId = new Map(students.map((s) => [s.id, s]));
-    return payments.map((p) => ({ ...this.presentPayment(p), student: byId.get(p.studentId) ?? null }));
+    return payments.map((p) => ({
+      ...this.presentPayment(p),
+      student: byId.get(p.studentId) ?? null,
+    }));
   }
 
   async exportCsv(from: string, to: string): Promise<string> {
@@ -628,10 +817,18 @@ export class FinanceService {
 
   async openCashSession() {
     const userId = staffContext().userId;
-    const existing = await this.db.cashSession.findFirst({ where: { status: 'OPEN', openedById: userId } });
+    const existing = await this.db.cashSession.findFirst({
+      where: { status: 'OPEN', openedById: userId },
+    });
     if (existing) return existing;
-    const session = await this.db.cashSession.create({ data: { schoolId: currentSchoolId(), openedById: userId } });
-    await this.audit.log({ action: 'finance.cash_opened', entity: 'CashSession', entityId: session.id });
+    const session = await this.db.cashSession.create({
+      data: { schoolId: currentSchoolId(), openedById: userId },
+    });
+    await this.audit.log({
+      action: 'finance.cash_opened',
+      entity: 'CashSession',
+      entityId: session.id,
+    });
     return session;
   }
 
@@ -641,17 +838,27 @@ export class FinanceService {
       select: { amount: true, reversedAt: true },
     });
     const valid = payments.filter((p) => p.reversedAt === null);
-    return { operations: valid.length, expected: valid.reduce((s, p) => s + p.amount, 0), reversed: payments.length - valid.length };
+    return {
+      operations: valid.length,
+      expected: valid.reduce((s, p) => s + p.amount, 0),
+      reversed: payments.length - valid.length,
+    };
   }
 
   async currentCashSession() {
-    const session = await this.db.cashSession.findFirst({ where: { status: 'OPEN', openedById: staffContext().userId } });
+    const session = await this.db.cashSession.findFirst({
+      where: { status: 'OPEN', openedById: staffContext().userId },
+    });
     if (!session) return null;
     return { ...session, ...(await this.sessionTotals(session.id)) };
   }
 
   async listCashSessions(status?: 'OPEN' | 'CLOSED' | 'APPROVED') {
-    const sessions = await this.db.cashSession.findMany({ where: { status }, orderBy: { openedAt: 'desc' }, take: 100 });
+    const sessions = await this.db.cashSession.findMany({
+      where: { status },
+      orderBy: { openedAt: 'desc' },
+      take: 100,
+    });
     const users = await this.db.user.findMany({
       where: { id: { in: [...new Set(sessions.map((s) => s.openedById))] } },
       select: { id: true, firstName: true, lastName: true },
@@ -671,21 +878,43 @@ export class FinanceService {
     const totals = await this.sessionTotals(id);
     const closed = await this.db.cashSession.update({
       where: { id },
-      data: { status: 'CLOSED', closedAt: new Date(), closedById: ctx.userId, expectedAmount: totals.expected, countedAmount, note },
+      data: {
+        status: 'CLOSED',
+        closedAt: new Date(),
+        closedById: ctx.userId,
+        expectedAmount: totals.expected,
+        countedAmount,
+        note,
+      },
     });
-    await this.audit.log({ action: 'finance.cash_closed', entity: 'CashSession', entityId: id, after: { expected: totals.expected, counted: countedAmount } });
-    return { ...closed, difference: countedAmount - totals.expected, operations: totals.operations };
+    await this.audit.log({
+      action: 'finance.cash_closed',
+      entity: 'CashSession',
+      entityId: id,
+      after: { expected: totals.expected, counted: countedAmount },
+    });
+    return {
+      ...closed,
+      difference: countedAmount - totals.expected,
+      operations: totals.operations,
+    };
   }
 
   async approveCashSession(id: string) {
     const ctx = staffContext();
     const session = await this.db.cashSession.findUnique({ where: { id } });
     if (!session) throw new NotFoundException('Caisse introuvable');
-    if (session.status !== 'CLOSED') throw new ConflictException('La caisse doit être clôturée avant validation');
+    if (session.status !== 'CLOSED')
+      throw new ConflictException('La caisse doit être clôturée avant validation');
     if (session.closedById === ctx.userId && !ctx.roles.includes('DIRECTOR')) {
-      throw new ForbiddenException('La validation doit être faite par une autre personne que celle qui a clôturé');
+      throw new ForbiddenException(
+        'La validation doit être faite par une autre personne que celle qui a clôturé',
+      );
     }
-    const approved = await this.db.cashSession.update({ where: { id }, data: { status: 'APPROVED', approvedById: ctx.userId, approvedAt: new Date() } });
+    const approved = await this.db.cashSession.update({
+      where: { id },
+      data: { status: 'APPROVED', approvedById: ctx.userId, approvedAt: new Date() },
+    });
     await this.audit.log({ action: 'finance.cash_approved', entity: 'CashSession', entityId: id });
     return approved;
   }
@@ -720,13 +949,27 @@ export class FinanceService {
   async unpaid(academicYearId: string, classId?: string) {
     const enrollments = await this.db.enrollment.findMany({
       where: { academicYearId, ...(classId ? { classId } : {}), student: { deletedAt: null } },
-      include: { student: { select: { id: true, firstName: true, lastName: true, matricule: true } }, class: { select: { id: true, name: true } } },
+      include: {
+        student: { select: { id: true, firstName: true, lastName: true, matricule: true } },
+        class: { select: { id: true, name: true } },
+      },
     });
     const byStudent = new Map(enrollments.map((e) => [e.studentId, e]));
-    const lines = await this.lineStates({ invoice: { academicYearId, studentId: { in: [...byStudent.keys()] } } });
-    const perStudent = new Map<string, { overdue: number; outstanding: number; oldest: string | null; due: number; paid: number }>();
+    const lines = await this.lineStates({
+      invoice: { academicYearId, studentId: { in: [...byStudent.keys()] } },
+    });
+    const perStudent = new Map<
+      string,
+      { overdue: number; outstanding: number; oldest: string | null; due: number; paid: number }
+    >();
     for (const l of lines) {
-      const cur = perStudent.get(l.studentId) ?? { overdue: 0, outstanding: 0, oldest: null, due: 0, paid: 0 };
+      const cur = perStudent.get(l.studentId) ?? {
+        overdue: 0,
+        outstanding: 0,
+        oldest: null,
+        due: 0,
+        paid: 0,
+      };
       cur.outstanding += l.outstanding;
       cur.due += l.due;
       cur.paid += Math.min(l.paid, l.due);
@@ -740,14 +983,37 @@ export class FinanceService {
       .filter(([, v]) => v.overdue > 0)
       .map(([studentId, v]) => {
         const e = byStudent.get(studentId);
-        return { student: e?.student, class: e?.class, overdue: v.overdue, outstanding: v.outstanding, oldestDueDate: v.oldest };
+        return {
+          student: e?.student,
+          class: e?.class,
+          overdue: v.overdue,
+          outstanding: v.outstanding,
+          oldestDueDate: v.oldest,
+        };
       })
       .sort((a, b) => b.overdue - a.overdue);
-    const perClass = new Map<string, { classId: string; className: string; students: number; overdue: number; due: number; paid: number }>();
+    const perClass = new Map<
+      string,
+      {
+        classId: string;
+        className: string;
+        students: number;
+        overdue: number;
+        due: number;
+        paid: number;
+      }
+    >();
     for (const [studentId, v] of perStudent) {
       const e = byStudent.get(studentId);
       if (!e) continue;
-      const cur = perClass.get(e.class.id) ?? { classId: e.class.id, className: e.class.name, students: 0, overdue: 0, due: 0, paid: 0 };
+      const cur = perClass.get(e.class.id) ?? {
+        classId: e.class.id,
+        className: e.class.name,
+        students: 0,
+        overdue: 0,
+        due: 0,
+        paid: 0,
+      };
       if (v.overdue > 0) cur.students++;
       cur.overdue += v.overdue;
       cur.due += v.due;
@@ -772,11 +1038,16 @@ export class FinanceService {
       where: { status: 'SUCCESS', reversedAt: null, confirmedAt: { gte: toDbDate(start) } },
       select: { amount: true, confirmedAt: true },
     });
-    const buckets = Array.from({ length: weeks }, (_, i) => ({ weekStart: addDays(start, i * 7), amount: 0 }));
+    const buckets = Array.from({ length: weeks }, (_, i) => ({
+      weekStart: addDays(start, i * 7),
+      amount: 0,
+    }));
     for (const p of payments) {
       if (!p.confirmedAt) continue;
       const day = todayInCameroon(p.confirmedAt);
-      const idx = Math.floor((toDbDate(day).getTime() - toDbDate(start).getTime()) / (7 * 86_400_000));
+      const idx = Math.floor(
+        (toDbDate(day).getTime() - toDbDate(start).getTime()) / (7 * 86_400_000),
+      );
       const bucket = buckets[idx];
       if (bucket) bucket.amount += p.amount;
     }
@@ -785,28 +1056,46 @@ export class FinanceService {
 
   /** Relances automatiques J+n après échéance (une seule par échéance et par palier). */
   async sendReminders(today = todayInCameroon()) {
-    const schools = await this.db.school.findMany({ where: { status: 'ACTIVE' }, select: { id: true, name: true, settings: true } });
+    const schools = await this.db.school.findMany({
+      where: { status: 'ACTIVE' },
+      select: { id: true, name: true, settings: true },
+    });
     let sent = 0;
     for (const school of schools) {
-      const offsets = ((school.settings as SchoolFinanceSettings).reminderOffsets ?? [5, 15, 30]).slice().sort((a, b) => a - b);
+      const offsets = ((school.settings as SchoolFinanceSettings).reminderOffsets ?? [5, 15, 30])
+        .slice()
+        .sort((a, b) => a - b);
       sent += await runAsSystem(
         'fee-reminders',
         async () => {
           let count = 0;
-          const lines = (await this.lineStates({ dueDate: { lt: toDbDate(today) } })).filter((l) => l.outstanding > 0);
+          const lines = (await this.lineStates({ dueDate: { lt: toDbDate(today) } })).filter(
+            (l) => l.outstanding > 0,
+          );
           for (const line of lines) {
             const reached = offsets.filter((o) => reminderDate(line.dueDate, o) <= today);
             const offset = reached[reached.length - 1];
             if (offset === undefined) continue;
             const scheduledFor = reminderDate(line.dueDate, offset);
-            const exists = await this.db.reminder.findFirst({ where: { invoiceLineId: line.id, scheduledFor: toDbDate(scheduledFor) } });
+            const exists = await this.db.reminder.findFirst({
+              where: { invoiceLineId: line.id, scheduledFor: toDbDate(scheduledFor) },
+            });
             if (exists) continue;
             const phone = await this.guardianPhone(line.studentId);
-            const student = await this.db.student.findUnique({ where: { id: line.studentId }, select: { firstName: true, lastName: true, deletedAt: true } });
+            const student = await this.db.student.findUnique({
+              where: { id: line.studentId },
+              select: { firstName: true, lastName: true, deletedAt: true },
+            });
             if (!student || student.deletedAt) continue;
             await this.db.$transaction(async (tx) => {
               await tx.reminder.create({
-                data: { schoolId: school.id, studentId: line.studentId, invoiceLineId: line.id, scheduledFor: toDbDate(scheduledFor), sentAt: phone ? new Date() : null },
+                data: {
+                  schoolId: school.id,
+                  studentId: line.studentId,
+                  invoiceLineId: line.id,
+                  scheduledFor: toDbDate(scheduledFor),
+                  sentAt: phone ? new Date() : null,
+                },
               });
               if (phone) {
                 await this.notifications.enqueue(

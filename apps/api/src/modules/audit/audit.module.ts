@@ -23,16 +23,31 @@ export class AuditController {
   @RequirePermissions('audit.read')
   @Get()
   async list(@Query(new ZodPipe(querySchema)) q: z.infer<typeof querySchema>) {
-    const where = { schoolId: currentSchoolId(), entity: q.entity, entityId: q.entityId, action: q.action ? { startsWith: q.action } : undefined };
+    const where = {
+      schoolId: currentSchoolId(),
+      entity: q.entity,
+      entityId: q.entityId,
+      action: q.action ? { startsWith: q.action } : undefined,
+    };
     const [total, items] = await Promise.all([
       this.db.auditLog.count({ where }),
-      this.db.auditLog.findMany({ where, orderBy: { createdAt: 'desc' }, skip: (q.page - 1) * q.pageSize, take: q.pageSize }),
+      this.db.auditLog.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (q.page - 1) * q.pageSize,
+        take: q.pageSize,
+      }),
     ]);
     const actors = await this.db.user.findMany({
-      where: { id: { in: [...new Set(items.map((i) => i.actorId).filter((x): x is string => !!x))] } },
+      where: {
+        id: { in: [...new Set(items.map((i) => i.actorId).filter((x): x is string => !!x))] },
+      },
       select: { id: true, firstName: true, lastName: true },
     });
-    return { total, items: items.map((i) => ({ ...i, actor: actors.find((a) => a.id === i.actorId) ?? null })) };
+    return {
+      total,
+      items: items.map((i) => ({ ...i, actor: actors.find((a) => a.id === i.actorId) ?? null })),
+    };
   }
 }
 

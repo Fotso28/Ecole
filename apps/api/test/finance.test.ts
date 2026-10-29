@@ -4,7 +4,10 @@ import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { addDays, todayInCameroon, toDbDate } from '../src/common/dates';
 import { FinanceService } from '../src/modules/finance/finance.service';
-import { signWebhook, SimulatorMobileMoneyProvider } from '../src/modules/finance/mobile-money.provider';
+import {
+  signWebhook,
+  SimulatorMobileMoneyProvider,
+} from '../src/modules/finance/mobile-money.provider';
 import { MemorySmsProvider } from '../src/modules/notifications/sms.provider';
 import { NotificationsService } from '../src/modules/notifications/notifications.service';
 import { enrollStudent, seedSchool, sessions, type SchoolFixture } from './fixtures';
@@ -40,7 +43,14 @@ beforeEach(async () => {
     await prisma.feeItem.updateMany({ where: { name }, data: { dueDate: toDbDate(date) } });
   }
   s = await sessions(app);
-  student = (await enrollStudent(app, s.secretariat, { firstName: 'Marie-Claire', lastName: 'Ngono', classId: f.class4AId, phone: '677123456' })).id;
+  student = (
+    await enrollStudent(app, s.secretariat, {
+      firstName: 'Marie-Claire',
+      lastName: 'Ngono',
+      classId: f.class4AId,
+      phone: '677123456',
+    })
+  ).id;
 });
 
 const pay = (body: Record<string, unknown>, session = s.compta) =>
@@ -50,35 +60,64 @@ const pay = (body: Record<string, unknown>, session = s.compta) =>
     .send({ studentId: student, idempotencyKey: randomUUID(), ...body });
 
 async function account() {
-  return (await http().get(`/finance/students/${student}/account`).set(s.compta.auth).expect(200)).body;
+  return (await http().get(`/finance/students/${student}/account`).set(s.compta.auth).expect(200))
+    .body;
 }
 
 describe('échéancier et relevé de compte', () => {
   it('présente les échéances, les retards et le solde', async () => {
     const a = await account();
-    expect(a.lines.map((l: { label: string; status: string; overdue: boolean }) => [l.label, l.status, l.overdue])).toEqual([
+    expect(
+      a.lines.map((l: { label: string; status: string; overdue: boolean }) => [
+        l.label,
+        l.status,
+        l.overdue,
+      ]),
+    ).toEqual([
       ['Inscription', 'UNPAID', true],
       ['Tranche 1', 'UNPAID', true],
       ['Frais de laboratoire 4e', 'UNPAID', true],
       ['Tranche 2', 'UNPAID', false],
       ['Tranche 3', 'UNPAID', false],
     ]);
-    expect(a.totals).toEqual({ due: 185000, paid: 0, outstanding: 185000, overdue: 105000, balance: 185000, credit: 0 });
+    expect(a.totals).toEqual({
+      due: 185000,
+      paid: 0,
+      outstanding: 185000,
+      overdue: 105000,
+      balance: 185000,
+      credit: 0,
+    });
     expect(a.nextDue).toMatchObject({ label: 'Inscription', amount: 25000 });
   });
 
-  it("accorde une remise (bourse) tracée dans le ledger", async () => {
+  it('accorde une remise (bourse) tracée dans le ledger', async () => {
     const a = await account();
     const t3 = a.lines.find((l: { label: string }) => l.label === 'Tranche 3');
-    await http().post(`/finance/invoice-lines/${t3.id}/discounts`).set(s.compta.auth).send({ amount: 10000, reason: 'Bourse excellence' }).expect(201);
-    await http().post(`/finance/invoice-lines/${t3.id}/discounts`).set(s.compta.auth).send({ amount: 50000, reason: 'Trop' }).expect(409);
+    await http()
+      .post(`/finance/invoice-lines/${t3.id}/discounts`)
+      .set(s.compta.auth)
+      .send({ amount: 10000, reason: 'Bourse excellence' })
+      .expect(201);
+    await http()
+      .post(`/finance/invoice-lines/${t3.id}/discounts`)
+      .set(s.compta.auth)
+      .send({ amount: 50000, reason: 'Trop' })
+      .expect(409);
     const after = await account();
     expect(after.totals.balance).toBe(175000);
-    expect(after.lines.find((l: { label: string }) => l.label === 'Tranche 3')).toMatchObject({ due: 20000, discount: 10000 });
+    expect(after.lines.find((l: { label: string }) => l.label === 'Tranche 3')).toMatchObject({
+      due: 20000,
+      discount: 10000,
+    });
   });
 
-  it("refuse de recréer un échéancier existant", async () => {
-    await http().post('/finance/invoices').set(s.compta.auth).send({ studentId: student, academicYearId: f.yearId }).expect(409);
+  it('refuse de recréer un échéancier existant', async () => {
+    await http()
+      .post('/finance/invoices')
+      .set(s.compta.auth)
+      .send({ studentId: student, academicYearId: f.yearId })
+      .expect(409);
   });
 });
 
@@ -92,13 +131,23 @@ describe('encaissement en espèces', () => {
     await http().post('/finance/cash-sessions/open').set(s.compta.auth).expect(201);
     const res = await pay({ amount: 40000, method: 'CASH' }).expect(201);
     const year = new Date(Date.now()).getUTCFullYear();
-    expect(res.body).toMatchObject({ status: 'SUCCESS', amount: 40000, unallocated: 0, balance: 145000, receipt: { number: `R-${year}-000001` } });
+    expect(res.body).toMatchObject({
+      status: 'SUCCESS',
+      amount: 40000,
+      unallocated: 0,
+      balance: 145000,
+      receipt: { number: `R-${year}-000001` },
+    });
     const a = await account();
-    expect(a.lines.slice(0, 2).map((l: { paid: number; status: string }) => [l.paid, l.status])).toEqual([
+    expect(
+      a.lines.slice(0, 2).map((l: { paid: number; status: string }) => [l.paid, l.status]),
+    ).toEqual([
       [25000, 'PAID'],
       [15000, 'PARTIAL'],
     ]);
-    const sms = await prisma.notificationOutbox.findFirstOrThrow({ where: { template: 'paymentReceived' } });
+    const sms = await prisma.notificationOutbox.findFirstOrThrow({
+      where: { template: 'paymentReceived' },
+    });
     expect(sms.recipient).toBe('+237677123456');
     expect(sms.body).toContain('Reste à payer : 145');
 
@@ -134,8 +183,14 @@ describe('encaissement en espèces', () => {
 
   it('résiste à deux encaissements simultanés sur les mêmes échéances', async () => {
     await http().post('/finance/cash-sessions/open').set(s.compta.auth).expect(201);
-    await Promise.all([pay({ amount: 100000, method: 'CASH' }).expect(201), pay({ amount: 100000, method: 'CASH' }).expect(201)]);
-    const allocations = await prisma.paymentAllocation.groupBy({ by: ['invoiceLineId'], _sum: { amount: true } });
+    await Promise.all([
+      pay({ amount: 100000, method: 'CASH' }).expect(201),
+      pay({ amount: 100000, method: 'CASH' }).expect(201),
+    ]);
+    const allocations = await prisma.paymentAllocation.groupBy({
+      by: ['invoiceLineId'],
+      _sum: { amount: true },
+    });
     const lines = await prisma.invoiceLine.findMany();
     for (const a of allocations) {
       const line = lines.find((l) => l.id === a.invoiceLineId)!;
@@ -158,13 +213,28 @@ describe('annulation (écriture de correction)', () => {
   it('annule un paiement sans le modifier ni le supprimer', async () => {
     await http().post('/finance/cash-sessions/open').set(s.compta.auth).expect(201);
     const p = await pay({ amount: 25000, method: 'CASH' }).expect(201);
-    await http().post(`/finance/payments/${p.body.id}/reverse`).set(s.compta.auth).send({ reason: 'non' }).expect(400);
-    await http().post(`/finance/payments/${p.body.id}/reverse`).set(s.compta.auth).send({ reason: 'Erreur de saisie du montant' }).expect(201);
-    await http().post(`/finance/payments/${p.body.id}/reverse`).set(s.compta.auth).send({ reason: 'Erreur de saisie du montant' }).expect(409);
+    await http()
+      .post(`/finance/payments/${p.body.id}/reverse`)
+      .set(s.compta.auth)
+      .send({ reason: 'non' })
+      .expect(400);
+    await http()
+      .post(`/finance/payments/${p.body.id}/reverse`)
+      .set(s.compta.auth)
+      .send({ reason: 'Erreur de saisie du montant' })
+      .expect(201);
+    await http()
+      .post(`/finance/payments/${p.body.id}/reverse`)
+      .set(s.compta.auth)
+      .send({ reason: 'Erreur de saisie du montant' })
+      .expect(409);
     const a = await account();
     expect(a.totals.balance).toBe(185000);
     expect(a.lines[0].status).toBe('UNPAID');
-    const entries = await prisma.ledgerEntry.findMany({ where: { paymentId: p.body.id }, orderBy: { createdAt: 'asc' } });
+    const entries = await prisma.ledgerEntry.findMany({
+      where: { paymentId: p.body.id },
+      orderBy: { createdAt: 'asc' },
+    });
     expect(entries.map((e) => [e.type, e.amount])).toEqual([
       ['PAYMENT', -25000],
       ['REVERSAL', 25000],
@@ -177,11 +247,21 @@ describe('annulation (écriture de correction)', () => {
     await http().post('/finance/cash-sessions/open').set(s.compta.auth).expect(201);
     const p = await pay({ amount: 25000, method: 'CASH' }).expect(201);
     const entry = await prisma.ledgerEntry.findFirstOrThrow({ where: { paymentId: p.body.id } });
-    await expect(prisma.ledgerEntry.update({ where: { id: entry.id }, data: { amount: -1 } })).rejects.toThrow(/ni modifiées ni supprimées/);
-    await expect(prisma.ledgerEntry.delete({ where: { id: entry.id } })).rejects.toThrow(/ni modifiées ni supprimées/);
-    await expect(prisma.payment.update({ where: { id: p.body.id }, data: { amount: 1 } })).rejects.toThrow(/ne peuvent pas être modifiés/);
-    await expect(prisma.payment.delete({ where: { id: p.body.id } })).rejects.toThrow(/ne peut pas être supprimé/);
-    await expect(prisma.payment.update({ where: { id: p.body.id }, data: { status: 'FAILED' } })).rejects.toThrow(/statut final/);
+    await expect(
+      prisma.ledgerEntry.update({ where: { id: entry.id }, data: { amount: -1 } }),
+    ).rejects.toThrow(/ni modifiées ni supprimées/);
+    await expect(prisma.ledgerEntry.delete({ where: { id: entry.id } })).rejects.toThrow(
+      /ni modifiées ni supprimées/,
+    );
+    await expect(
+      prisma.payment.update({ where: { id: p.body.id }, data: { amount: 1 } }),
+    ).rejects.toThrow(/ne peuvent pas être modifiés/);
+    await expect(prisma.payment.delete({ where: { id: p.body.id } })).rejects.toThrow(
+      /ne peut pas être supprimé/,
+    );
+    await expect(
+      prisma.payment.update({ where: { id: p.body.id }, data: { status: 'FAILED' } }),
+    ).rejects.toThrow(/statut final/);
   });
 });
 
@@ -203,29 +283,54 @@ describe('Mobile Money', () => {
 
   it('crée un paiement en attente puis le confirme par webhook signé', async () => {
     const p = await requestMomo();
-    expect(SimulatorMobileMoneyProvider.requests[0]).toMatchObject({ amount: 35000, phone: '+237677123456', method: 'MTN_MOMO' });
-    await webhook({ reference: p.operatorReference, status: 'SUCCESS', amount: 35000 }, 'mauvais-secret-0123456789').expect(401);
-    await http().post('/webhooks/mobile-money').send({ reference: p.operatorReference, status: 'SUCCESS' }).expect(401);
+    expect(SimulatorMobileMoneyProvider.requests[0]).toMatchObject({
+      amount: 35000,
+      phone: '+237677123456',
+      method: 'MTN_MOMO',
+    });
+    await webhook(
+      { reference: p.operatorReference, status: 'SUCCESS', amount: 35000 },
+      'mauvais-secret-0123456789',
+    ).expect(401);
+    await http()
+      .post('/webhooks/mobile-money')
+      .send({ reference: p.operatorReference, status: 'SUCCESS' })
+      .expect(401);
     await webhook({ reference: p.operatorReference, status: 'SUCCESS', amount: 30000 }).expect(409);
-    const ok = await webhook({ reference: p.operatorReference, status: 'SUCCESS', amount: 35000 }).expect(200);
+    const ok = await webhook({
+      reference: p.operatorReference,
+      status: 'SUCCESS',
+      amount: 35000,
+    }).expect(200);
     expect(ok.body).toEqual({ status: 'SUCCESS', changed: true });
     // Webhook rejoué : aucun double encaissement.
-    const replay = await webhook({ reference: p.operatorReference, status: 'SUCCESS', amount: 35000 }).expect(200);
+    const replay = await webhook({
+      reference: p.operatorReference,
+      status: 'SUCCESS',
+      amount: 35000,
+    }).expect(200);
     expect(replay.body.changed).toBe(false);
     const payment = await http().get(`/finance/payments/${p.id}`).set(s.compta.auth).expect(200);
-    expect(payment.body).toMatchObject({ status: 'SUCCESS', receipt: { number: expect.stringMatching(/^R-\d{4}-000001$/) } });
+    expect(payment.body).toMatchObject({
+      status: 'SUCCESS',
+      receipt: { number: expect.stringMatching(/^R-\d{4}-000001$/) },
+    });
     expect(await prisma.ledgerEntry.count({ where: { paymentId: p.id } })).toBe(1);
-    const mismatch = await prisma.auditLog.count({ where: { action: 'finance.mobile_money_amount_mismatch' } });
+    const mismatch = await prisma.auditLog.count({
+      where: { action: 'finance.mobile_money_amount_mismatch' },
+    });
     expect(mismatch).toBe(1);
   });
 
-  it("enregistre un échec sans écriture et prévient le payeur", async () => {
+  it('enregistre un échec sans écriture et prévient le payeur', async () => {
     const p = await requestMomo();
     await webhook({ reference: p.operatorReference, status: 'FAILED' }).expect(200);
     const row = await prisma.payment.findUniqueOrThrow({ where: { id: p.id } });
     expect(row.status).toBe('FAILED');
     expect(await prisma.ledgerEntry.count({ where: { paymentId: p.id } })).toBe(0);
-    const sms = await prisma.notificationOutbox.findFirstOrThrow({ where: { template: 'paymentFailed' } });
+    const sms = await prisma.notificationOutbox.findFirstOrThrow({
+      where: { template: 'paymentFailed' },
+    });
     expect(sms.recipient).toBe('+237677123456');
     await webhook({ reference: p.operatorReference, status: 'SUCCESS', amount: 35000 }).expect(200);
     expect((await prisma.payment.findUniqueOrThrow({ where: { id: p.id } })).status).toBe('FAILED');
@@ -233,7 +338,11 @@ describe('Mobile Money', () => {
 
   it("signale une erreur claire si l'opérateur ne répond pas", async () => {
     SimulatorMobileMoneyProvider.failNextRequest = true;
-    const res = await pay({ amount: 35000, method: 'ORANGE_MONEY', payerPhone: '699887766' }).expect(502);
+    const res = await pay({
+      amount: 35000,
+      method: 'ORANGE_MONEY',
+      payerPhone: '699887766',
+    }).expect(502);
     expect(res.body.message).toMatch(/ne répond pas/);
     expect((await prisma.payment.findFirstOrThrow()).status).toBe('FAILED');
   });
@@ -249,32 +358,78 @@ describe('Mobile Money', () => {
     SimulatorMobileMoneyProvider.statuses.set(b.operatorReference, 'FAILED');
     const result = await finance.reconcilePending();
     expect(result).toEqual({ checked: 3, settled: 2, expired: 1 });
-    const statuses = await prisma.payment.findMany({ orderBy: { amount: 'asc' }, select: { status: true } });
+    const statuses = await prisma.payment.findMany({
+      orderBy: { amount: 'asc' },
+      select: { status: true },
+    });
     expect(statuses.map((x) => x.status)).toEqual(['SUCCESS', 'FAILED', 'CANCELLED']);
   });
 
   it('le parent paie depuis le portail et suit le statut', async () => {
     await http().post('/auth/otp/request').send({ phone: '677123456' }).expect(202);
     const code = /(\d{6})/.exec(MemorySmsProvider.lastTo('+237677123456') ?? '')?.[1];
-    const parent = toSession(await http().post('/auth/otp/verify').send({ phone: '677123456', code }).expect(200));
+    const parent = toSession(
+      await http().post('/auth/otp/verify').send({ phone: '677123456', code }).expect(200),
+    );
     const children = await http().get('/portal/children').set(parent.auth).expect(200);
     expect(children.body).toHaveLength(1);
-    expect(children.body[0]).toMatchObject({ firstName: 'Marie-Claire', balance: 185000, overdue: 105000, className: '4e A' });
+    expect(children.body[0]).toMatchObject({
+      firstName: 'Marie-Claire',
+      balance: 185000,
+      overdue: 105000,
+      className: '4e A',
+    });
     const created = await http()
       .post('/portal/payments')
       .set(parent.auth)
-      .send({ studentId: student, amount: 35000, method: 'ORANGE_MONEY', payerPhone: '677123456', idempotencyKey: randomUUID() })
+      .send({
+        studentId: student,
+        amount: 35000,
+        method: 'ORANGE_MONEY',
+        payerPhone: '677123456',
+        idempotencyKey: randomUUID(),
+      })
       .expect(201);
     expect(created.body.status).toBe('PENDING');
     await http().post(`/dev/mobile-money/${created.body.operatorReference}/SUCCESS`).expect(200);
-    const status = await http().get(`/portal/payments/${created.body.id}`).set(parent.auth).expect(200);
+    const status = await http()
+      .get(`/portal/payments/${created.body.id}`)
+      .set(parent.auth)
+      .expect(200);
     expect(status.body).toMatchObject({ status: 'SUCCESS', balance: 150000 });
-    const receipt = await http().get(`/portal/payments/${created.body.id}/receipt.pdf`).set(parent.auth).expect(200);
+    const receipt = await http()
+      .get(`/portal/payments/${created.body.id}/receipt.pdf`)
+      .set(parent.auth)
+      .expect(200);
     expect(receipt.body.subarray(0, 4).toString()).toBe('%PDF');
     // Le portail n'accepte pas les espèces, ni un enfant qui n'est pas le sien.
-    await http().post('/portal/payments').set(parent.auth).send({ studentId: student, amount: 100, method: 'CASH', payerPhone: '677123456', idempotencyKey: randomUUID() }).expect(400);
-    const other = await enrollStudent(app, s.secretariat, { firstName: 'Junior', lastName: 'Tchoupo', classId: f.class4BId });
-    await http().post('/portal/payments').set(parent.auth).send({ studentId: other.id, amount: 100, method: 'MTN_MOMO', payerPhone: '677123456', idempotencyKey: randomUUID() }).expect(404);
+    await http()
+      .post('/portal/payments')
+      .set(parent.auth)
+      .send({
+        studentId: student,
+        amount: 100,
+        method: 'CASH',
+        payerPhone: '677123456',
+        idempotencyKey: randomUUID(),
+      })
+      .expect(400);
+    const other = await enrollStudent(app, s.secretariat, {
+      firstName: 'Junior',
+      lastName: 'Tchoupo',
+      classId: f.class4BId,
+    });
+    await http()
+      .post('/portal/payments')
+      .set(parent.auth)
+      .send({
+        studentId: other.id,
+        amount: 100,
+        method: 'MTN_MOMO',
+        payerPhone: '677123456',
+        idempotencyKey: randomUUID(),
+      })
+      .expect(404);
   });
 });
 
@@ -283,34 +438,80 @@ describe('caisse journalière', () => {
     const session = await http().post('/finance/cash-sessions/open').set(s.compta.auth).expect(201);
     await pay({ amount: 25000, method: 'CASH' }).expect(201);
     const p2 = await pay({ amount: 15000, method: 'CASH' }).expect(201);
-    await pay({ amount: 50000, method: 'BANK', bankReference: 'BRD-001', bankName: 'Banque' }).expect(201);
-    await http().post(`/finance/payments/${p2.body.id}/reverse`).set(s.compta.auth).send({ reason: 'Billet refusé par le parent' }).expect(201);
-    const current = await http().get('/finance/cash-sessions/current').set(s.compta.auth).expect(200);
+    await pay({
+      amount: 50000,
+      method: 'BANK',
+      bankReference: 'BRD-001',
+      bankName: 'Banque',
+    }).expect(201);
+    await http()
+      .post(`/finance/payments/${p2.body.id}/reverse`)
+      .set(s.compta.auth)
+      .send({ reason: 'Billet refusé par le parent' })
+      .expect(201);
+    const current = await http()
+      .get('/finance/cash-sessions/current')
+      .set(s.compta.auth)
+      .expect(200);
     expect(current.body).toMatchObject({ operations: 1, expected: 25000, reversed: 1 });
-    const closed = await http().post(`/finance/cash-sessions/${session.body.id}/close`).set(s.compta.auth).send({ countedAmount: 24000 }).expect(201);
-    expect(closed.body).toMatchObject({ status: 'CLOSED', expectedAmount: 25000, countedAmount: 24000, difference: -1000 });
+    const closed = await http()
+      .post(`/finance/cash-sessions/${session.body.id}/close`)
+      .set(s.compta.auth)
+      .send({ countedAmount: 24000 })
+      .expect(201);
+    expect(closed.body).toMatchObject({
+      status: 'CLOSED',
+      expectedAmount: 25000,
+      countedAmount: 24000,
+      difference: -1000,
+    });
     await pay({ amount: 1000, method: 'CASH' }).expect(409);
-    await http().post(`/finance/cash-sessions/${session.body.id}/approve`).set(s.compta.auth).expect(403);
-    await http().post(`/finance/cash-sessions/${session.body.id}/approve`).set(s.direction.auth).expect(201);
+    await http()
+      .post(`/finance/cash-sessions/${session.body.id}/approve`)
+      .set(s.compta.auth)
+      .expect(403);
+    await http()
+      .post(`/finance/cash-sessions/${session.body.id}/approve`)
+      .set(s.direction.auth)
+      .expect(201);
   });
 });
 
 describe('pilotage', () => {
   it('calcule recouvrement, impayés par classe et encaissements hebdomadaires', async () => {
-    const other = await enrollStudent(app, s.secretariat, { firstName: 'Junior', lastName: 'Tchoupo', classId: f.class4BId });
+    const other = await enrollStudent(app, s.secretariat, {
+      firstName: 'Junior',
+      lastName: 'Tchoupo',
+      classId: f.class4BId,
+    });
     await http().post('/finance/cash-sessions/open').set(s.compta.auth).expect(201);
     await pay({ amount: 105000, method: 'CASH' }).expect(201);
     const summary = await http().get('/finance/summary').set(s.compta.auth).expect(200);
-    expect(summary.body).toMatchObject({ expected: 370000, collected: 105000, recoveryRate: 28, overdue: 105000, overdueStudents: 1 });
-    expect(summary.body.items.find((i: { name: string }) => i.name === 'Inscription')).toMatchObject({ due: 50000, paid: 25000, rate: 50 });
+    expect(summary.body).toMatchObject({
+      expected: 370000,
+      collected: 105000,
+      recoveryRate: 28,
+      overdue: 105000,
+      overdueStudents: 1,
+    });
+    expect(
+      summary.body.items.find((i: { name: string }) => i.name === 'Inscription'),
+    ).toMatchObject({ due: 50000, paid: 25000, rate: 50 });
     const unpaid = await http().get('/finance/unpaid').set(s.compta.auth).expect(200);
     expect(unpaid.body.students).toHaveLength(1);
-    expect(unpaid.body.students[0]).toMatchObject({ student: { id: other.id }, overdue: 105000, class: { name: '4e B' } });
+    expect(unpaid.body.students[0]).toMatchObject({
+      student: { id: other.id },
+      overdue: 105000,
+      class: { name: '4e B' },
+    });
     expect(unpaid.body.classes[0]).toMatchObject({ className: '4e B', students: 1, rate: 0 });
     const dash = await http().get('/dashboard').set(s.direction.auth).expect(200);
     expect(dash.body.finance.weekly.at(-1).amount).toBe(105000);
     expect(dash.body.enrollment).toMatchObject({ total: 2, girls: 2 });
-    const csv = await http().get(`/finance/payments/export.csv?from=${addDays(today(), -1)}&to=${addDays(today(), 1)}`).set(s.compta.auth).expect(200);
+    const csv = await http()
+      .get(`/finance/payments/export.csv?from=${addDays(today(), -1)}&to=${addDays(today(), 1)}`)
+      .set(s.compta.auth)
+      .expect(200);
     expect(csv.text).toContain('date;recu;matricule;eleve;moyen;montant;annule;reference');
     expect(csv.text).toContain(';105000;non;');
   });
@@ -322,7 +523,9 @@ describe('pilotage', () => {
     expect(first.sent).toBe(3);
     const again = await finance.sendReminders();
     expect(again.sent).toBe(0);
-    const reminders = await prisma.notificationOutbox.findMany({ where: { template: 'feeReminder' } });
+    const reminders = await prisma.notificationOutbox.findMany({
+      where: { template: 'feeReminder' },
+    });
     expect(reminders.every((r) => r.recipient === '+237677123456')).toBe(true);
     expect(reminders.map((r) => r.body).join('\n')).toContain('Tranche 1 de Marie-Claire Ngono');
   });
@@ -330,33 +533,58 @@ describe('pilotage', () => {
   it('produit un reçu PDF vérifiable', async () => {
     await http().post('/finance/cash-sessions/open').set(s.compta.auth).expect(201);
     const p = await pay({ amount: 25000, method: 'CASH' }).expect(201);
-    const pdf = await http().get(`/finance/payments/${p.body.id}/receipt.pdf`).set(s.compta.auth).expect(200);
+    const pdf = await http()
+      .get(`/finance/payments/${p.body.id}/receipt.pdf`)
+      .set(s.compta.auth)
+      .expect(200);
     expect(pdf.headers['content-type']).toBe('application/pdf');
     const verify = await http().get(`/verify/${p.body.receipt.verificationCode}`).expect(200);
-    expect(verify.body).toMatchObject({ type: 'receipt', valid: true, student: 'NGONO Marie-Claire' });
+    expect(verify.body).toMatchObject({
+      type: 'receipt',
+      valid: true,
+      student: 'NGONO Marie-Claire',
+    });
   });
 });
 
 describe('envoi des notifications', () => {
   it('envoie, réessaie avec délai croissant et abandonne après cinq échecs', async () => {
     const notifications = app.get(NotificationsService);
-    const n = await notifications.enqueue({ recipient: '+237677000000', template: 'test', body: 'Bonjour' });
+    const n = await notifications.enqueue({
+      recipient: '+237677000000',
+      template: 'test',
+      body: 'Bonjour',
+    });
     MemorySmsProvider.failNext = 1;
     expect(await notifications.dispatchPending()).toBeGreaterThanOrEqual(1);
     let row = await prisma.notificationOutbox.findUniqueOrThrow({ where: { id: n.id } });
-    expect(row).toMatchObject({ status: 'PENDING', attempts: 1, lastError: 'Échec simulé du fournisseur SMS' });
+    expect(row).toMatchObject({
+      status: 'PENDING',
+      attempts: 1,
+      lastError: 'Échec simulé du fournisseur SMS',
+    });
     expect(row.availableAt.getTime()).toBeGreaterThan(Date.now());
 
-    await prisma.notificationOutbox.update({ where: { id: n.id }, data: { availableAt: new Date(Date.now() - 1000) } });
+    await prisma.notificationOutbox.update({
+      where: { id: n.id },
+      data: { availableAt: new Date(Date.now() - 1000) },
+    });
     await notifications.dispatchPending();
     row = await prisma.notificationOutbox.findUniqueOrThrow({ where: { id: n.id } });
     expect(row.status).toBe('SENT');
     expect(MemorySmsProvider.lastTo('+237677000000')).toBe('Bonjour');
 
-    const failing = await notifications.enqueue({ recipient: '+237677000001', template: 'test', body: 'Échec' });
+    const failing = await notifications.enqueue({
+      recipient: '+237677000001',
+      template: 'test',
+      body: 'Échec',
+    });
     MemorySmsProvider.failNext = 10;
     for (let i = 0; i < 5; i++) {
-      await prisma.notificationOutbox.update({ where: { id: failing.id }, data: { availableAt: new Date(Date.now() - 1000) } });
+      await prisma.notificationOutbox.update({
+        where: { id: failing.id },
+        data: { availableAt: new Date(Date.now() - 1000) },
+      });
       await notifications.dispatchPending();
     }
     const dead = await prisma.notificationOutbox.findUniqueOrThrow({ where: { id: failing.id } });

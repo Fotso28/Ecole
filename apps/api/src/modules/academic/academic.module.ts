@@ -1,4 +1,16 @@
-import { Body, ConflictException, Controller, Get, Injectable, Module, NotFoundException, Param, Patch, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  ConflictException,
+  Controller,
+  Get,
+  Injectable,
+  Module,
+  NotFoundException,
+  Param,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import {
   academicYearCreateSchema,
@@ -51,7 +63,12 @@ export class AcademicService {
         endDate: toDbDate(input.endDate),
       },
     });
-    await this.audit.log({ action: 'academic.year_created', entity: 'AcademicYear', entityId: year.id, after: input });
+    await this.audit.log({
+      action: 'academic.year_created',
+      entity: 'AcademicYear',
+      entityId: year.id,
+      after: input,
+    });
     return year;
   }
 
@@ -81,7 +98,9 @@ export class AcademicService {
           include: {
             level: { include: { cycle: true } },
             subjects: { include: { subject: true }, orderBy: { subject: { name: 'asc' } } },
-            _count: { select: { enrollments: { where: { status: { in: ['ENROLLED', 'REPEATING'] } } } } },
+            _count: {
+              select: { enrollments: { where: { status: { in: ['ENROLLED', 'REPEATING'] } } } },
+            },
           },
         },
       },
@@ -105,14 +124,22 @@ export class AcademicService {
         },
       });
       for (const s of input.sequences) {
-        await tx.sequence.create({ data: { schoolId, termId: term.id, name: s.name, order: s.order } });
+        await tx.sequence.create({
+          data: { schoolId, termId: term.id, name: s.name, order: s.order },
+        });
       }
-      return tx.term.findUniqueOrThrow({ where: { id: term.id }, include: { sequences: { orderBy: { order: 'asc' } } } });
+      return tx.term.findUniqueOrThrow({
+        where: { id: term.id },
+        include: { sequences: { orderBy: { order: 'asc' } } },
+      });
     });
   }
 
   listCycles() {
-    return this.db.cycle.findMany({ orderBy: { order: 'asc' }, include: { levels: { orderBy: { order: 'asc' } } } });
+    return this.db.cycle.findMany({
+      orderBy: { order: 'asc' },
+      include: { levels: { orderBy: { order: 'asc' } } },
+    });
   }
 
   createCycle(input: z.infer<typeof cycleCreateSchema>) {
@@ -130,7 +157,9 @@ export class AcademicService {
       orderBy: [{ level: { order: 'asc' } }, { name: 'asc' }],
       include: {
         level: { include: { cycle: true } },
-        _count: { select: { enrollments: { where: { status: { in: ['ENROLLED', 'REPEATING'] } } } } },
+        _count: {
+          select: { enrollments: { where: { status: { in: ['ENROLLED', 'REPEATING'] } } } },
+        },
       },
     });
   }
@@ -159,8 +188,17 @@ export class AcademicService {
       },
     });
     if (!cls) throw new NotFoundException('Classe introuvable');
-    const teacherIds = [...new Set([cls.mainTeacherId, ...cls.subjects.map((s) => s.teacherId)].filter((x): x is string => !!x))];
-    const teachers = await this.db.user.findMany({ where: { id: { in: teacherIds } }, select: { id: true, firstName: true, lastName: true } });
+    const teacherIds = [
+      ...new Set(
+        [cls.mainTeacherId, ...cls.subjects.map((s) => s.teacherId)].filter(
+          (x): x is string => !!x,
+        ),
+      ),
+    ];
+    const teachers = await this.db.user.findMany({
+      where: { id: { in: teacherIds } },
+      select: { id: true, firstName: true, lastName: true },
+    });
     return { ...cls, teachers };
   }
 
@@ -182,27 +220,47 @@ export class AcademicService {
   async assignSubject(input: z.infer<typeof classSubjectCreateSchema>) {
     const cls = await this.db.class.findUniqueOrThrow({ where: { id: input.classId } });
     await this.db.subject.findUniqueOrThrow({ where: { id: input.subjectId } });
-    const existing = await this.db.classSubject.findFirst({ where: { classId: input.classId, subjectId: input.subjectId } });
-    if (existing) throw new ConflictException('Cette matière est déjà affectée à la classe pour cette année');
+    const existing = await this.db.classSubject.findFirst({
+      where: { classId: input.classId, subjectId: input.subjectId },
+    });
+    if (existing)
+      throw new ConflictException('Cette matière est déjà affectée à la classe pour cette année');
     if (input.teacherId) {
       await this.assertTeacher(input.teacherId);
       await this.assertTeacherLoad(input.teacherId, cls.academicYearId, input.weeklyHours ?? 0);
     }
-    const cs = await this.db.classSubject.create({ data: { schoolId: currentSchoolId(), ...input } });
-    await this.audit.log({ action: 'academic.subject_assigned', entity: 'ClassSubject', entityId: cs.id, after: input });
+    const cs = await this.db.classSubject.create({
+      data: { schoolId: currentSchoolId(), ...input },
+    });
+    await this.audit.log({
+      action: 'academic.subject_assigned',
+      entity: 'ClassSubject',
+      entityId: cs.id,
+      after: input,
+    });
     return cs;
   }
 
   async updateClassSubject(id: string, input: z.infer<typeof classSubjectUpdateSchema>) {
-    const before = await this.db.classSubject.findUniqueOrThrow({ where: { id }, include: { class: true } });
+    const before = await this.db.classSubject.findUniqueOrThrow({
+      where: { id },
+      include: { class: true },
+    });
     const teacherId = input.teacherId === undefined ? before.teacherId : input.teacherId;
-    const hours = input.weeklyHours === undefined ? (before.weeklyHours ?? 0) : (input.weeklyHours ?? 0);
+    const hours =
+      input.weeklyHours === undefined ? (before.weeklyHours ?? 0) : (input.weeklyHours ?? 0);
     if (teacherId) {
       await this.assertTeacher(teacherId);
       await this.assertTeacherLoad(teacherId, before.class.academicYearId, hours, id);
     }
     const after = await this.db.classSubject.update({ where: { id }, data: input });
-    await this.audit.log({ action: 'academic.subject_updated', entity: 'ClassSubject', entityId: id, before, after });
+    await this.audit.log({
+      action: 'academic.subject_updated',
+      entity: 'ClassSubject',
+      entityId: id,
+      before,
+      after,
+    });
     return after;
   }
 
@@ -215,13 +273,24 @@ export class AcademicService {
     ]);
     if (from.id === to.id) throw new ConflictException('Choisissez une année différente');
     const already = await this.db.class.count({ where: { academicYearId: to.id } });
-    if (already > 0) throw new ConflictException('L’année de destination contient déjà des classes');
+    if (already > 0)
+      throw new ConflictException('L’année de destination contient déjà des classes');
     return this.db.$transaction(async (tx: Tx) => {
-      const classes = await tx.class.findMany({ where: { academicYearId: from.id }, include: { subjects: true } });
+      const classes = await tx.class.findMany({
+        where: { academicYearId: from.id },
+        include: { subjects: true },
+      });
       let subjects = 0;
       for (const c of classes) {
         const created = await tx.class.create({
-          data: { schoolId, academicYearId: to.id, levelId: c.levelId, name: c.name, capacity: c.capacity, mainTeacherId: c.mainTeacherId },
+          data: {
+            schoolId,
+            academicYearId: to.id,
+            levelId: c.levelId,
+            name: c.name,
+            capacity: c.capacity,
+            mainTeacherId: c.mainTeacherId,
+          },
         });
         for (const s of c.subjects) {
           await tx.classSubject.create({
@@ -240,31 +309,61 @@ export class AcademicService {
       const fees = await tx.feeItem.findMany({ where: { academicYearId: from.id } });
       for (const f of fees) {
         await tx.feeItem.create({
-          data: { schoolId, academicYearId: to.id, name: f.name, amount: f.amount, dueDate: shiftYear(f.dueDate), levelId: f.levelId, order: f.order },
+          data: {
+            schoolId,
+            academicYearId: to.id,
+            name: f.name,
+            amount: f.amount,
+            dueDate: shiftYear(f.dueDate),
+            levelId: f.levelId,
+            order: f.order,
+          },
         });
       }
-      await this.audit.log({ action: 'academic.rollover', entity: 'AcademicYear', entityId: to.id, after: { fromYearId, classes: classes.length } }, tx);
+      await this.audit.log(
+        {
+          action: 'academic.rollover',
+          entity: 'AcademicYear',
+          entityId: to.id,
+          after: { fromYearId, classes: classes.length },
+        },
+        tx,
+      );
       return { classes: classes.length, subjects, feeItems: fees.length };
     });
   }
 
   private async assertTeacher(userId: string) {
-    const m = await this.db.membership.findUnique({ where: { userId_schoolId: { userId, schoolId: currentSchoolId() } } });
-    if (!m?.active) throw new ConflictException('Cet enseignant ne fait pas partie de l’établissement');
+    const m = await this.db.membership.findUnique({
+      where: { userId_schoolId: { userId, schoolId: currentSchoolId() } },
+    });
+    if (!m?.active)
+      throw new ConflictException('Cet enseignant ne fait pas partie de l’établissement');
     return m;
   }
 
   /** Contrôle la charge horaire maximale configurée pour l'enseignant. */
-  private async assertTeacherLoad(teacherId: string, academicYearId: string, addedHours: number, excludeId?: string) {
+  private async assertTeacherLoad(
+    teacherId: string,
+    academicYearId: string,
+    addedHours: number,
+    excludeId?: string,
+  ) {
     const m = await this.assertTeacher(teacherId);
     if (!m.maxWeeklyHours) return;
     const agg = await this.db.classSubject.aggregate({
-      where: { teacherId, class: { academicYearId }, ...(excludeId ? { id: { not: excludeId } } : {}) },
+      where: {
+        teacherId,
+        class: { academicYearId },
+        ...(excludeId ? { id: { not: excludeId } } : {}),
+      },
       _sum: { weeklyHours: true },
     });
     const total = (agg._sum.weeklyHours ?? 0) + addedHours;
     if (total > m.maxWeeklyHours) {
-      throw new ConflictException(`Charge horaire maximale dépassée : ${total} h pour ${m.maxWeeklyHours} h autorisées`);
+      throw new ConflictException(
+        `Charge horaire maximale dépassée : ${total} h pour ${m.maxWeeklyHours} h autorisées`,
+      );
     }
   }
 }
@@ -283,7 +382,9 @@ export class AcademicController {
 
   @RequirePermissions('academic.write')
   @Post('years')
-  createYear(@Body(new ZodPipe(academicYearCreateSchema)) body: z.infer<typeof academicYearCreateSchema>) {
+  createYear(
+    @Body(new ZodPipe(academicYearCreateSchema)) body: z.infer<typeof academicYearCreateSchema>,
+  ) {
     return this.academic.createYear(body);
   }
 
@@ -307,13 +408,20 @@ export class AcademicController {
       ...s,
       startDate: fromDbDate(s.startDate),
       endDate: fromDbDate(s.endDate),
-      terms: s.terms.map((t) => ({ ...t, startDate: fromDbDate(t.startDate), endDate: fromDbDate(t.endDate) })),
+      terms: s.terms.map((t) => ({
+        ...t,
+        startDate: fromDbDate(t.startDate),
+        endDate: fromDbDate(t.endDate),
+      })),
     };
   }
 
   @RequirePermissions('academic.write')
   @Post('years/:id/rollover')
-  rollover(@Param('id') id: string, @Body(new ZodPipe(rolloverSchema)) body: z.infer<typeof rolloverSchema>) {
+  rollover(
+    @Param('id') id: string,
+    @Body(new ZodPipe(rolloverSchema)) body: z.infer<typeof rolloverSchema>,
+  ) {
     return this.academic.rollover(id, body.fromYearId);
   }
 
@@ -373,16 +481,25 @@ export class AcademicController {
 
   @RequirePermissions('academic.write')
   @Post('class-subjects')
-  assign(@Body(new ZodPipe(classSubjectCreateSchema)) body: z.infer<typeof classSubjectCreateSchema>) {
+  assign(
+    @Body(new ZodPipe(classSubjectCreateSchema)) body: z.infer<typeof classSubjectCreateSchema>,
+  ) {
     return this.academic.assignSubject(body);
   }
 
   @RequirePermissions('academic.write')
   @Patch('class-subjects/:id')
-  updateClassSubject(@Param('id') id: string, @Body(new ZodPipe(classSubjectUpdateSchema)) body: z.infer<typeof classSubjectUpdateSchema>) {
+  updateClassSubject(
+    @Param('id') id: string,
+    @Body(new ZodPipe(classSubjectUpdateSchema)) body: z.infer<typeof classSubjectUpdateSchema>,
+  ) {
     return this.academic.updateClassSubject(id, body);
   }
 }
 
-@Module({ controllers: [AcademicController], providers: [AcademicService], exports: [AcademicService] })
+@Module({
+  controllers: [AcademicController],
+  providers: [AcademicService],
+  exports: [AcademicService],
+})
 export class AcademicModule {}

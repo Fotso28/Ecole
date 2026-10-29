@@ -66,7 +66,14 @@ export class AttendanceService {
     });
     return {
       class: { id: cls.id, name: cls.name },
-      session: session ? { id: session.id, startTime: session.startTime, endTime: session.endTime, updatedAt: session.updatedAt } : null,
+      session: session
+        ? {
+            id: session.id,
+            startTime: session.startTime,
+            endTime: session.endTime,
+            updatedAt: session.updatedAt,
+          }
+        : null,
       students: students.map((s) => ({
         id: s.id,
         firstName: s.firstName,
@@ -79,23 +86,36 @@ export class AttendanceService {
 
   /** Enregistre (ou corrige) un appel, puis programme les SMS aux parents des absents. */
   async submit(input: z.infer<typeof attendanceSubmitSchema>) {
-    if (toMinutes(input.endTime) <= toMinutes(input.startTime)) throw new BadRequestException('L’heure de fin doit suivre l’heure de début');
-    if (input.date > todayInCameroon()) throw new BadRequestException('Impossible de faire l’appel d’une date future');
+    if (toMinutes(input.endTime) <= toMinutes(input.startTime))
+      throw new BadRequestException('L’heure de fin doit suivre l’heure de début');
+    if (input.date > todayInCameroon())
+      throw new BadRequestException('Impossible de faire l’appel d’une date future');
     const cls = await this.scope.classForTeacher(input.classId);
     if (input.classSubjectId) {
       const cs = await this.db.classSubject.findUnique({ where: { id: input.classSubjectId } });
-      if (!cs || cs.classId !== input.classId) throw new BadRequestException('Matière inconnue pour cette classe');
+      if (!cs || cs.classId !== input.classId)
+        throw new BadRequestException('Matière inconnue pour cette classe');
     }
     const enrolled = new Set((await this.scope.classStudents(input.classId)).map((s) => s.id));
     const unknown = input.records.filter((r) => !enrolled.has(r.studentId));
-    if (unknown.length > 0) throw new BadRequestException('Certains élèves ne sont pas inscrits dans cette classe');
-    const school = await this.db.school.findUniqueOrThrow({ where: { id: currentSchoolId() }, select: { name: true, settings: true } });
+    if (unknown.length > 0)
+      throw new BadRequestException('Certains élèves ne sont pas inscrits dans cette classe');
+    const school = await this.db.school.findUniqueOrThrow({
+      where: { id: currentSchoolId() },
+      select: { name: true, settings: true },
+    });
     const settings = (school.settings ?? {}) as AttendanceSettings;
     const takenById = currentActorId() ?? '';
 
     const result = await this.db.$transaction(async (tx) => {
       const session = await tx.attendanceSession.upsert({
-        where: { classId_date_startTime: { classId: input.classId, date: toDbDate(input.date), startTime: input.startTime } },
+        where: {
+          classId_date_startTime: {
+            classId: input.classId,
+            date: toDbDate(input.date),
+            startTime: input.startTime,
+          },
+        },
         create: {
           schoolId: currentSchoolId(),
           classId: input.classId,
@@ -109,26 +129,45 @@ export class AttendanceService {
       });
       const previous = await tx.attendanceRecord.findMany({ where: { sessionId: session.id } });
       const notifyAfter = new Date(
-        Math.max(Date.now(), new Date(`${input.date}T${input.endTime}:00+01:00`).getTime()) + (settings.absenceNotificationDelayMinutes ?? 60) * 60_000,
+        Math.max(Date.now(), new Date(`${input.date}T${input.endTime}:00+01:00`).getTime()) +
+          (settings.absenceNotificationDelayMinutes ?? 60) * 60_000,
       );
       let notified = 0;
       for (const r of input.records) {
         const prev = previous.find((p) => p.studentId === r.studentId);
         const record = await tx.attendanceRecord.upsert({
           where: { sessionId_studentId: { sessionId: session.id, studentId: r.studentId } },
-          create: { schoolId: currentSchoolId(), sessionId: session.id, studentId: r.studentId, status: r.status },
+          create: {
+            schoolId: currentSchoolId(),
+            sessionId: session.id,
+            studentId: r.studentId,
+            status: r.status,
+          },
           update: { status: r.status },
         });
         if (prev?.status === 'ABSENT' && r.status !== 'ABSENT') {
           await this.cancelAbsenceNotification(tx, record.id);
         }
         if (r.status === 'ABSENT' && !record.notifiedAt && !record.justificationId) {
-          const sent = await this.scheduleAbsenceNotification(tx, record.id, r.studentId, input.date, `${input.startTime}–${input.endTime}`, school.name, notifyAfter);
+          const sent = await this.scheduleAbsenceNotification(
+            tx,
+            record.id,
+            r.studentId,
+            input.date,
+            `${input.startTime}–${input.endTime}`,
+            school.name,
+            notifyAfter,
+          );
           if (sent) notified++;
         }
       }
       await this.audit.log(
-        { action: 'attendance.submitted', entity: 'AttendanceSession', entityId: session.id, after: { classId: input.classId, date: input.date, records: input.records.length } },
+        {
+          action: 'attendance.submitted',
+          entity: 'AttendanceSession',
+          entityId: session.id,
+          after: { classId: input.classId, date: input.date, records: input.records.length },
+        },
         tx,
       );
       return { sessionId: session.id, notified };
@@ -140,16 +179,36 @@ export class AttendanceService {
     return { ...result, className: cls.name, alerts };
   }
 
-  private async scheduleAbsenceNotification(tx: Tx, recordId: string, studentId: string, date: string, slot: string, schoolName: string, availableAt: Date) {
-    const student = await tx.student.findUniqueOrThrow({ where: { id: studentId }, select: { firstName: true, lastName: true } });
-    const link = await tx.studentGuardian.findFirst({ where: { studentId }, include: { guardian: true }, orderBy: { isPrimary: 'desc' } });
+  private async scheduleAbsenceNotification(
+    tx: Tx,
+    recordId: string,
+    studentId: string,
+    date: string,
+    slot: string,
+    schoolName: string,
+    availableAt: Date,
+  ) {
+    const student = await tx.student.findUniqueOrThrow({
+      where: { id: studentId },
+      select: { firstName: true, lastName: true },
+    });
+    const link = await tx.studentGuardian.findFirst({
+      where: { studentId },
+      include: { guardian: true },
+      orderBy: { isPrimary: 'desc' },
+    });
     if (!link) return false;
     const n = await this.notifications.enqueue(
       {
         schoolId: currentSchoolId(),
         recipient: link.guardian.phone,
         template: 'absence',
-        body: templates.absence({ student: `${student.firstName} ${student.lastName}`, date: date.split('-').reverse().join('/'), slot, school: schoolName }),
+        body: templates.absence({
+          student: `${student.firstName} ${student.lastName}`,
+          date: date.split('-').reverse().join('/'),
+          slot,
+          school: schoolName,
+        }),
         payload: { recordId, studentId },
       },
       tx,
@@ -185,21 +244,41 @@ export class AttendanceService {
       if (count < threshold) continue;
       alerts.push({ studentId, count });
       const already = await this.db.notificationOutbox.count({
-        where: { template: 'absenceThreshold', createdAt: { gte: since }, payload: { path: ['studentId'], equals: studentId } },
+        where: {
+          template: 'absenceThreshold',
+          createdAt: { gte: since },
+          payload: { path: ['studentId'], equals: studentId },
+        },
       });
       if (already > 0) continue;
-      const student = await this.db.student.findUniqueOrThrow({ where: { id: studentId }, select: { firstName: true, lastName: true } });
-      const link = await this.db.studentGuardian.findFirst({ where: { studentId }, include: { guardian: true }, orderBy: { isPrimary: 'desc' } });
+      const student = await this.db.student.findUniqueOrThrow({
+        where: { id: studentId },
+        select: { firstName: true, lastName: true },
+      });
+      const link = await this.db.studentGuardian.findFirst({
+        where: { studentId },
+        include: { guardian: true },
+        orderBy: { isPrimary: 'desc' },
+      });
       if (link) {
         await this.notifications.enqueue({
           schoolId: currentSchoolId(),
           recipient: link.guardian.phone,
           template: 'absenceThreshold',
-          body: templates.absenceThreshold({ student: `${student.firstName} ${student.lastName}`, count, days }),
+          body: templates.absenceThreshold({
+            student: `${student.firstName} ${student.lastName}`,
+            count,
+            days,
+          }),
           payload: { studentId },
         });
       }
-      await this.audit.log({ action: 'attendance.threshold_alert', entity: 'Student', entityId: studentId, after: { count, days } });
+      await this.audit.log({
+        action: 'attendance.threshold_alert',
+        entity: 'Student',
+        entityId: studentId,
+        after: { count, days },
+      });
     }
     return alerts;
   }
@@ -208,7 +287,10 @@ export class AttendanceService {
     const year = await this.scope.currentYear();
     const records = await this.db.attendanceRecord.findMany({
       where: { studentId, session: { date: { gte: year.startDate } } },
-      include: { session: true, justification: { select: { id: true, status: true, reason: true } } },
+      include: {
+        session: true,
+        justification: { select: { id: true, status: true, reason: true } },
+      },
       orderBy: { session: { date: 'desc' } },
     });
     return records.map((r) => ({
@@ -221,17 +303,42 @@ export class AttendanceService {
     }));
   }
 
-  async createJustification(input: z.infer<typeof justificationCreateSchema>, submittedById: string, tx?: Tx) {
+  async createJustification(
+    input: z.infer<typeof justificationCreateSchema>,
+    submittedById: string,
+    tx?: Tx,
+  ) {
     const db = tx ?? this.db;
-    const records = await db.attendanceRecord.findMany({ where: { id: { in: input.recordIds }, studentId: input.studentId } });
-    if (records.length !== input.recordIds.length) throw new BadRequestException('Absence inconnue pour cet élève');
-    if (records.some((r) => r.status === 'PRESENT')) throw new BadRequestException('Seules les absences et retards se justifient');
-    if (records.some((r) => r.justificationId)) throw new ConflictException('Une de ces absences a déjà un justificatif');
-    const justification = await db.justification.create({
-      data: { schoolId: records[0]?.schoolId ?? currentSchoolId(), studentId: input.studentId, submittedById, reason: input.reason },
+    const records = await db.attendanceRecord.findMany({
+      where: { id: { in: input.recordIds }, studentId: input.studentId },
     });
-    await db.attendanceRecord.updateMany({ where: { id: { in: input.recordIds } }, data: { justificationId: justification.id } });
-    await this.audit.log({ action: 'attendance.justification_submitted', entity: 'Justification', entityId: justification.id, after: input }, tx);
+    if (records.length !== input.recordIds.length)
+      throw new BadRequestException('Absence inconnue pour cet élève');
+    if (records.some((r) => r.status === 'PRESENT'))
+      throw new BadRequestException('Seules les absences et retards se justifient');
+    if (records.some((r) => r.justificationId))
+      throw new ConflictException('Une de ces absences a déjà un justificatif');
+    const justification = await db.justification.create({
+      data: {
+        schoolId: records[0]?.schoolId ?? currentSchoolId(),
+        studentId: input.studentId,
+        submittedById,
+        reason: input.reason,
+      },
+    });
+    await db.attendanceRecord.updateMany({
+      where: { id: { in: input.recordIds } },
+      data: { justificationId: justification.id },
+    });
+    await this.audit.log(
+      {
+        action: 'attendance.justification_submitted',
+        entity: 'Justification',
+        entityId: justification.id,
+        after: input,
+      },
+      tx,
+    );
     return justification;
   }
 
@@ -252,7 +359,13 @@ export class AttendanceService {
       reason: j.reason,
       createdAt: j.createdAt,
       student: students.find((s) => s.id === j.studentId) ?? null,
-      records: j.records.map((r) => ({ id: r.id, date: fromDbDate(r.session.date), startTime: r.session.startTime, endTime: r.session.endTime, status: r.status })),
+      records: j.records.map((r) => ({
+        id: r.id,
+        date: fromDbDate(r.session.date),
+        startTime: r.session.startTime,
+        endTime: r.session.endTime,
+        status: r.status,
+      })),
     }));
   }
 
@@ -261,13 +374,27 @@ export class AttendanceService {
     if (!j) throw new NotFoundException('Justificatif introuvable');
     if (j.status !== 'PENDING') throw new ConflictException('Ce justificatif a déjà été traité');
     return this.db.$transaction(async (tx) => {
-      const updated = await tx.justification.update({ where: { id }, data: { status: decision, reviewedById: currentActorId(), reviewedAt: new Date() } });
+      const updated = await tx.justification.update({
+        where: { id },
+        data: { status: decision, reviewedById: currentActorId(), reviewedAt: new Date() },
+      });
       if (decision === 'REJECTED') {
-        await tx.attendanceRecord.updateMany({ where: { justificationId: id }, data: { justificationId: null } });
+        await tx.attendanceRecord.updateMany({
+          where: { justificationId: id },
+          data: { justificationId: null },
+        });
       } else {
         for (const r of j.records) await this.cancelAbsenceNotification(tx, r.id);
       }
-      await this.audit.log({ action: 'attendance.justification_reviewed', entity: 'Justification', entityId: id, after: { decision } }, tx);
+      await this.audit.log(
+        {
+          action: 'attendance.justification_reviewed',
+          entity: 'Justification',
+          entityId: id,
+          after: { decision },
+        },
+        tx,
+      );
       return updated;
     });
   }
@@ -276,10 +403,18 @@ export class AttendanceService {
     const year = await this.scope.currentYear();
     const start = from ?? fromDbDate(year.startDate);
     const end = to ?? todayInCameroon();
-    const classes = await this.db.class.findMany({ where: { academicYearId: year.id }, orderBy: { name: 'asc' } });
+    const classes = await this.db.class.findMany({
+      where: { academicYearId: year.id },
+      orderBy: { name: 'asc' },
+    });
     const records = await this.db.attendanceRecord.findMany({
       where: { session: { date: { gte: toDbDate(start), lte: toDbDate(end) } } },
-      select: { status: true, studentId: true, justification: { select: { status: true } }, session: { select: { classId: true } } },
+      select: {
+        status: true,
+        studentId: true,
+        justification: { select: { status: true } },
+        session: { select: { classId: true } },
+      },
     });
     const byClass = classes.map((c) => {
       const rows = records.filter((r) => r.session.classId === c.id);
@@ -295,23 +430,43 @@ export class AttendanceService {
       };
     });
     const perStudent = new Map<string, number>();
-    for (const r of records) if (r.status === 'ABSENT') perStudent.set(r.studentId, (perStudent.get(r.studentId) ?? 0) + 1);
+    for (const r of records)
+      if (r.status === 'ABSENT')
+        perStudent.set(r.studentId, (perStudent.get(r.studentId) ?? 0) + 1);
     const top = [...perStudent.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10);
-    const students = await this.db.student.findMany({ where: { id: { in: top.map(([id]) => id) } }, select: { id: true, firstName: true, lastName: true } });
+    const students = await this.db.student.findMany({
+      where: { id: { in: top.map(([id]) => id) } },
+      select: { id: true, firstName: true, lastName: true },
+    });
     return {
       from: start,
       to: end,
       classes: byClass,
-      topStudents: top.map(([id, count]) => ({ student: students.find((s) => s.id === id) ?? null, absences: count })),
+      topStudents: top.map(([id, count]) => ({
+        student: students.find((s) => s.id === id) ?? null,
+        absences: count,
+      })),
     };
   }
 
   async createIncident(input: z.infer<typeof incidentSchema>) {
     await this.db.student.findUniqueOrThrow({ where: { id: input.studentId } });
     const incident = await this.db.incident.create({
-      data: { schoolId: currentSchoolId(), studentId: input.studentId, date: toDbDate(input.date), description: input.description, sanction: input.sanction, reportedById: currentActorId() ?? '' },
+      data: {
+        schoolId: currentSchoolId(),
+        studentId: input.studentId,
+        date: toDbDate(input.date),
+        description: input.description,
+        sanction: input.sanction,
+        reportedById: currentActorId() ?? '',
+      },
     });
-    await this.audit.log({ action: 'discipline.incident', entity: 'Incident', entityId: incident.id, after: input });
+    await this.audit.log({
+      action: 'discipline.incident',
+      entity: 'Incident',
+      entityId: incident.id,
+      after: input,
+    });
     return incident;
   }
 }
@@ -343,7 +498,9 @@ export class AttendanceController {
 
   @RequirePermissions('attendance.justify')
   @Post('justifications')
-  justify(@Body(new ZodPipe(justificationCreateSchema)) body: z.infer<typeof justificationCreateSchema>) {
+  justify(
+    @Body(new ZodPipe(justificationCreateSchema)) body: z.infer<typeof justificationCreateSchema>,
+  ) {
     return this.attendance.createJustification(body, currentActorId() ?? '');
   }
 
@@ -355,7 +512,10 @@ export class AttendanceController {
 
   @RequirePermissions('attendance.justify')
   @Patch('justifications/:id')
-  review(@Param('id') id: string, @Body(new ZodPipe(justificationReviewSchema)) body: z.infer<typeof justificationReviewSchema>) {
+  review(
+    @Param('id') id: string,
+    @Body(new ZodPipe(justificationReviewSchema)) body: z.infer<typeof justificationReviewSchema>,
+  ) {
     return this.attendance.review(id, body.decision);
   }
 
@@ -372,5 +532,9 @@ export class AttendanceController {
   }
 }
 
-@Module({ controllers: [AttendanceController], providers: [AttendanceService], exports: [AttendanceService] })
+@Module({
+  controllers: [AttendanceController],
+  providers: [AttendanceService],
+  exports: [AttendanceService],
+})
 export class AttendanceModule {}

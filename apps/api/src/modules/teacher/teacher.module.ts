@@ -23,13 +23,25 @@ export class TeacherService {
       this.db.classSubject.findMany({
         where: { teacherId: userId, class: { academicYearId: year.id } },
         include: {
-          class: { include: { _count: { select: { enrollments: { where: { status: { in: ['ENROLLED', 'REPEATING'] } } } } } } },
+          class: {
+            include: {
+              _count: {
+                select: { enrollments: { where: { status: { in: ['ENROLLED', 'REPEATING'] } } } },
+              },
+            },
+          },
           subject: true,
         },
         orderBy: [{ class: { name: 'asc' } }, { subject: { name: 'asc' } }],
       }),
-      this.db.timetableEntry.findMany({ where: { teacherId: userId, academicYearId: year.id, dayOfWeek }, orderBy: { startTime: 'asc' } }),
-      this.db.attendanceSession.findMany({ where: { takenById: userId, date: toDbDate(today) }, select: { classId: true, startTime: true } }),
+      this.db.timetableEntry.findMany({
+        where: { teacherId: userId, academicYearId: year.id, dayOfWeek },
+        orderBy: { startTime: 'asc' },
+      }),
+      this.db.attendanceSession.findMany({
+        where: { takenById: userId, date: toDbDate(today) },
+        select: { classId: true, startTime: true },
+      }),
     ]);
     const byCs = new Map(classSubjects.map((c) => [c.id, c]));
     return {
@@ -44,7 +56,9 @@ export class TeacherService {
           className: cs?.class.name ?? '',
           classSubjectId: e.classSubjectId,
           subjectName: cs?.subject.name ?? '',
-          attendanceTaken: sessions.some((s) => s.classId === e.classId && s.startTime === e.startTime),
+          attendanceTaken: sessions.some(
+            (s) => s.classId === e.classId && s.startTime === e.startTime,
+          ),
         };
       }),
       classSubjects: classSubjects.map((c) => ({

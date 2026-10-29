@@ -1,4 +1,15 @@
-import { Body, Controller, Delete, Get, Module, Param, Patch, Post, Put, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Module,
+  Param,
+  Patch,
+  Post,
+  Put,
+  Query,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import {
   duplicateCheckSchema,
@@ -24,8 +35,13 @@ const listSchema = z.object({
 });
 const reasonSchema = z.object({ reason: z.string().trim().min(5).max(300) });
 const documentSchema = z.object({ status: z.enum(['RECEIVED', 'MISSING']) });
-const enrollmentChangeSchema = z.object({ classId: z.string().optional(), status: z.enum(ENROLLMENT_STATUSES).optional() });
-const healthQuerySchema = z.object({ reason: z.string().trim().min(5, 'Motif obligatoire (5 caractères minimum)').max(300) });
+const enrollmentChangeSchema = z.object({
+  classId: z.string().optional(),
+  status: z.enum(ENROLLMENT_STATUSES).optional(),
+});
+const healthQuerySchema = z.object({
+  reason: z.string().trim().min(5, 'Motif obligatoire (5 caractères minimum)').max(300),
+});
 const healthSchema = z.object({
   allergies: z.string().max(1000).optional(),
   conditions: z.string().max(1000).optional(),
@@ -55,7 +71,9 @@ export class StudentsController {
 
   @RequirePermissions('students.write')
   @Post('students/check-duplicates')
-  checkDuplicates(@Body(new ZodPipe(duplicateCheckSchema)) body: z.infer<typeof duplicateCheckSchema>) {
+  checkDuplicates(
+    @Body(new ZodPipe(duplicateCheckSchema)) body: z.infer<typeof duplicateCheckSchema>,
+  ) {
     return this.students.findDuplicates(body);
   }
 
@@ -73,19 +91,28 @@ export class StudentsController {
 
   @RequirePermissions('students.write')
   @Patch('students/:id')
-  update(@Param('id') id: string, @Body(new ZodPipe(studentUpdateSchema)) body: z.infer<typeof studentUpdateSchema>) {
+  update(
+    @Param('id') id: string,
+    @Body(new ZodPipe(studentUpdateSchema)) body: z.infer<typeof studentUpdateSchema>,
+  ) {
     return this.students.update(id, body);
   }
 
   @RequirePermissions('students.write')
   @Delete('students/:id')
-  remove(@Param('id') id: string, @Body(new ZodPipe(reasonSchema)) body: z.infer<typeof reasonSchema>) {
+  remove(
+    @Param('id') id: string,
+    @Body(new ZodPipe(reasonSchema)) body: z.infer<typeof reasonSchema>,
+  ) {
     return this.students.softDelete(id, body.reason);
   }
 
   @RequirePermissions('students.write')
   @Post('students/:id/guardians')
-  addGuardian(@Param('id') id: string, @Body(new ZodPipe(guardianInputSchema)) body: z.infer<typeof guardianInputSchema>) {
+  addGuardian(
+    @Param('id') id: string,
+    @Body(new ZodPipe(guardianInputSchema)) body: z.infer<typeof guardianInputSchema>,
+  ) {
     return this.students.addGuardian(id, body);
   }
 
@@ -97,19 +124,29 @@ export class StudentsController {
 
   @RequirePermissions('students.write')
   @Patch('students/:id/documents/:documentId')
-  setDocument(@Param('id') id: string, @Param('documentId') documentId: string, @Body(new ZodPipe(documentSchema)) body: z.infer<typeof documentSchema>) {
+  setDocument(
+    @Param('id') id: string,
+    @Param('documentId') documentId: string,
+    @Body(new ZodPipe(documentSchema)) body: z.infer<typeof documentSchema>,
+  ) {
     return this.students.setDocument(id, documentId, body.status);
   }
 
   @RequirePermissions('health.read')
   @Get('students/:id/health')
-  health(@Param('id') id: string, @Query(new ZodPipe(healthQuerySchema)) q: z.infer<typeof healthQuerySchema>) {
+  health(
+    @Param('id') id: string,
+    @Query(new ZodPipe(healthQuerySchema)) q: z.infer<typeof healthQuerySchema>,
+  ) {
     return this.students.health(id, q.reason);
   }
 
   @RequirePermissions('health.read')
   @Put('students/:id/health')
-  saveHealth(@Param('id') id: string, @Body(new ZodPipe(healthSchema)) body: z.infer<typeof healthSchema>) {
+  saveHealth(
+    @Param('id') id: string,
+    @Body(new ZodPipe(healthSchema)) body: z.infer<typeof healthSchema>,
+  ) {
     return this.students.saveHealth(id, body);
   }
 
@@ -121,10 +158,17 @@ export class StudentsController {
 
   @RequirePermissions('enrollments.write')
   @Patch('enrollments/:id')
-  changeEnrollment(@Param('id') id: string, @Body(new ZodPipe(enrollmentChangeSchema)) body: z.infer<typeof enrollmentChangeSchema>) {
+  changeEnrollment(
+    @Param('id') id: string,
+    @Body(new ZodPipe(enrollmentChangeSchema)) body: z.infer<typeof enrollmentChangeSchema>,
+  ) {
     return this.students.changeEnrollment(id, body);
   }
 }
 
-@Module({ imports: [FinanceModule], controllers: [StudentsController], providers: [StudentsService] })
+@Module({
+  imports: [FinanceModule],
+  controllers: [StudentsController],
+  providers: [StudentsService],
+})
 export class StudentsModule {}

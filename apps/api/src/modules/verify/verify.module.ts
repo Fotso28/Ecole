@@ -37,15 +37,25 @@ export class VerifyController {
           year: data.year,
           version: card.version,
           latestVersion: latest?.version ?? null,
-          generalAverage: card.generalAverageCenti === null ? null : formatGrade(card.generalAverageCenti),
+          generalAverage:
+            card.generalAverageCenti === null ? null : formatGrade(card.generalAverageCenti),
           publishedAt: card.publishedAt,
         };
       }
-      const receipt = await this.db.receipt.findUnique({ where: { verificationCode: code }, include: { payment: true } });
+      const receipt = await this.db.receipt.findUnique({
+        where: { verificationCode: code },
+        include: { payment: true },
+      });
       if (receipt) {
         const [school, student] = await Promise.all([
-          this.db.school.findUniqueOrThrow({ where: { id: receipt.schoolId }, select: { name: true } }),
-          this.db.student.findUniqueOrThrow({ where: { id: receipt.payment.studentId }, select: { firstName: true, lastName: true } }),
+          this.db.school.findUniqueOrThrow({
+            where: { id: receipt.schoolId },
+            select: { name: true },
+          }),
+          this.db.student.findUniqueOrThrow({
+            where: { id: receipt.payment.studentId },
+            select: { firstName: true, lastName: true },
+          }),
         ]);
         return {
           type: 'receipt',

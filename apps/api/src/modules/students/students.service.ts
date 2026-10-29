@@ -1,4 +1,9 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   assessDuplicate,
   formatMatricule,
@@ -22,7 +27,12 @@ import { Db, InjectDb, Tx } from '../../common/prisma';
 import { ScopeService } from '../../common/scope.service';
 import { FinanceService } from '../finance/finance.service';
 
-export const DEFAULT_DOCUMENTS = ['Acte de naissance', 'Photo d’identité', 'Certificat médical', 'Bulletin de l’année précédente'];
+export const DEFAULT_DOCUMENTS = [
+  'Acte de naissance',
+  'Photo d’identité',
+  'Certificat médical',
+  'Bulletin de l’année précédente',
+];
 
 type StudentInput = z.infer<typeof studentCreateSchema>;
 
@@ -48,7 +58,12 @@ export class StudentsService {
     const year = await this.scope.currentYear();
     const teacherOnly = this.scope.isTeacherOnly();
     const teacherClassIds = teacherOnly
-      ? (await this.db.classSubject.findMany({ where: { teacherId: this.scope.userId(), class: { academicYearId: year.id } }, select: { classId: true } })).map((c) => c.classId)
+      ? (
+          await this.db.classSubject.findMany({
+            where: { teacherId: this.scope.userId(), class: { academicYearId: year.id } },
+            select: { classId: true },
+          })
+        ).map((c) => c.classId)
       : null;
     const search = q.search?.trim();
     const phone = search ? normalizeCameroonPhone(search) : null;
@@ -58,7 +73,13 @@ export class StudentsService {
         some: {
           academicYearId: year.id,
           ...(q.classId ? { classId: q.classId } : {}),
-          ...(teacherClassIds ? { classId: { in: q.classId ? teacherClassIds.filter((c) => c === q.classId) : teacherClassIds } } : {}),
+          ...(teacherClassIds
+            ? {
+                classId: {
+                  in: q.classId ? teacherClassIds.filter((c) => c === q.classId) : teacherClassIds,
+                },
+              }
+            : {}),
           ...(q.status ? { status: q.status } : {}),
         },
       },
@@ -81,22 +102,35 @@ export class StudentsService {
         skip: (q.page - 1) * q.pageSize,
         take: q.pageSize,
         include: {
-          enrollments: { where: { academicYearId: year.id }, include: { class: { select: { id: true, name: true } } } },
+          enrollments: {
+            where: { academicYearId: year.id },
+            include: { class: { select: { id: true, name: true } } },
+          },
           guardians: { include: { guardian: true }, orderBy: { isPrimary: 'desc' }, take: 1 },
         },
       }),
       this.db.enrollment.groupBy({
         by: ['status'],
-        where: { academicYearId: year.id, student: { deletedAt: null }, ...(teacherClassIds ? { classId: { in: teacherClassIds } } : {}) },
+        where: {
+          academicYearId: year.id,
+          student: { deletedAt: null },
+          ...(teacherClassIds ? { classId: { in: teacherClassIds } } : {}),
+        },
         _count: { _all: true },
       }),
     ]);
     const ids = students.map((s) => s.id);
     const [lines, absences] = await Promise.all([
-      teacherOnly ? Promise.resolve([]) : this.finance.lineStates({ invoice: { studentId: { in: ids }, academicYearId: year.id } }),
+      teacherOnly
+        ? Promise.resolve([])
+        : this.finance.lineStates({ invoice: { studentId: { in: ids }, academicYearId: year.id } }),
       this.db.attendanceRecord.groupBy({
         by: ['studentId'],
-        where: { studentId: { in: ids }, status: 'ABSENT', session: { date: { gte: year.startDate } } },
+        where: {
+          studentId: { in: ids },
+          status: 'ABSENT',
+          session: { date: { gte: year.startDate } },
+        },
         _count: { _all: true },
       }),
     ]);
@@ -118,15 +152,28 @@ export class StudentsService {
           birthDate: fromDbDate(s.birthDate),
           class: enrollment ? enrollment.class : null,
           status: enrollment?.status ?? null,
-          guardian: guardian ? { name: `${guardian.firstName} ${guardian.lastName}`, phone: guardian.phone } : null,
-          overdue: teacherOnly ? null : mine.filter((l) => l.overdue).reduce((n, l) => n + l.outstanding, 0),
+          guardian: guardian
+            ? { name: `${guardian.firstName} ${guardian.lastName}`, phone: guardian.phone }
+            : null,
+          overdue: teacherOnly
+            ? null
+            : mine.filter((l) => l.overdue).reduce((n, l) => n + l.outstanding, 0),
           absences: absences.find((a) => a.studentId === s.id)?._count._all ?? 0,
         };
       }),
     };
   }
 
-  async findDuplicates(input: { firstName: string; lastName: string; birthDate: string; birthPlace?: string; guardianPhones: string[] }, excludeId?: string) {
+  async findDuplicates(
+    input: {
+      firstName: string;
+      lastName: string;
+      birthDate: string;
+      birthPlace?: string;
+      guardianPhones: string[];
+    },
+    excludeId?: string,
+  ) {
     const fullName = `${input.lastName} ${input.firstName}`;
     const phones = input.guardianPhones.map(normalizeCameroonPhone).filter((p): p is string => !!p);
     const candidates = await this.db.student.findMany({
@@ -136,20 +183,36 @@ export class StudentsService {
         OR: [
           { birthDate: toDbDate(input.birthDate) },
           { lastName: { equals: input.lastName.trim(), mode: 'insensitive' } },
-          ...(phones.length ? [{ guardians: { some: { guardian: { phone: { in: phones } } } } }] : []),
+          ...(phones.length
+            ? [{ guardians: { some: { guardian: { phone: { in: phones } } } } }]
+            : []),
         ],
       },
       include: {
         guardians: { include: { guardian: { select: { phone: true } } } },
-        enrollments: { orderBy: { createdAt: 'desc' }, take: 1, include: { class: { select: { name: true } } } },
+        enrollments: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          include: { class: { select: { name: true } } },
+        },
       },
       take: 200,
     });
     return candidates
       .map((c) => {
         const assessment = assessDuplicate(
-          { fullName, birthDate: input.birthDate, birthPlace: input.birthPlace, guardianPhones: phones },
-          { fullName: `${c.lastName} ${c.firstName}`, birthDate: fromDbDate(c.birthDate), birthPlace: c.birthPlace, guardianPhones: c.guardians.map((g) => g.guardian.phone) },
+          {
+            fullName,
+            birthDate: input.birthDate,
+            birthPlace: input.birthPlace,
+            guardianPhones: phones,
+          },
+          {
+            fullName: `${c.lastName} ${c.firstName}`,
+            birthDate: fromDbDate(c.birthDate),
+            birthPlace: c.birthPlace,
+            guardianPhones: c.guardians.map((g) => g.guardian.phone),
+          },
         );
         return {
           id: c.id,
@@ -168,20 +231,32 @@ export class StudentsService {
   /** Inscription d'un nouvel élève : contrôle des doublons, matricule, parents, inscription, échéancier. */
   async create(input: StudentInput) {
     if (!input.confirmNotDuplicate) {
-      const duplicates = await this.findDuplicates({ ...input, guardianPhones: input.guardians.map((g) => g.phone) });
+      const duplicates = await this.findDuplicates({
+        ...input,
+        guardianPhones: input.guardians.map((g) => g.phone),
+      });
       if (duplicates.length > 0) {
-        throw new ConflictException({ statusCode: 409, code: 'POSSIBLE_DUPLICATE', message: 'Ce dossier existe peut-être déjà', candidates: duplicates });
+        throw new ConflictException({
+          statusCode: 409,
+          code: 'POSSIBLE_DUPLICATE',
+          message: 'Ce dossier existe peut-être déjà',
+          candidates: duplicates,
+        });
       }
     }
     const year = await this.scope.currentYear();
     if (input.classId) {
       const cls = await this.db.class.findUnique({ where: { id: input.classId } });
-      if (!cls || cls.academicYearId !== year.id) throw new BadRequestException('Classe inconnue pour l’année en cours');
+      if (!cls || cls.academicYearId !== year.id)
+        throw new BadRequestException('Classe inconnue pour l’année en cours');
     }
     const result = await this.db.$transaction(async (tx) => {
       const student = await this.createInTx(tx, input, year.id);
       if (input.confirmNotDuplicate) {
-        await this.audit.log({ action: 'students.duplicate_dismissed', entity: 'Student', entityId: student.id }, tx);
+        await this.audit.log(
+          { action: 'students.duplicate_dismissed', entity: 'Student', entityId: student.id },
+          tx,
+        );
       }
       return student;
     });
@@ -190,7 +265,10 @@ export class StudentsService {
 
   private async createInTx(tx: Tx, input: StudentInput, academicYearId: string) {
     const schoolId = currentSchoolId();
-    const school = await tx.school.findUniqueOrThrow({ where: { id: schoolId }, select: { matriculePrefix: true } });
+    const school = await tx.school.findUniqueOrThrow({
+      where: { id: schoolId },
+      select: { matriculePrefix: true },
+    });
     const calendarYear = Number(todayInCameroon().slice(0, 4));
     const seq = await this.counters.next(`matricule:${calendarYear}`, tx);
     const student = await tx.student.create({
@@ -209,14 +287,32 @@ export class StudentsService {
     });
     for (const g of input.guardians) await this.linkGuardian(tx, student.id, g);
     for (const type of DEFAULT_DOCUMENTS) {
-      await tx.studentDocument.create({ data: { schoolId, studentId: student.id, type, status: 'MISSING' } });
+      await tx.studentDocument.create({
+        data: { schoolId, studentId: student.id, type, status: 'MISSING' },
+      });
     }
     if (input.classId) {
-      await tx.enrollment.create({ data: { schoolId, studentId: student.id, classId: input.classId, academicYearId, status: 'ENROLLED' } });
+      await tx.enrollment.create({
+        data: {
+          schoolId,
+          studentId: student.id,
+          classId: input.classId,
+          academicYearId,
+          status: 'ENROLLED',
+        },
+      });
       const fees = await tx.feeItem.count({ where: { academicYearId } });
       if (fees > 0) await this.finance.generateInvoice(student.id, academicYearId, [], tx);
     }
-    await this.audit.log({ action: 'students.created', entity: 'Student', entityId: student.id, after: { matricule: student.matricule, classId: input.classId } }, tx);
+    await this.audit.log(
+      {
+        action: 'students.created',
+        entity: 'Student',
+        entityId: student.id,
+        after: { matricule: student.matricule, classId: input.classId },
+      },
+      tx,
+    );
     return student;
   }
 
@@ -224,7 +320,13 @@ export class StudentsService {
     const schoolId = currentSchoolId();
     const guardian = await tx.guardian.upsert({
       where: { schoolId_phone: { schoolId, phone: g.phone } },
-      create: { schoolId, firstName: g.firstName, lastName: g.lastName, phone: g.phone, email: g.email },
+      create: {
+        schoolId,
+        firstName: g.firstName,
+        lastName: g.lastName,
+        phone: g.phone,
+        email: g.email,
+      },
       update: {},
     });
     const hasPrimary = await tx.studentGuardian.count({ where: { studentId, isPrimary: true } });
@@ -239,17 +341,31 @@ export class StudentsService {
         isEmergencyContact: g.isEmergencyContact,
         canPickUp: g.canPickUp,
       },
-      update: { relationship: g.relationship, isEmergencyContact: g.isEmergencyContact, canPickUp: g.canPickUp },
+      update: {
+        relationship: g.relationship,
+        isEmergencyContact: g.isEmergencyContact,
+        canPickUp: g.canPickUp,
+      },
     });
   }
 
   async addGuardian(studentId: string, g: GuardianInput) {
     await this.ensureStudent(studentId);
     return this.db.$transaction(async (tx) => {
-      if (g.isPrimary) await tx.studentGuardian.updateMany({ where: { studentId }, data: { isPrimary: false } });
+      if (g.isPrimary)
+        await tx.studentGuardian.updateMany({ where: { studentId }, data: { isPrimary: false } });
       const link = await this.linkGuardian(tx, studentId, g);
-      if (g.isPrimary) await tx.studentGuardian.update({ where: { id: link.id }, data: { isPrimary: true } });
-      await this.audit.log({ action: 'students.guardian_added', entity: 'Student', entityId: studentId, after: { phone: g.phone } }, tx);
+      if (g.isPrimary)
+        await tx.studentGuardian.update({ where: { id: link.id }, data: { isPrimary: true } });
+      await this.audit.log(
+        {
+          action: 'students.guardian_added',
+          entity: 'Student',
+          entityId: studentId,
+          after: { phone: g.phone },
+        },
+        tx,
+      );
       return link;
     });
   }
@@ -257,9 +373,15 @@ export class StudentsService {
   async removeGuardian(studentId: string, linkId: string) {
     const links = await this.db.studentGuardian.findMany({ where: { studentId } });
     if (!links.some((l) => l.id === linkId)) throw new NotFoundException('Lien introuvable');
-    if (links.length === 1) throw new ConflictException('Un élève doit garder au moins un parent ou tuteur');
+    if (links.length === 1)
+      throw new ConflictException('Un élève doit garder au moins un parent ou tuteur');
     await this.db.studentGuardian.delete({ where: { id: linkId } });
-    await this.audit.log({ action: 'students.guardian_removed', entity: 'Student', entityId: studentId, after: { linkId } });
+    await this.audit.log({
+      action: 'students.guardian_removed',
+      entity: 'Student',
+      entityId: studentId,
+      after: { linkId },
+    });
     return { ok: true };
   }
 
@@ -268,31 +390,52 @@ export class StudentsService {
       where: { id },
       include: {
         guardians: { include: { guardian: true }, orderBy: { isPrimary: 'desc' } },
-        enrollments: { orderBy: { createdAt: 'desc' }, include: { class: { include: { academicYear: true, level: true } } } },
+        enrollments: {
+          orderBy: { createdAt: 'desc' },
+          include: { class: { include: { academicYear: true, level: true } } },
+        },
         documents: { orderBy: { type: 'asc' } },
       },
     });
     if (!student || student.deletedAt) throw new NotFoundException('Élève introuvable');
     if (this.scope.isTeacherOnly()) {
       const classIds = student.enrollments.map((e) => e.classId);
-      const teaches = await this.db.classSubject.count({ where: { classId: { in: classIds }, teacherId: this.scope.userId() } });
+      const teaches = await this.db.classSubject.count({
+        where: { classId: { in: classIds }, teacherId: this.scope.userId() },
+      });
       if (teaches === 0) throw new NotFoundException('Élève introuvable');
     }
     const year = await this.scope.currentYear();
     const [records, reportCards, incidents, guardianUsers] = await Promise.all([
       this.db.attendanceRecord.findMany({
-        where: { studentId: id, status: { in: ['ABSENT', 'LATE'] }, session: { date: { gte: year.startDate } } },
+        where: {
+          studentId: id,
+          status: { in: ['ABSENT', 'LATE'] },
+          session: { date: { gte: year.startDate } },
+        },
         include: { session: true, justification: { select: { status: true } } },
         orderBy: { session: { date: 'desc' } },
       }),
       this.db.reportCard.findMany({
         where: { studentId: id, status: 'PUBLISHED' },
         orderBy: { createdAt: 'desc' },
-        select: { id: true, termId: true, version: true, generalAverageCenti: true, rank: true, classSize: true, publishedAt: true },
+        select: {
+          id: true,
+          termId: true,
+          version: true,
+          generalAverageCenti: true,
+          rank: true,
+          classSize: true,
+          publishedAt: true,
+        },
       }),
       this.db.incident.findMany({ where: { studentId: id }, orderBy: { date: 'desc' }, take: 10 }),
       this.db.user.findMany({
-        where: { id: { in: student.guardians.map((g) => g.guardian.userId).filter((x): x is string => !!x) } },
+        where: {
+          id: {
+            in: student.guardians.map((g) => g.guardian.userId).filter((x): x is string => !!x),
+          },
+        },
         select: { id: true, lastLoginAt: true },
       }),
     ]);
@@ -333,7 +476,9 @@ export class StudentsService {
       documents: student.documents.map((d) => ({ id: d.id, type: d.type, status: d.status })),
       attendance: {
         absences: records.filter((r) => r.status === 'ABSENT').length,
-        unjustified: records.filter((r) => r.status === 'ABSENT' && r.justification?.status !== 'ACCEPTED').length,
+        unjustified: records.filter(
+          (r) => r.status === 'ABSENT' && r.justification?.status !== 'ACCEPTED',
+        ).length,
         lates: records.filter((r) => r.status === 'LATE').length,
         recent: records.slice(0, 10).map((r) => ({
           id: r.id,
@@ -344,7 +489,12 @@ export class StudentsService {
           justification: r.justification?.status ?? null,
         })),
       },
-      incidents: incidents.map((i) => ({ id: i.id, date: fromDbDate(i.date), description: i.description, sanction: i.sanction })),
+      incidents: incidents.map((i) => ({
+        id: i.id,
+        date: fromDbDate(i.date),
+        description: i.description,
+        sanction: i.sanction,
+      })),
       reportCards,
       finance: account ? { totals: account.totals, nextDue: account.nextDue } : null,
     };
@@ -356,7 +506,13 @@ export class StudentsService {
       where: { id },
       data: { ...input, birthDate: input.birthDate ? toDbDate(input.birthDate) : undefined },
     });
-    await this.audit.log({ action: 'students.updated', entity: 'Student', entityId: id, before, after });
+    await this.audit.log({
+      action: 'students.updated',
+      entity: 'Student',
+      entityId: id,
+      before,
+      after,
+    });
     return after;
   }
 
@@ -371,8 +527,17 @@ export class StudentsService {
   async setDocument(studentId: string, documentId: string, status: 'RECEIVED' | 'MISSING') {
     const doc = await this.db.studentDocument.findFirst({ where: { id: documentId, studentId } });
     if (!doc) throw new NotFoundException('Pièce introuvable');
-    const updated = await this.db.studentDocument.update({ where: { id: documentId }, data: { status } });
-    await this.audit.log({ action: 'students.document', entity: 'StudentDocument', entityId: documentId, before: doc.status, after: status });
+    const updated = await this.db.studentDocument.update({
+      where: { id: documentId },
+      data: { status },
+    });
+    await this.audit.log({
+      action: 'students.document',
+      entity: 'StudentDocument',
+      entityId: documentId,
+      before: doc.status,
+      after: status,
+    });
     return updated;
   }
 
@@ -381,38 +546,79 @@ export class StudentsService {
     await this.ensureStudent(studentId);
     const year = await this.scope.currentYear();
     const cls = await this.db.class.findUnique({ where: { id: classId } });
-    if (!cls || cls.academicYearId !== year.id) throw new BadRequestException('Classe inconnue pour l’année en cours');
-    const existing = await this.db.enrollment.findFirst({ where: { studentId, academicYearId: year.id } });
+    if (!cls || cls.academicYearId !== year.id)
+      throw new BadRequestException('Classe inconnue pour l’année en cours');
+    const existing = await this.db.enrollment.findFirst({
+      where: { studentId, academicYearId: year.id },
+    });
     if (existing) throw new ConflictException('L’élève est déjà inscrit cette année');
-    const previous = await this.db.enrollment.findFirst({ where: { studentId }, orderBy: { createdAt: 'desc' } });
+    const previous = await this.db.enrollment.findFirst({
+      where: { studentId },
+      orderBy: { createdAt: 'desc' },
+    });
     return this.db.$transaction(async (tx) => {
       const enrollment = await tx.enrollment.create({
-        data: { schoolId: currentSchoolId(), studentId, classId, academicYearId: year.id, status, previousEnrollmentId: previous?.id },
+        data: {
+          schoolId: currentSchoolId(),
+          studentId,
+          classId,
+          academicYearId: year.id,
+          status,
+          previousEnrollmentId: previous?.id,
+        },
       });
       const fees = await tx.feeItem.count({ where: { academicYearId: year.id } });
       if (fees > 0) await this.finance.generateInvoice(studentId, year.id, [], tx);
-      await this.audit.log({ action: 'enrollments.created', entity: 'Enrollment', entityId: enrollment.id, after: { classId, status } }, tx);
+      await this.audit.log(
+        {
+          action: 'enrollments.created',
+          entity: 'Enrollment',
+          entityId: enrollment.id,
+          after: { classId, status },
+        },
+        tx,
+      );
       return enrollment;
     });
   }
 
-  async changeEnrollment(enrollmentId: string, input: { classId?: string; status?: EnrollmentStatus }) {
+  async changeEnrollment(
+    enrollmentId: string,
+    input: { classId?: string; status?: EnrollmentStatus },
+  ) {
     const before = await this.db.enrollment.findUnique({ where: { id: enrollmentId } });
     if (!before) throw new NotFoundException('Inscription introuvable');
     if (input.classId) {
       const cls = await this.db.class.findUnique({ where: { id: input.classId } });
-      if (!cls || cls.academicYearId !== before.academicYearId) throw new BadRequestException('La classe doit appartenir à la même année');
+      if (!cls || cls.academicYearId !== before.academicYearId)
+        throw new BadRequestException('La classe doit appartenir à la même année');
     }
     const after = await this.db.enrollment.update({ where: { id: enrollmentId }, data: input });
-    await this.audit.log({ action: 'enrollments.changed', entity: 'Enrollment', entityId: enrollmentId, before, after });
+    await this.audit.log({
+      action: 'enrollments.changed',
+      entity: 'Enrollment',
+      entityId: enrollmentId,
+      before,
+      after,
+    });
     return after;
   }
 
   async health(studentId: string, reason: string) {
     await this.ensureStudent(studentId);
     const record = await this.db.healthRecord.findUnique({ where: { studentId } });
-    await this.audit.log({ action: 'health.read', entity: 'HealthRecord', entityId: studentId, reason });
-    return record ? (JSON.parse(decrypt(record.encryptedPayload, env().DATA_ENCRYPTION_KEY)) as Record<string, unknown>) : null;
+    await this.audit.log({
+      action: 'health.read',
+      entity: 'HealthRecord',
+      entityId: studentId,
+      reason,
+    });
+    return record
+      ? (JSON.parse(decrypt(record.encryptedPayload, env().DATA_ENCRYPTION_KEY)) as Record<
+          string,
+          unknown
+        >)
+      : null;
   }
 
   async saveHealth(studentId: string, payload: Record<string, unknown>) {
@@ -436,12 +642,19 @@ export class StudentsService {
     const year = await this.scope.currentYear();
     if (classId) {
       const cls = await this.db.class.findUnique({ where: { id: classId } });
-      if (!cls || cls.academicYearId !== year.id) throw new BadRequestException('Classe inconnue pour l’année en cours');
+      if (!cls || cls.academicYearId !== year.id)
+        throw new BadRequestException('Classe inconnue pour l’année en cours');
     }
     const parsed = Papa.parse<Record<string, string>>(csv.trim(), {
       header: true,
       skipEmptyLines: true,
-      transformHeader: (h) => h.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, '_'),
+      transformHeader: (h) =>
+        h
+          .trim()
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/\s+/g, '_'),
     });
     const relationshipOf = (v: string): (typeof GUARDIAN_RELATIONSHIPS)[number] => {
       const s = v.trim().toLowerCase();
@@ -470,23 +683,42 @@ export class StudentsService {
       const candidate = studentCreateSchema.safeParse({
         firstName: raw.prenoms ?? raw.prenom ?? '',
         lastName: raw.nom ?? '',
-        gender: (raw.sexe ?? '').trim().toUpperCase().startsWith('F') ? 'F' : (raw.sexe ?? '').trim().toUpperCase().startsWith('M') ? 'M' : '',
+        gender: (raw.sexe ?? '').trim().toUpperCase().startsWith('F')
+          ? 'F'
+          : (raw.sexe ?? '').trim().toUpperCase().startsWith('M')
+            ? 'M'
+            : '',
         birthDate: toIso(raw.date_naissance ?? ''),
         birthPlace: raw.lieu_naissance || undefined,
         guardians: guardian.success ? [guardian.data] : [],
         classId,
         confirmNotDuplicate: false,
       });
-      if (!guardian.success) errors.push(...guardian.error.issues.map((e) => `Parent (${e.path.join('.')}) : ${e.message}`));
-      if (!candidate.success) errors.push(...candidate.error.issues.filter((e) => e.path[0] !== 'guardians').map((e) => `${e.path.join('.')} : ${e.message}`));
+      if (!guardian.success)
+        errors.push(
+          ...guardian.error.issues.map((e) => `Parent (${e.path.join('.')}) : ${e.message}`),
+        );
+      if (!candidate.success)
+        errors.push(
+          ...candidate.error.issues
+            .filter((e) => e.path[0] !== 'guardians')
+            .map((e) => `${e.path.join('.')} : ${e.message}`),
+        );
       if (candidate.success) {
-        const key = `${candidate.data.lastName}|${candidate.data.firstName}|${candidate.data.birthDate}`.toUpperCase();
+        const key =
+          `${candidate.data.lastName}|${candidate.data.firstName}|${candidate.data.birthDate}`.toUpperCase();
         const dup = seen.get(key);
         if (dup) errors.push(`Doublon de la ligne ${dup}`);
         else seen.set(key, line);
         if (errors.length === 0) {
-          const existing = await this.findDuplicates({ ...candidate.data, guardianPhones: candidate.data.guardians.map((g) => g.phone) });
-          if (existing[0]) errors.push(`Existe déjà : ${existing[0].lastName} ${existing[0].firstName} (${existing[0].matricule})`);
+          const existing = await this.findDuplicates({
+            ...candidate.data,
+            guardianPhones: candidate.data.guardians.map((g) => g.phone),
+          });
+          if (existing[0])
+            errors.push(
+              `Existe déjà : ${existing[0].lastName} ${existing[0].firstName} (${existing[0].matricule})`,
+            );
         }
       }
       rows.push({ line, input: candidate.success ? candidate.data : undefined, errors });
@@ -502,7 +734,14 @@ export class StudentsService {
     await this.db.$transaction(
       async (tx) => {
         for (const r of rows) if (r.input) await this.createInTx(tx, r.input, year.id);
-        await this.audit.log({ action: 'students.imported', entity: 'Student', after: { count: rows.length, classId } }, tx);
+        await this.audit.log(
+          {
+            action: 'students.imported',
+            entity: 'Student',
+            after: { count: rows.length, classId },
+          },
+          tx,
+        );
       },
       { timeout: 60_000 },
     );

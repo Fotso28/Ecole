@@ -9,7 +9,10 @@ import { PdfModule } from '../pdf/pdf.module';
 import { PdfService } from '../pdf/pdf.service';
 import { ReportCardsService } from './report-cards.service';
 
-const decisionBody = councilDecisionSchema.extend({ studentId: z.string().min(1), termId: z.string().min(1) });
+const decisionBody = councilDecisionSchema.extend({
+  studentId: z.string().min(1),
+  termId: z.string().min(1),
+});
 
 @ApiTags('report-cards')
 @ApiBearerAuth()
@@ -23,13 +26,17 @@ export class ReportCardsController {
 
   @RequirePermissions('reportcards.generate')
   @Post('generate')
-  generate(@Body(new ZodPipe(reportCardGenerateSchema)) body: z.infer<typeof reportCardGenerateSchema>) {
+  generate(
+    @Body(new ZodPipe(reportCardGenerateSchema)) body: z.infer<typeof reportCardGenerateSchema>,
+  ) {
     return this.cards.generate(body.classId, body.termId);
   }
 
   @RequirePermissions('reportcards.publish')
   @Post('publish')
-  publish(@Body(new ZodPipe(reportCardGenerateSchema)) body: z.infer<typeof reportCardGenerateSchema>) {
+  publish(
+    @Body(new ZodPipe(reportCardGenerateSchema)) body: z.infer<typeof reportCardGenerateSchema>,
+  ) {
     return this.cards.publish(body.classId, body.termId);
   }
 

@@ -1,4 +1,9 @@
-import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { isTeacherOnly } from '@ecole/shared';
 import { currentContext } from './context';
 import { Db, InjectDb, Tx } from './prisma';
@@ -10,7 +15,10 @@ export class ScopeService {
 
   async currentYear(tx?: Tx) {
     const year = await (tx ?? this.db).academicYear.findFirst({ where: { isCurrent: true } });
-    if (!year) throw new ConflictException('Aucune année scolaire en cours : définissez-la dans la structure académique');
+    if (!year)
+      throw new ConflictException(
+        'Aucune année scolaire en cours : définissez-la dans la structure académique',
+      );
     return year;
   }
 
@@ -38,12 +46,16 @@ export class ScopeService {
   }
 
   async classForTeacher(classId: string) {
-    const cls = await this.db.class.findUnique({ where: { id: classId }, include: { level: true } });
+    const cls = await this.db.class.findUnique({
+      where: { id: classId },
+      include: { level: true },
+    });
     if (!cls) throw new NotFoundException('Classe introuvable');
     if (this.isTeacherOnly()) {
       const userId = this.userId();
       const teaches = await this.db.classSubject.count({ where: { classId, teacherId: userId } });
-      if (teaches === 0 && cls.mainTeacherId !== userId) throw new ForbiddenException('Vous n’intervenez pas dans cette classe');
+      if (teaches === 0 && cls.mainTeacherId !== userId)
+        throw new ForbiddenException('Vous n’intervenez pas dans cette classe');
     }
     return cls;
   }
@@ -56,6 +68,10 @@ export class ScopeService {
     });
     return enrollments
       .map((e) => e.student)
-      .sort((a, b) => a.lastName.localeCompare(b.lastName, 'fr') || a.firstName.localeCompare(b.firstName, 'fr'));
+      .sort(
+        (a, b) =>
+          a.lastName.localeCompare(b.lastName, 'fr') ||
+          a.firstName.localeCompare(b.firstName, 'fr'),
+      );
   }
 }

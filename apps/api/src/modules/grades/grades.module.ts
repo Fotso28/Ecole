@@ -26,7 +26,10 @@ import { ScopeService } from '../../common/scope.service';
 import { ZodPipe } from '../../common/zod.pipe';
 import { computeSheet, compactGrade, toStored } from './grades.compute';
 
-const sheetQuerySchema = z.object({ classSubjectId: z.string().min(1), sequenceId: z.string().min(1) });
+const sheetQuerySchema = z.object({
+  classSubjectId: z.string().min(1),
+  sequenceId: z.string().min(1),
+});
 const reopenSchema = sheetQuerySchema.extend({ reason: z.string().trim().min(5).max(300) });
 
 @Injectable()
@@ -47,7 +50,11 @@ export class GradesService {
         ...(teacherOnly ? { teacherId: this.scope.userId() } : {}),
       },
       include: { class: { include: { level: true } }, subject: true },
-      orderBy: [{ class: { level: { order: 'asc' } } }, { class: { name: 'asc' } }, { subject: { name: 'asc' } }],
+      orderBy: [
+        { class: { level: { order: 'asc' } } },
+        { class: { name: 'asc' } },
+        { subject: { name: 'asc' } },
+      ],
     });
     const sequences = await this.db.sequence.findMany({
       where: { term: { academicYearId: year.id } },
@@ -64,13 +71,22 @@ export class GradesService {
         coefficient: r.coefficient,
         teacherId: r.teacherId,
       })),
-      sequences: sequences.map((s) => ({ id: s.id, name: s.name, order: s.order, termId: s.termId, termName: s.term.name })),
+      sequences: sequences.map((s) => ({
+        id: s.id,
+        name: s.name,
+        order: s.order,
+        termId: s.termId,
+        termName: s.term.name,
+      })),
     };
   }
 
   async createEvaluation(input: z.infer<typeof evaluationCreateSchema>) {
     const cs = await this.scope.classSubjectForWrite(input.classSubjectId);
-    const sequence = await this.db.sequence.findUnique({ where: { id: input.sequenceId }, include: { term: true } });
+    const sequence = await this.db.sequence.findUnique({
+      where: { id: input.sequenceId },
+      include: { term: true },
+    });
     if (!sequence || sequence.term.academicYearId !== cs.class.academicYearId) {
       throw new BadRequestException('Séquence hors de l’année scolaire de la classe');
     }
@@ -88,7 +104,12 @@ export class GradesService {
         createdById: staffContext().userId,
       },
     });
-    await this.audit.log({ action: 'grades.evaluation_created', entity: 'Evaluation', entityId: evaluation.id, after: input });
+    await this.audit.log({
+      action: 'grades.evaluation_created',
+      entity: 'Evaluation',
+      entityId: evaluation.id,
+      after: input,
+    });
     return evaluation;
   }
 
@@ -96,19 +117,31 @@ export class GradesService {
     const evaluation = await this.db.evaluation.findUnique({ where: { id } });
     if (!evaluation) throw new NotFoundException('Évaluation introuvable');
     await this.scope.classSubjectForWrite(evaluation.classSubjectId);
-    if (evaluation.status !== 'DRAFT') throw new ConflictException('Seule une évaluation en brouillon peut être supprimée');
+    if (evaluation.status !== 'DRAFT')
+      throw new ConflictException('Seule une évaluation en brouillon peut être supprimée');
     await this.db.evaluation.delete({ where: { id } });
-    await this.audit.log({ action: 'grades.evaluation_deleted', entity: 'Evaluation', entityId: id, before: evaluation });
+    await this.audit.log({
+      action: 'grades.evaluation_deleted',
+      entity: 'Evaluation',
+      entityId: id,
+      before: evaluation,
+    });
     return { ok: true };
   }
 
   async sheet(classSubjectId: string, sequenceId: string) {
-    const cs = await this.db.classSubject.findUnique({ where: { id: classSubjectId }, include: { class: true, subject: true } });
+    const cs = await this.db.classSubject.findUnique({
+      where: { id: classSubjectId },
+      include: { class: true, subject: true },
+    });
     if (!cs) throw new NotFoundException('Matière de classe introuvable');
     if (this.scope.isTeacherOnly() && cs.teacherId !== this.scope.userId()) {
       throw new ForbiddenException('Vous n’enseignez pas cette matière dans cette classe');
     }
-    const sequence = await this.db.sequence.findUniqueOrThrow({ where: { id: sequenceId }, include: { term: true } });
+    const sequence = await this.db.sequence.findUniqueOrThrow({
+      where: { id: sequenceId },
+      include: { term: true },
+    });
     const [students, evaluations] = await Promise.all([
       this.scope.classStudents(cs.classId),
       this.db.evaluation.findMany({
@@ -116,15 +149,31 @@ export class GradesService {
         orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
       }),
     ]);
-    const grades = await this.db.grade.findMany({ where: { evaluationId: { in: evaluations.map((e) => e.id) } } });
+    const grades = await this.db.grade.findMany({
+      where: { evaluationId: { in: evaluations.map((e) => e.id) } },
+    });
     const computed = computeSheet(students, evaluations, grades);
     const statuses = new Set(evaluations.map((e) => e.status));
-    const status = evaluations.length === 0 ? 'DRAFT' : statuses.size === 1 ? [...statuses][0] : 'MIXED';
+    const status =
+      evaluations.length === 0 ? 'DRAFT' : statuses.size === 1 ? [...statuses][0] : 'MIXED';
     return {
-      classSubject: { id: cs.id, coefficient: cs.coefficient, className: cs.class.name, classId: cs.classId, subjectName: cs.subject.name },
+      classSubject: {
+        id: cs.id,
+        coefficient: cs.coefficient,
+        className: cs.class.name,
+        classId: cs.classId,
+        subjectName: cs.subject.name,
+      },
       sequence: { id: sequence.id, name: sequence.name, termName: sequence.term.name },
       status,
-      evaluations: evaluations.map((e) => ({ id: e.id, name: e.name, type: e.type, weight: e.weight, maxScore: e.maxScore, status: e.status })),
+      evaluations: evaluations.map((e) => ({
+        id: e.id,
+        name: e.name,
+        type: e.type,
+        weight: e.weight,
+        maxScore: e.maxScore,
+        status: e.status,
+      })),
       ...computed,
     };
   }
@@ -134,23 +183,30 @@ export class GradesService {
     if (!evaluation) throw new NotFoundException('Évaluation introuvable');
     const cs = await this.scope.classSubjectForWrite(evaluation.classSubjectId);
     const ctx = staffContext();
-    if (evaluation.status === 'LOCKED') throw new ConflictException('Notes validées : demandez au censeur de rouvrir la grille');
+    if (evaluation.status === 'LOCKED')
+      throw new ConflictException('Notes validées : demandez au censeur de rouvrir la grille');
     if (evaluation.status === 'SUBMITTED' && !ctx.permissions.has('grades.validate')) {
       throw new ConflictException('Notes soumises : seule la vie pédagogique peut les corriger');
     }
     const enrolled = new Set((await this.scope.classStudents(cs.classId)).map((s) => s.id));
     const errors: { studentId: string; message: string }[] = [];
     const parsed = rows.map((r) => {
-      if (!enrolled.has(r.studentId)) errors.push({ studentId: r.studentId, message: 'Élève non inscrit dans la classe' });
+      if (!enrolled.has(r.studentId))
+        errors.push({ studentId: r.studentId, message: 'Élève non inscrit dans la classe' });
       const stored = toStored(r.value, evaluation.maxScore);
       if (stored === 'invalid') {
-        errors.push({ studentId: r.studentId, message: `Note invalide : entre 0 et ${evaluation.maxScore}, deux décimales au plus` });
+        errors.push({
+          studentId: r.studentId,
+          message: `Note invalide : entre 0 et ${evaluation.maxScore}, deux décimales au plus`,
+        });
       }
       return { studentId: r.studentId, stored };
     });
     if (errors.length > 0) throw new BadRequestException({ message: 'Notes invalides', errors });
 
-    const before = await this.db.grade.findMany({ where: { evaluationId, studentId: { in: rows.map((r) => r.studentId) } } });
+    const before = await this.db.grade.findMany({
+      where: { evaluationId, studentId: { in: rows.map((r) => r.studentId) } },
+    });
     const beforeBy = new Map(before.map((g) => [g.studentId, g]));
     const changes: { studentId: string; before: string; after: string }[] = [];
     await this.db.$transaction(async (tx) => {
@@ -164,16 +220,35 @@ export class GradesService {
           }
           continue;
         }
-        if (prev && prev.status === p.stored.status && prev.valueCenti === p.stored.valueCenti) continue;
+        if (prev && prev.status === p.stored.status && prev.valueCenti === p.stored.valueCenti)
+          continue;
         await tx.grade.upsert({
           where: { evaluationId_studentId: { evaluationId, studentId: p.studentId } },
-          create: { schoolId: currentSchoolId(), evaluationId, studentId: p.studentId, ...p.stored, updatedById: ctx.userId },
+          create: {
+            schoolId: currentSchoolId(),
+            evaluationId,
+            studentId: p.studentId,
+            ...p.stored,
+            updatedById: ctx.userId,
+          },
           update: { ...p.stored, updatedById: ctx.userId },
         });
-        changes.push({ studentId: p.studentId, before: compactGrade(prev), after: compactGrade(p.stored) });
+        changes.push({
+          studentId: p.studentId,
+          before: compactGrade(prev),
+          after: compactGrade(p.stored),
+        });
       }
       if (changes.length > 0) {
-        await this.audit.log({ action: 'grades.updated', entity: 'Evaluation', entityId: evaluationId, after: { changes } }, tx);
+        await this.audit.log(
+          {
+            action: 'grades.updated',
+            entity: 'Evaluation',
+            entityId: evaluationId,
+            after: { changes },
+          },
+          tx,
+        );
       }
     });
     return { saved: changes.length };
@@ -183,29 +258,46 @@ export class GradesService {
   async submit(classSubjectId: string, sequenceId: string) {
     await this.scope.classSubjectForWrite(classSubjectId);
     const sheet = await this.sheet(classSubjectId, sequenceId);
-    if (sheet.evaluations.length === 0) throw new ConflictException('Aucune évaluation à soumettre');
+    if (sheet.evaluations.length === 0)
+      throw new ConflictException('Aucune évaluation à soumettre');
     if (sheet.missing > 0) {
       const missing = sheet.rows
         .filter((r) => r.cells.some((c) => c.value === ''))
         .map((r) => `${r.student.lastName} ${r.student.firstName}`);
-      throw new ConflictException({ statusCode: 409, message: `${sheet.missing} note(s) manquante(s)`, missing });
+      throw new ConflictException({
+        statusCode: 409,
+        message: `${sheet.missing} note(s) manquante(s)`,
+        missing,
+      });
     }
     const updated = await this.db.evaluation.updateMany({
       where: { classSubjectId, sequenceId, status: 'DRAFT' },
       data: { status: 'SUBMITTED' },
     });
-    await this.audit.log({ action: 'grades.submitted', entity: 'ClassSubject', entityId: classSubjectId, after: { sequenceId } });
+    await this.audit.log({
+      action: 'grades.submitted',
+      entity: 'ClassSubject',
+      entityId: classSubjectId,
+      after: { sequenceId },
+    });
     return { submitted: updated.count };
   }
 
   async validate(classSubjectId: string, sequenceId: string) {
-    const draft = await this.db.evaluation.count({ where: { classSubjectId, sequenceId, status: 'DRAFT' } });
+    const draft = await this.db.evaluation.count({
+      where: { classSubjectId, sequenceId, status: 'DRAFT' },
+    });
     if (draft > 0) throw new ConflictException('La grille n’a pas encore été soumise');
     const updated = await this.db.evaluation.updateMany({
       where: { classSubjectId, sequenceId, status: 'SUBMITTED' },
       data: { status: 'LOCKED' },
     });
-    await this.audit.log({ action: 'grades.validated', entity: 'ClassSubject', entityId: classSubjectId, after: { sequenceId } });
+    await this.audit.log({
+      action: 'grades.validated',
+      entity: 'ClassSubject',
+      entityId: classSubjectId,
+      after: { sequenceId },
+    });
     return { locked: updated.count };
   }
 
@@ -214,7 +306,13 @@ export class GradesService {
       where: { classSubjectId, sequenceId, status: { in: ['SUBMITTED', 'LOCKED'] } },
       data: { status: 'DRAFT' },
     });
-    await this.audit.log({ action: 'grades.reopened', entity: 'ClassSubject', entityId: classSubjectId, after: { sequenceId }, reason });
+    await this.audit.log({
+      action: 'grades.reopened',
+      entity: 'ClassSubject',
+      entityId: classSubjectId,
+      after: { sequenceId },
+      reason,
+    });
     return { reopened: updated.count };
   }
 
@@ -223,7 +321,11 @@ export class GradesService {
     const year = await this.scope.currentYear();
     const classSubjects = await this.db.classSubject.findMany({
       where: { class: { academicYearId: year.id } },
-      include: { class: true, subject: true, evaluations: { where: { sequenceId }, select: { status: true } } },
+      include: {
+        class: true,
+        subject: true,
+        evaluations: { where: { sequenceId }, select: { status: true } },
+      },
     });
     const users = await this.db.user.findMany({
       where: { id: { in: classSubjects.map((c) => c.teacherId).filter((x): x is string => !!x) } },
@@ -233,15 +335,35 @@ export class GradesService {
     return classSubjects
       .map((c) => {
         const statuses = c.evaluations.map((e) => e.status);
-        const status = statuses.length === 0 ? 'EMPTY' : statuses.every((s) => s === 'LOCKED') ? 'LOCKED' : statuses.every((s) => s !== 'DRAFT') ? 'SUBMITTED' : 'DRAFT';
+        const status =
+          statuses.length === 0
+            ? 'EMPTY'
+            : statuses.every((s) => s === 'LOCKED')
+              ? 'LOCKED'
+              : statuses.every((s) => s !== 'DRAFT')
+                ? 'SUBMITTED'
+                : 'DRAFT';
         const t = c.teacherId ? byId.get(c.teacherId) : undefined;
-        return { classSubjectId: c.id, className: c.class.name, subjectName: c.subject.name, teacher: t ? `${t.lastName} ${t.firstName}` : null, evaluations: statuses.length, status };
+        return {
+          classSubjectId: c.id,
+          className: c.class.name,
+          subjectName: c.subject.name,
+          teacher: t ? `${t.lastName} ${t.firstName}` : null,
+          evaluations: statuses.length,
+          status,
+        };
       })
-      .sort((a, b) => a.className.localeCompare(b.className, 'fr') || a.subjectName.localeCompare(b.subjectName, 'fr'));
+      .sort(
+        (a, b) =>
+          a.className.localeCompare(b.className, 'fr') ||
+          a.subjectName.localeCompare(b.subjectName, 'fr'),
+      );
   }
 
   private async assertSheetEditable(classSubjectId: string, sequenceId: string) {
-    const locked = await this.db.evaluation.count({ where: { classSubjectId, sequenceId, status: { not: 'DRAFT' } } });
+    const locked = await this.db.evaluation.count({
+      where: { classSubjectId, sequenceId, status: { not: 'DRAFT' } },
+    });
     if (locked > 0) throw new ConflictException('La grille de cette séquence a déjà été soumise');
   }
 }
@@ -261,7 +383,9 @@ export class GradesController {
 
   @RequirePermissions('grades.write')
   @Post('evaluations')
-  createEvaluation(@Body(new ZodPipe(evaluationCreateSchema)) body: z.infer<typeof evaluationCreateSchema>) {
+  createEvaluation(
+    @Body(new ZodPipe(evaluationCreateSchema)) body: z.infer<typeof evaluationCreateSchema>,
+  ) {
     return this.grades.createEvaluation(body);
   }
 
@@ -273,7 +397,10 @@ export class GradesController {
 
   @RequirePermissions('grades.write')
   @Put('evaluations/:id/grades')
-  upsert(@Param('id') id: string, @Body(new ZodPipe(gradesUpsertSchema)) body: z.infer<typeof gradesUpsertSchema>) {
+  upsert(
+    @Param('id') id: string,
+    @Body(new ZodPipe(gradesUpsertSchema)) body: z.infer<typeof gradesUpsertSchema>,
+  ) {
     return this.grades.upsertGrades(id, body.grades);
   }
 

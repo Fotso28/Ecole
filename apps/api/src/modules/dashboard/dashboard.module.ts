@@ -40,23 +40,49 @@ export class DashboardService {
     const monday = addDays(today, -weekday);
     const canFinance = ctx.permissions.has('finance.read');
 
-    const [byGender, previousYear, weekAbsences, pendingJustifications, pendingMobile, cashToApprove, submittedSheets, draftCards, activity] = await Promise.all([
+    const [
+      byGender,
+      previousYear,
+      weekAbsences,
+      pendingJustifications,
+      pendingMobile,
+      cashToApprove,
+      submittedSheets,
+      draftCards,
+      activity,
+    ] = await Promise.all([
       this.db.student.groupBy({
         by: ['gender'],
-        where: { deletedAt: null, enrollments: { some: { academicYearId: year.id, status: { in: ['ENROLLED', 'REPEATING'] } } } },
+        where: {
+          deletedAt: null,
+          enrollments: {
+            some: { academicYearId: year.id, status: { in: ['ENROLLED', 'REPEATING'] } },
+          },
+        },
         _count: { _all: true },
       }),
-      this.db.academicYear.findFirst({ where: { startDate: { lt: year.startDate } }, orderBy: { startDate: 'desc' } }),
+      this.db.academicYear.findFirst({
+        where: { startDate: { lt: year.startDate } },
+        orderBy: { startDate: 'desc' },
+      }),
       this.db.attendanceRecord.findMany({
-        where: { status: 'ABSENT', session: { date: { gte: toDbDate(monday), lte: toDbDate(today) } } },
+        where: {
+          status: 'ABSENT',
+          session: { date: { gte: toDbDate(monday), lte: toDbDate(today) } },
+        },
         select: { studentId: true, justification: { select: { status: true } } },
       }),
       this.db.justification.count({ where: { status: 'PENDING' } }),
       canFinance
-        ? this.db.payment.count({ where: { status: 'PENDING', createdAt: { lt: new Date(Date.now() - 2 * 3600_000) } } })
+        ? this.db.payment.count({
+            where: { status: 'PENDING', createdAt: { lt: new Date(Date.now() - 2 * 3600_000) } },
+          })
         : Promise.resolve(0),
       canFinance ? this.db.cashSession.count({ where: { status: 'CLOSED' } }) : Promise.resolve(0),
-      this.db.evaluation.groupBy({ by: ['classSubjectId', 'sequenceId'], where: { status: 'SUBMITTED' } }),
+      this.db.evaluation.groupBy({
+        by: ['classSubjectId', 'sequenceId'],
+        where: { status: 'SUBMITTED' },
+      }),
       this.db.reportCard.groupBy({ by: ['classId', 'termId'], where: { status: 'DRAFT' } }),
       this.db.auditLog.findMany({
         where: { schoolId: ctx.schoolId, action: { in: Object.keys(ACTION_LABELS) } },
@@ -65,7 +91,9 @@ export class DashboardService {
       }),
     ]);
     const previousCount = previousYear
-      ? await this.db.enrollment.count({ where: { academicYearId: previousYear.id, status: { in: ['ENROLLED', 'REPEATING'] } } })
+      ? await this.db.enrollment.count({
+          where: { academicYearId: previousYear.id, status: { in: ['ENROLLED', 'REPEATING'] } },
+        })
       : null;
     const actors = await this.db.user.findMany({
       where: { id: { in: activity.map((a) => a.actorId).filter((x): x is string => !!x) } },
@@ -74,10 +102,15 @@ export class DashboardService {
     const total = byGender.reduce((s, g) => s + g._count._all, 0);
     const unjustified = weekAbsences.filter((a) => a.justification?.status !== 'ACCEPTED');
     const perStudent = new Map<string, number>();
-    for (const a of unjustified) perStudent.set(a.studentId, (perStudent.get(a.studentId) ?? 0) + 1);
+    for (const a of unjustified)
+      perStudent.set(a.studentId, (perStudent.get(a.studentId) ?? 0) + 1);
 
     const finance = canFinance
-      ? await Promise.all([this.finance.summary(year.id), this.finance.weeklyCollections(9), this.finance.unpaid(year.id)]).then(([summary, weekly, unpaid]) => ({
+      ? await Promise.all([
+          this.finance.summary(year.id),
+          this.finance.weeklyCollections(9),
+          this.finance.unpaid(year.id),
+        ]).then(([summary, weekly, unpaid]) => ({
           ...summary,
           weekly,
           worstClasses: unpaid.classes.slice(0, 5),
@@ -132,5 +165,9 @@ export class DashboardController {
   }
 }
 
-@Module({ imports: [FinanceModule], controllers: [DashboardController], providers: [DashboardService] })
+@Module({
+  imports: [FinanceModule],
+  controllers: [DashboardController],
+  providers: [DashboardService],
+})
 export class DashboardModule {}

@@ -41,7 +41,10 @@ import {
   SimulatorMobileMoneyProvider,
 } from './mobile-money.provider';
 
-const discountSchema = z.object({ amount: z.number().int().positive(), reason: z.string().trim().min(2).max(120) });
+const discountSchema = z.object({
+  amount: z.number().int().positive(),
+  reason: z.string().trim().min(2).max(120),
+});
 const journalSchema = z.object({
   from: isoDate.optional(),
   to: isoDate.optional(),
@@ -87,13 +90,18 @@ export class FinanceController {
 
   @RequirePermissions('finance.fees.write')
   @Post('invoices')
-  generateInvoice(@Body(new ZodPipe(invoiceGenerateSchema)) body: z.infer<typeof invoiceGenerateSchema>) {
+  generateInvoice(
+    @Body(new ZodPipe(invoiceGenerateSchema)) body: z.infer<typeof invoiceGenerateSchema>,
+  ) {
     return this.finance.generateInvoice(body.studentId, body.academicYearId, body.discounts);
   }
 
   @RequirePermissions('finance.fees.write')
   @Post('invoice-lines/:id/discounts')
-  discount(@Param('id') id: string, @Body(new ZodPipe(discountSchema)) body: z.infer<typeof discountSchema>) {
+  discount(
+    @Param('id') id: string,
+    @Body(new ZodPipe(discountSchema)) body: z.infer<typeof discountSchema>,
+  ) {
     return this.finance.addDiscount(id, body.amount, body.reason);
   }
 
@@ -117,7 +125,10 @@ export class FinanceController {
 
   @RequirePermissions('finance.read')
   @Get('payments/export.csv')
-  async export(@Query(new ZodPipe(exportSchema)) q: z.infer<typeof exportSchema>, @Res() res: Response) {
+  async export(
+    @Query(new ZodPipe(exportSchema)) q: z.infer<typeof exportSchema>,
+    @Res() res: Response,
+  ) {
     const csv = await this.finance.exportCsv(q.from, q.to);
     res.setHeader('content-type', 'text/csv; charset=utf-8');
     res.setHeader('content-disposition', `attachment; filename="paiements-${q.from}-${q.to}.csv"`);
@@ -141,7 +152,10 @@ export class FinanceController {
 
   @RequirePermissions('finance.payments.reverse')
   @Post('payments/:id/reverse')
-  reverse(@Param('id') id: string, @Body(new ZodPipe(paymentReverseSchema)) body: z.infer<typeof paymentReverseSchema>) {
+  reverse(
+    @Param('id') id: string,
+    @Body(new ZodPipe(paymentReverseSchema)) body: z.infer<typeof paymentReverseSchema>,
+  ) {
     return this.finance.reversePayment(id, body.reason);
   }
 
@@ -165,7 +179,10 @@ export class FinanceController {
 
   @RequirePermissions('finance.cash.close')
   @Post('cash-sessions/:id/close')
-  closeCash(@Param('id') id: string, @Body(new ZodPipe(cashCloseSchema)) body: z.infer<typeof cashCloseSchema>) {
+  closeCash(
+    @Param('id') id: string,
+    @Body(new ZodPipe(cashCloseSchema)) body: z.infer<typeof cashCloseSchema>,
+  ) {
     return this.finance.closeCashSession(id, body.countedAmount, body.note);
   }
 
@@ -183,7 +200,10 @@ export class FinanceController {
 
   @RequirePermissions('finance.read')
   @Get('unpaid')
-  async unpaid(@Query('classId') classId?: string, @Query('academicYearId') academicYearId?: string) {
+  async unpaid(
+    @Query('classId') classId?: string,
+    @Query('academicYearId') academicYearId?: string,
+  ) {
     return this.finance.unpaid(academicYearId ?? (await this.scope.currentYear()).id, classId);
   }
 }
@@ -197,14 +217,22 @@ export class WebhooksController {
   @Public()
   @Post('mobile-money')
   @HttpCode(200)
-  async mobileMoney(@Req() req: Request & { rawBody?: Buffer }, @Body(new ZodPipe(webhookSchema)) body: z.infer<typeof webhookSchema>) {
+  async mobileMoney(
+    @Req() req: Request & { rawBody?: Buffer },
+    @Body(new ZodPipe(webhookSchema)) body: z.infer<typeof webhookSchema>,
+  ) {
     const allowed = env()
       .MOBILE_MONEY_ALLOWED_IPS.split(',')
       .map((s) => s.trim())
       .filter(Boolean);
-    if (allowed.length > 0 && !allowed.includes(req.ip ?? '')) throw new ForbiddenException('Origine non autorisée');
+    if (allowed.length > 0 && !allowed.includes(req.ip ?? ''))
+      throw new ForbiddenException('Origine non autorisée');
     const signature = req.headers['x-ecole-signature'];
-    if (typeof signature !== 'string' || !req.rawBody || !safeEqual(signature, signWebhook(req.rawBody))) {
+    if (
+      typeof signature !== 'string' ||
+      !req.rawBody ||
+      !safeEqual(signature, signWebhook(req.rawBody))
+    ) {
       throw new UnauthorizedException('Signature invalide');
     }
     return this.finance.confirmMobileMoney(body.reference, body.status, body.amount);
@@ -221,7 +249,8 @@ export class MobileMoneySimulatorController {
   @Post(':reference/:status')
   @HttpCode(200)
   async simulate(@Param('reference') reference: string, @Param('status') status: string) {
-    if (env().NODE_ENV === 'production' || env().MOBILE_MONEY_PROVIDER !== 'simulator') throw new NotFoundException();
+    if (env().NODE_ENV === 'production' || env().MOBILE_MONEY_PROVIDER !== 'simulator')
+      throw new NotFoundException();
     if (status !== 'SUCCESS' && status !== 'FAILED') throw new NotFoundException();
     SimulatorMobileMoneyProvider.statuses.set(reference, status);
     return this.finance.confirmMobileMoney(reference, status);
@@ -231,8 +260,10 @@ export class MobileMoneySimulatorController {
 @Module({
   imports: [PdfModule],
   controllers: [FinanceController, WebhooksController, MobileMoneySimulatorController],
-  providers: [FinanceService, { provide: MOBILE_MONEY_PROVIDER, useFactory: createMobileMoneyProvider }],
+  providers: [
+    FinanceService,
+    { provide: MOBILE_MONEY_PROVIDER, useFactory: createMobileMoneyProvider },
+  ],
   exports: [FinanceService],
 })
 export class FinanceModule {}
-

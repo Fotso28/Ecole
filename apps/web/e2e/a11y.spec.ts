@@ -59,18 +59,6 @@ test('écrans de la direction', async ({ page }) => {
     await expect(page.locator('main h1').first()).toBeVisible();
     await expectAccessible(page, path);
   }
-  // Emploi du temps : choix d'un créneau au clavier (alternative au glisser-déposer).
-  await page.goto('/caisse/journal');
-  await expect(page.locator('main h1').first()).toBeVisible();
-  await expectAccessible(page, '/caisse/journal');
-  await page.goto('/emploi-du-temps');
-  await page.getByLabel('Classe').selectOption({ label: '4e A' });
-  await page
-    .getByRole('button', { name: /^Déplacer / })
-    .first()
-    .click();
-  await expect(page.getByRole('dialog', { name: /^Déplacer / })).toBeVisible();
-  await expectAccessible(page, '/emploi-du-temps (déplacer un cours)');
   // Fiche élève et dépôt d'une pièce d'inscription.
   await page.goto('/eleves?q=Ngono');
   await page.getByRole('link', { name: /Ngono Marie-Claire/ }).click();
@@ -81,6 +69,22 @@ test('écrans de la direction', async ({ page }) => {
     .click();
   await expect(page.getByRole('dialog')).toBeVisible();
   await expectAccessible(page, '/eleves/[id] (dépôt de pièce)');
+});
+
+test('journal des paiements et déplacement d’un cours', async ({ page }) => {
+  await loginStaff(page, 'direction@demo.cm');
+  await page.goto('/caisse/journal');
+  await expect(page.locator('main h1').first()).toBeVisible();
+  await expectAccessible(page, '/caisse/journal');
+  // Emploi du temps : choix d'un créneau au clavier (alternative au glisser-déposer).
+  await page.goto('/emploi-du-temps');
+  await page.getByLabel('Classe').selectOption({ label: '4e A' });
+  await page
+    .getByRole('button', { name: /^Déplacer / })
+    .first()
+    .click();
+  await expect(page.getByRole('dialog', { name: /^Déplacer / })).toBeVisible();
+  await expectAccessible(page, '/emploi-du-temps (déplacer un cours)');
 });
 
 test('fenêtres du secrétariat et de la surveillance', async ({ page }) => {

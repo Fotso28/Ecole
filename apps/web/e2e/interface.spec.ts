@@ -217,10 +217,13 @@ test.describe('hors connexion', () => {
     await page.getByRole('button', { name: 'Se déconnecter' }).click();
     await expect
       .poll(() =>
-        page.evaluate(async () => ({
-          data: await caches.has('ecole-data'),
-          profile: localStorage.getItem('ecole.offline.me'),
-        })),
+        page
+          .evaluate(async () => ({
+            data: await caches.has('ecole-data'),
+            profile: localStorage.getItem('ecole.offline.me'),
+          }))
+          // Navigation en cours vers l'écran de connexion : on réessaie.
+          .catch(() => null),
       )
       .toEqual({ data: false, profile: null });
 

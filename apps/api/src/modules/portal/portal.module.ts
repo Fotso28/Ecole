@@ -78,6 +78,16 @@ export class PortalService {
     return link;
   }
 
+  /** Notes et finances ne s'affichent que si l'école de l'enfant a activé le module. */
+  private async assertChildModule(studentId: string, module: 'grades' | 'finance') {
+    const link = await this.childLink(studentId);
+    if (!link.student.school.modules.includes(module))
+      throw new NotFoundException(
+        module === 'grades' ? 'Notes non disponibles' : 'Finances non disponibles',
+      );
+    return link;
+  }
+
   async children() {
     const userId = parentContext().userId;
     const links = await runAsSystem('portal-children', () =>
@@ -86,7 +96,7 @@ export class PortalService {
         include: {
           student: {
             include: {
-              school: { select: { id: true, name: true, city: true } },
+              school: { select: { id: true, name: true, city: true, modules: true } },
               enrollments: {
                 orderBy: { createdAt: 'desc' },
                 take: 1,
@@ -99,21 +109,22 @@ export class PortalService {
     );
     const result = [];
     for (const l of links) {
-      const account = await runAsSystem(
-        'portal-account',
-        () => this.finance.account(l.studentId),
-        l.schoolId,
-      );
+      const { modules, ...school } = l.student.school;
+      const finance = modules.includes('finance');
+      const account = finance
+        ? await runAsSystem('portal-account', () => this.finance.account(l.studentId), l.schoolId)
+        : null;
       result.push({
         id: l.student.id,
         firstName: l.student.firstName,
         lastName: l.student.lastName,
         matricule: l.student.matricule,
-        school: l.student.school,
+        school,
         className: l.student.enrollments[0]?.class.name ?? null,
-        balance: account.totals.outstanding,
-        overdue: account.totals.overdue,
-        nextDue: account.nextDue,
+        modules: { grades: modules.includes('grades'), finance },
+        balance: account?.totals.outstanding ?? 0,
+        overdue: account?.totals.overdue ?? 0,
+        nextDue: account?.nextDue ?? null,
       });
     }
     return result;
@@ -122,6 +133,9 @@ export class PortalService {
   async overview(studentId: string) {
     const link = await this.childLink(studentId);
     const schoolId = link.schoolId;
+    const modules = link.student.school.modules;
+    const hasGrades = modules.includes('grades');
+    const hasFinance = modules.includes('finance');
     return runAsSystem(
       'portal-overview',
       async () => {
@@ -132,7 +146,7 @@ export class PortalService {
         });
         const [account, grades, absences, reportCards, announcements, gradedSequences] =
           await Promise.all([
-            this.finance.account(studentId),
+            hasFinance ? this.finance.account(studentId) : Promise.resolve(null),
             this.db.grade.findMany({
               where: { studentId, evaluation: { status: { in: ['SUBMITTED', 'LOCKED'] } } },
               orderBy: { updatedAt: 'desc' },
@@ -182,7 +196,7 @@ export class PortalService {
               orderBy: { publishedAt: 'desc' },
               take: 5,
             }),
-            enrollment
+            enrollment && hasGrades
               ? this.db.sequence.findMany({
                   where: {
                     term: { academicYearId: enrollment.academicYearId },
@@ -215,17 +229,23 @@ export class PortalService {
             matricule: link.student.matricule,
           },
           className: enrollment?.class.name ?? null,
-          finance: {
-            totals: account.totals,
-            nextDue: account.nextDue,
-            lines: account.lines,
-            // Le téléphone payeur, la référence de l'opérateur et l'agent de caisse ne regardent
-            // pas l'autre tuteur : seul `GET /portal/payments/:id` les montre, à l'auteur du paiement.
-            payments: account.payments
-              .slice(0, 10)
-              .map(({ payerPhone: _phone, operatorReference: _ref, receivedById: _by, ...p }) => p),
-          },
-          grades: grades.map((g) => {
+          modules: { grades: hasGrades, finance: hasFinance },
+          finance: account
+            ? {
+                totals: account.totals,
+                nextDue: account.nextDue,
+                lines: account.lines,
+                // Le téléphone payeur, la référence de l'opérateur et l'agent de caisse ne
+                // regardent pas l'autre tuteur : seul `GET /portal/payments/:id` les montre, à
+                // l'auteur du paiement.
+                payments: account.payments
+                  .slice(0, 10)
+                  .map(
+                    ({ payerPhone: _phone, operatorReference: _ref, receivedById: _by, ...p }) => p,
+                  ),
+              }
+            : null,
+          grades: (hasGrades ? grades : []).map((g) => {
             const parsed = toParsed(g);
             return {
               id: g.id,
@@ -253,7 +273,7 @@ export class PortalService {
             justificationId: r.justification?.id ?? null,
             hasAttachment: !!r.justification?.fileId,
           })),
-          reportCards: reportCards.map((r) => {
+          reportCards: (hasGrades ? reportCards : []).map((r) => {
             const data = r.data as unknown as ReportCardData;
             return {
               id: r.id,
@@ -274,9 +294,10 @@ export class PortalService {
               .sort((a, b) => a.term.order - b.term.order || a.order - b.order)
               .map((sq) => ({ id: sq.id, name: sq.name })),
             terms: yearTerms
-              .filter((tm) => publishedTermIds.has(tm.id))
+              .filter((tm) => hasGrades && publishedTermIds.has(tm.id))
               .map((tm) => ({ id: tm.id, name: tm.name })),
             year:
+              hasGrades &&
               enrollment &&
               yearTerms.some((tm) => isFinalTerm(tm, yearTerms) && publishedTermIds.has(tm.id))
                 ? { id: enrollment.academicYearId }
@@ -383,7 +404,7 @@ export class PortalService {
       this.db.payment.findUnique({ where: { id: paymentId }, include: { receipt: true } }),
     );
     if (!payment) throw new NotFoundException('Paiement introuvable');
-    await this.childLink(payment.studentId);
+    await this.assertChildModule(payment.studentId, 'finance');
     if (payment.initiatedByUserId && payment.initiatedByUserId !== userId)
       throw new ForbiddenException();
     const balance = await runAsSystem(
@@ -399,7 +420,7 @@ export class PortalService {
       this.db.reportCard.findUnique({ where: { id: reportCardId } }),
     );
     if (!card || card.status !== 'PUBLISHED') throw new NotFoundException('Bulletin introuvable');
-    await this.childLink(card.studentId);
+    await this.assertChildModule(card.studentId, 'grades');
     return runAsSystem('portal-report-card-pdf', () => this.pdf.reportCard(card.id), card.schoolId);
   }
 
@@ -408,7 +429,7 @@ export class PortalService {
    * fois le bulletin correspondant publié, pour ne pas divulguer de moyennes provisoires.
    */
   async transcriptPdf(studentId: string, q: z.infer<typeof transcriptQuerySchema>) {
-    const link = await this.childLink(studentId);
+    const link = await this.assertChildModule(studentId, 'grades');
     return runAsSystem(
       'portal-transcript',
       async () => {
@@ -450,7 +471,7 @@ export class PortalService {
       this.db.payment.findUnique({ where: { id: paymentId } }),
     );
     if (!payment) throw new NotFoundException('Reçu introuvable');
-    await this.childLink(payment.studentId);
+    await this.assertChildModule(payment.studentId, 'finance');
     return runAsSystem('portal-receipt-pdf', () => this.pdf.receipt(payment.id), payment.schoolId);
   }
 }

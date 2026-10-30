@@ -20,6 +20,8 @@ export interface Child {
   matricule: string;
   school: { id: string; name: string; city: string };
   className: string | null;
+  /** Modules activés par l'école de l'enfant : sans eux, ni notes ni finances. */
+  modules?: { grades: boolean; finance: boolean };
   balance: number;
   overdue: number;
   nextDue: { lineId: string; label: string; dueDate: string; amount: number } | null;

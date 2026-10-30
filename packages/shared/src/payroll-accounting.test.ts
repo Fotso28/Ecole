@@ -248,7 +248,7 @@ describe('produits des services facturés par la scolarité', () => {
       expect(isPostable(n)).toBe(true);
       expect(n.startsWith('7')).toBe(true);
     }
-    expect(new Set(Object.values(REVENUE_ACCOUNTS)).has('7061')).toBe(false);
+    expect((Object.values(REVENUE_ACCOUNTS) as string[]).includes('7061')).toBe(false);
     const charge = (description: string, revenueAccount?: string) =>
       tuitionPosting({
         type: 'CHARGE',

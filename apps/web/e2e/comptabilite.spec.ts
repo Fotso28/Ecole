@@ -93,6 +93,44 @@ test('comptabilité : scolarité, saisie, contre-passation, dépense validée, �
   await expect(page.getByText(/Dépense validée · écritures AC-\d{4}-\d{6}, BQ-/)).toBeVisible();
   await expect(row(page, `Électricité ${tag}`).getByText('Comptabilisée')).toBeVisible();
 
+  // Annulation de la dépense : motif, contre-passation de ses écritures, statut « Annulée ».
+  await row(page, `Électricité ${tag}`)
+    .getByRole('button', { name: /^Annuler/ })
+    .click();
+  const cancel = page.getByRole('dialog', { name: 'Annuler cette dépense ?' });
+  await cancel.getByLabel('Motif de l’annulation').fill('Facture saisie en double');
+  await cancel.getByRole('button', { name: 'Annuler la dépense' }).click();
+  await expect(
+    page.getByText(/Dépense annulée · contre-passations AC-\d{4}-\d{6}, BQ-/),
+  ).toBeVisible();
+  await expect(row(page, `Électricité ${tag}`).getByText('Annulée', { exact: true })).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+
+  // Sortie de caisse au-delà du seuil saisie par la comptabilité : la direction la valide.
+  await logout(page);
+  await loginStaff(page, 'compta@demo.cm');
+  await page.goto('/comptabilite/ecritures');
+  await newEntry(page, {
+    label: `Avance de caisse ${tag}`,
+    debit: '658',
+    credit: '571',
+    amount: 120000,
+  });
+  await expect(page.getByText(/au-delà du seuil : en attente de validation/)).toBeVisible();
+  const pendingEntry = page
+    .getByRole('list', { name: 'Écritures à valider' })
+    .getByRole('listitem')
+    .filter({ hasText: `Avance de caisse ${tag}` });
+  await expect(pendingEntry).toBeVisible();
+  await expect(pendingEntry.getByRole('button', { name: /^Valider/ })).toHaveCount(0);
+  await expectNoHorizontalOverflow(page);
+  await logout(page);
+  await loginStaff(page, 'direction@demo.cm');
+  await page.goto('/comptabilite/ecritures');
+  await pendingEntry.getByRole('button', { name: /^Valider/ }).click();
+  await expect(page.getByText(/Écriture CA-\d{4}-\d{6} validée et enregistrée/)).toBeVisible();
+  await expect(pendingEntry).toHaveCount(0);
+
   // États financiers et export Excel.
   await navigate(page, info, 'États financiers');
   await expect(page.getByRole('heading', { name: 'Balance générale' })).toBeVisible();

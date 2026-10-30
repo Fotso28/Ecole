@@ -30,12 +30,20 @@ import { Prisma, type EmploymentContract, type Payslip } from '@prisma/client';
 import { z } from 'zod';
 import { AccessService } from '../../common/access.service';
 import { AuditService } from '../../common/audit.service';
+import { sha256 } from '../../common/crypto';
 import { currentSchoolId, staffContext } from '../../common/context';
 import { fromDbDate, toDbDate } from '../../common/dates';
 import { Db, InjectDb, Tx } from '../../common/prisma';
 import { AccountingService, translateAccountingError } from '../accounting/accounting.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { decryptSensitive } from './employees.service';
+import {
+  decryptPayout,
+  decryptSensitive,
+  encryptPayout,
+  payoutDetails,
+  payoutFingerprint,
+  type PayoutDetails,
+} from './employees.service';
 import { HoursService, type MonthTotals } from './hours.service';
 import type { PayslipBatch, TransferRow } from './payroll.exports';
 
@@ -61,6 +69,9 @@ export interface PayslipInputs {
   /** Retenues effectives par avance (après limite au net). */
   advanceAllocations: { id: string; amount: number }[];
 }
+
+/** Empreinte d'un état des virements (liste triée des bulletins et de leurs coordonnées). */
+const payoutFingerprintOf = (items: string[]) => sha256(items.join('|'));
 
 interface PayoutView {
   id: string;
@@ -673,12 +684,26 @@ export class PayrollService {
         'fr',
       );
     });
+    // Coordonnées de paiement figées dans chaque bulletin : l'état des virements et le versement
+    // lisent ce cliché, jamais le dossier qui pourrait être modifié après la validation.
+    const files = await this.db.employeeFile.findMany({
+      where: { id: { in: slips.map((p) => p.employeeId) } },
+    });
+    const frozen = new Map(
+      files.map((f) => [
+        f.id,
+        encryptPayout(payoutDetails(f.payoutMethod, decryptSensitive(f.encryptedSensitive))),
+      ]),
+    );
     await this.db.$transaction(async (tx) => {
-      // Numérotation et remboursements d'avances avant de figer la paie.
+      // Numérotation, coordonnées et remboursements d'avances avant de figer la paie.
       for (const [i, p] of slips.entries()) {
         await tx.payslip.update({
           where: { id: p.id },
-          data: { number: `PAIE-${month}-${String(i + 1).padStart(4, '0')}` },
+          data: {
+            number: `PAIE-${month}-${String(i + 1).padStart(4, '0')}`,
+            encryptedPayout: frozen.get(p.employeeId) ?? null,
+          },
         });
         const inputs = p.inputs as unknown as PayslipInputs;
         for (const a of inputs.advanceAllocations) {
@@ -978,13 +1003,35 @@ export class PayrollService {
       throw new ConflictException('Cette paie est déjà marquée comme versée');
     const sameAsValidator = await this.payerCheck(run.validatedById);
     const amount = run.payslips.reduce((s, p) => s + p.net, 0);
+    // Le versement porte sur les coordonnées figées à la validation : leur empreinte est
+    // journalisée avec le montant par mode de paiement.
+    const frozen = await this.frozenPayouts(run.payslips);
+    const byMethod: Record<string, number> = {};
+    for (const p of run.payslips) {
+      if (p.net <= 0) continue;
+      const method = frozen.get(p.id)?.method ?? 'CASH';
+      byMethod[method] = (byMethod[method] ?? 0) + p.net;
+    }
+    const transfersFingerprint = payoutFingerprintOf(
+      run.payslips
+        .filter((p) => p.net > 0)
+        .map(
+          (p) =>
+            `${p.number}:${p.net}:${payoutFingerprint(frozen.get(p.id) ?? { method: 'CASH' })}`,
+        )
+        .sort(),
+    );
     await this.recordPayout({
       kind: 'PAYROLL',
       sourceId: run.id,
       amount,
       sameAsValidator,
       payout: input,
-      audit: { action: 'hr.payroll_paid', entity: 'PayrollRun', after: { month } },
+      audit: {
+        action: 'hr.payroll_paid',
+        entity: 'PayrollRun',
+        after: { month, byMethod, transfersFingerprint },
+      },
     });
     return this.get(month);
   }
@@ -1053,31 +1100,48 @@ export class PayrollService {
     };
   }
 
-  /** Lignes de l'état des virements : coordonnées de paiement déchiffrées, net à payer. */
+  /**
+   * Coordonnées de paiement de chaque bulletin : le cliché figé à la validation. Les paies validées
+   * avant ce cliché retombent sur le dossier (seul cas où il est lu).
+   */
+  private async frozenPayouts(payslips: Payslip[]): Promise<Map<string, PayoutDetails>> {
+    // Coordonnées bancaires : refusées en accès exceptionnel.
+    const missing = payslips.filter((p) => !p.encryptedPayout);
+    const live = await this.sensitiveByEmployee(missing.map((p) => p.employeeId));
+    return new Map(
+      payslips.map((p) => {
+        if (p.encryptedPayout) return [p.id, decryptPayout(p.encryptedPayout)];
+        const s = live.get(p.employeeId);
+        return [p.id, payoutDetails(s?.file.payoutMethod ?? 'CASH', s?.data ?? {})];
+      }),
+    );
+  }
+
+  /** Lignes de l'état des virements : coordonnées de paiement figées, net à payer. */
   async transferRows(month: string): Promise<{ school: string; rows: TransferRow[] }> {
     const run = await this.requireValidated(month);
     const school = await this.db.school.findUniqueOrThrow({ where: { id: currentSchoolId() } });
-    const sensitive = await this.sensitiveByEmployee(run.payslips.map((p) => p.employeeId));
+    const frozen = await this.frozenPayouts(run.payslips);
     const rows = run.payslips
       .filter((p) => p.net > 0)
       .map((p) => {
         const inputs = p.inputs as unknown as PayslipInputs;
-        const s = sensitive.get(p.employeeId);
-        const method = s?.file.payoutMethod ?? 'CASH';
+        const d = frozen.get(p.id);
+        const method = d?.method ?? 'CASH';
         return {
           number: p.number,
           lastName: inputs.employee.lastName,
           firstName: inputs.employee.firstName,
           position: inputs.employee.position,
           method,
-          bankName: method === 'BANK' ? (s?.data.bankName ?? null) : null,
+          bankName: method === 'BANK' ? (d?.bankName ?? null) : null,
           account:
             method === 'BANK'
-              ? (s?.data.bankAccount ?? null)
+              ? (d?.bankAccount ?? null)
               : method === 'MOBILE_MONEY'
-                ? (s?.data.mobileMoneyNumber ?? null)
+                ? (d?.mobileMoneyNumber ?? null)
                 : null,
-          operator: method === 'MOBILE_MONEY' ? (s?.data.mobileMoneyOperator ?? null) : null,
+          operator: method === 'MOBILE_MONEY' ? (d?.mobileMoneyOperator ?? null) : null,
           net: p.net,
         };
       })

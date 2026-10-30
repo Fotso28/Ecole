@@ -106,6 +106,7 @@ async function main(): Promise<void> {
   const { LibraryService } = await import('./modules/library/library.service');
   const { StockService } = await import('./modules/library/stock.service');
   const { PayrollService } = await import('./modules/hr/payroll.service');
+  const { EmployeesService } = await import('./modules/hr/employees.service');
   const app = await NestFactory.createApplicationContext(AppModule, { logger: ['error', 'warn'] });
   const students = app.get(StudentsService);
   const finance = app.get(FinanceService);
@@ -867,7 +868,37 @@ async function main(): Promise<void> {
     await payroll.submit(demoPayrollMonth);
   });
   await runInContext(directionCtx, () => payroll.validate(demoPayrollMonth));
+  // Nouveau RIB saisi par la comptabilité : en attente de l'accord de la direction.
+  await runInContext(accountantCtx, () =>
+    app.get(EmployeesService).update(hrFiles['prof.maths@demo.cm'] ?? '', {
+      sensitive: { bankName: 'Ecobank', bankAccount: '10029 00001 09876543210 77' },
+    }),
+  );
   await runAsSystem('seed:accounting', () => app.get(AccountingService).syncOperations(), schoolId);
+  // Une dépense sous le seuil (comptabilisée) et une sortie de banque au-delà du seuil, en attente
+  // de l'accord d'une autre personne.
+  await runInContext(accountantCtx, async () => {
+    const accounting = app.get(AccountingService);
+    await accounting.createExpense({
+      supplierName: 'CAMWATER',
+      date: addDays(today, -3),
+      label: 'Facture d’eau',
+      amount: 18_500,
+      accountNumber: '6051',
+      method: 'BANK',
+      pieceRef: 'CW-2026-118',
+    });
+    await accounting.createManualEntry({
+      journal: 'BQ',
+      date: addDays(today, -1),
+      label: 'Retrait bancaire pour la caisse',
+      pieceRef: 'CHQ-004512',
+      lines: [
+        { accountNumber: '585', debit: 250_000, credit: 0 },
+        { accountNumber: '521', debit: 0, credit: 250_000 },
+      ],
+    });
+  });
 
   // Les SMS générés par le jeu de démonstration ne doivent pas partir.
   await base.notificationOutbox.updateMany({

@@ -113,6 +113,8 @@ test('dossier du personnel et fenêtres du module RH', async ({ page }) => {
   await page.goto('/rh');
   await page.getByRole('link', { name: 'Mbarga Paul' }).first().click();
   await expect(page.getByRole('heading', { name: 'Mbarga Paul', level: 1 })).toBeVisible();
+  // Nouveau RIB du jeu de démonstration en attente d'approbation (tant que le parcours RH ne l'a
+  // pas approuvé).
   await expectAccessible(page, '/rh/[id]');
   await page.getByRole('button', { name: 'Afficher' }).click();
   await expect(page.getByRole('dialog', { name: 'Données sensibles' })).toBeVisible();
@@ -223,6 +225,21 @@ test('formulaires de la comptabilité', async ({ page }) => {
   await page.getByRole('button', { name: 'Nouvelle dépense' }).click();
   await expect(page.getByRole('dialog', { name: 'Nouvelle dépense' })).toBeVisible();
   await expectAccessible(page, '/comptabilite/depenses (nouvelle dépense)');
+  // Dépense comptabilisée du jeu de démonstration : fenêtre d'annulation.
+  await page.getByRole('button', { name: 'Fermer' }).click();
+  await page
+    .getByRole('button', { name: /^Annuler la dépense Facture d’eau/ })
+    .filter({ visible: true })
+    .first()
+    .click();
+  await expect(page.getByRole('dialog', { name: 'Annuler cette dépense ?' })).toBeVisible();
+  await expectAccessible(page, '/comptabilite/depenses (annulation)');
+  // Sortie de banque au-delà du seuil en attente de validation.
+  await page.goto('/comptabilite/ecritures');
+  await expect(
+    page.getByRole('heading', { name: 'Écritures de trésorerie à valider' }),
+  ).toBeVisible();
+  await expectAccessible(page, '/comptabilite/ecritures (écritures à valider)');
   for (const kind of ['grand-livre', 'bilan']) {
     await page.goto('/comptabilite/etats');
     await page.getByLabel('État').selectOption(kind);

@@ -101,6 +101,22 @@ export class HrController {
     return this.employees.update(id, body);
   }
 
+  /** Changement des coordonnées de paiement : approuvé par une autre personne. */
+  @RequirePermissions('hr.write')
+  @Post('employees/:id/payout-change/approve')
+  approvePayoutChange(@Param('id') id: string) {
+    return this.employees.decidePayoutChange(id, true);
+  }
+
+  @RequirePermissions('hr.write')
+  @Post('employees/:id/payout-change/reject')
+  rejectPayoutChange(
+    @Param('id') id: string,
+    @Body(new ZodPipe(advanceDecisionSchema)) body: z.infer<typeof advanceDecisionSchema>,
+  ) {
+    return this.employees.decidePayoutChange(id, false, body.reason);
+  }
+
   @RequirePermissions('hr.write')
   @Post('employees/:id/contracts')
   addContract(

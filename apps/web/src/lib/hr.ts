@@ -48,6 +48,8 @@ export interface EmployeeDetail extends EmployeeRow {
     bankAccount: string | null;
     mobileMoneyNumber: string | null;
   };
+  /** Changement de coordonnées de paiement en attente d'approbation (valeurs masquées). */
+  pendingPayoutChange: PendingPayoutChange | null;
   contracts: ContractView[];
   advances: {
     id: string;
@@ -199,4 +201,21 @@ export function monthOptions(now = new Date()): string[] {
     out.push(d.toISOString().slice(0, 7));
   }
   return out;
+}
+
+export interface MaskedPayout {
+  method: PayoutMethod;
+  bankName: string | null;
+  bankAccount: string | null;
+  mobileMoneyNumber: string | null;
+  mobileMoneyOperator: 'MTN' | 'ORANGE' | null;
+}
+
+export interface PendingPayoutChange {
+  id: string;
+  requestedById: string;
+  requestedBy: string | null;
+  requestedAt: string;
+  before: MaskedPayout;
+  after: MaskedPayout;
 }

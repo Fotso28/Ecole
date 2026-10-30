@@ -41,6 +41,23 @@ test('dossier du personnel, données sensibles, heures de cours et avance', asyn
   await expectNoHorizontalOverflow(page);
   await dialog.getByRole('button', { name: 'Masquer et fermer' }).click();
 
+  // Nouveau RIB saisi par la comptabilité : la direction l'approuve (une seule fois : base partagée).
+  await navigate(page, info, 'Dossiers du personnel');
+  await visibleItem(page, 'Mbarga Paul').getByRole('link').first().click();
+  await expect(page.getByRole('heading', { name: 'Mbarga Paul', level: 1 })).toBeVisible();
+  const pendingRib = page.getByText('Changement de coordonnées en attente d’approbation');
+  await expect(page.getByText('Mode de paiement')).toBeVisible();
+  if (await pendingRib.count()) {
+    await expect(
+      page.getByText(/Demandées : Virement bancaire · Ecobank · •••• 1077/),
+    ).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+    await page.getByRole('button', { name: 'Approuver' }).click();
+    await expect(page.getByText('Nouvelles coordonnées approuvées')).toBeVisible();
+  }
+  await expect(pendingRib).toHaveCount(0);
+  await expect(page.getByText('•••• 1077')).toBeVisible();
+
   // Avance demandée par la comptabilité : la direction l'accorde.
   await navigate(page, info, 'Avances sur salaire');
   const advance = visibleItem(page, 'Eyenga Brigitte');

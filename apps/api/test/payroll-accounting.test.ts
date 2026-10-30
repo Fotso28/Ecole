@@ -290,6 +290,133 @@ describe('écritures de paie', () => {
   });
 });
 
+describe('coordonnées de paiement', () => {
+  it('figées dans la paie validée ; un changement n’a d’effet qu’après l’accord d’une autre personne', async () => {
+    await enable(f.schoolId, ['accounting']);
+    const file = (
+      await http()
+        .post('/hr/employees')
+        .set(s.compta.auth)
+        .send({
+          userId: f.users.teacher,
+          position: 'Enseignant',
+          hireDate: '2026-09-01',
+          payoutMethod: 'MOBILE_MONEY',
+          sensitive: { mobileMoneyNumber: '677123456', mobileMoneyOperator: 'MTN' },
+        })
+        .expect(201)
+    ).body.id as string;
+    await http()
+      .post(`/hr/employees/${file}/contracts`)
+      .set(s.compta.auth)
+      .send({ type: 'CDI', startDate: '2026-09-01', baseSalary: 200_000 })
+      .expect(201);
+    await validatedPayroll();
+    const transfers = async () =>
+      (await http().get(`/hr/payroll/${MONTH}/transfers?format=csv`).set(s.compta.auth).expect(200))
+        .text;
+    const plain = async () =>
+      (
+        await http()
+          .post(`/hr/employees/${file}/sensitive`)
+          .set(s.direction.auth)
+          .send({ reason: 'Contrôle des coordonnées' })
+          .expect(201)
+      ).body;
+
+    // La comptabilité change le numéro Mobile Money après la validation : simple demande.
+    const asked = await http()
+      .patch(`/hr/employees/${file}`)
+      .set(s.compta.auth)
+      .send({ sensitive: { mobileMoneyNumber: '699000111' } })
+      .expect(200);
+    expect(asked.body.pendingPayoutChange).toMatchObject({
+      before: { method: 'MOBILE_MONEY', mobileMoneyNumber: '•••• 3456' },
+      after: { method: 'MOBILE_MONEY', mobileMoneyNumber: '•••• 0111' },
+    });
+    expect((await plain()).mobileMoneyNumber).toBe('677123456');
+    expect(await transfers()).toContain('677123456');
+    expect(await transfers()).not.toContain('699000111');
+    await http()
+      .patch(`/hr/employees/${file}`)
+      .set(s.compta.auth)
+      .send({ payoutMethod: 'CASH' })
+      .expect(409);
+    // Ni la personne qui a demandé ni la personne concernée n'approuvent.
+    await http().post(`/hr/employees/${file}/payout-change/approve`).set(s.compta.auth).expect(403);
+    await http().post(`/hr/employees/${file}/payout-change/approve`).set(s.prof.auth).expect(403);
+    await http()
+      .post(`/hr/employees/${file}/payout-change/approve`)
+      .set(s.direction.auth)
+      .expect(201);
+    expect((await plain()).mobileMoneyNumber).toBe('699000111');
+    // La paie validée garde le numéro figé à la validation, y compris pour le versement.
+    expect(await transfers()).toContain('677123456');
+    expect(await transfers()).not.toContain('699000111');
+    await http()
+      .post(`/hr/payroll/${MONTH}/pay`)
+      .set(s.compta.auth)
+      .send({ date: today(), method: 'MTN_MOMO' })
+      .expect(201);
+    const paid = await prisma.auditLog.findFirstOrThrow({ where: { action: 'hr.payroll_paid' } });
+    expect(paid.after).toMatchObject({
+      transfersFingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
+    });
+    expect(Object.keys((paid.after as { byMethod: object }).byMethod)).toEqual(['MOBILE_MONEY']);
+    // La paie suivante prend le nouveau numéro approuvé.
+    await validatedPayroll('2026-11');
+    const nov = (
+      await http().get('/hr/payroll/2026-11/transfers?format=csv').set(s.compta.auth).expect(200)
+    ).text;
+    expect(nov).toContain('699000111');
+
+    // Refus : rien ne change.
+    await http()
+      .patch(`/hr/employees/${file}`)
+      .set(s.compta.auth)
+      .send({ payoutMethod: 'BANK', sensitive: { bankName: 'SGC', bankAccount: 'CM21 9999 0000' } })
+      .expect(200);
+    await http()
+      .post(`/hr/employees/${file}/payout-change/reject`)
+      .set(s.direction.auth)
+      .send({ reason: 'RIB non signé' })
+      .expect(201);
+    const detail = await http().get(`/hr/employees/${file}`).set(s.direction.auth).expect(200);
+    expect(detail.body.payoutMethod).toBe('MOBILE_MONEY');
+    expect(detail.body.pendingPayoutChange).toBeNull();
+    await http()
+      .post(`/hr/employees/${file}/payout-change/approve`)
+      .set(s.direction.auth)
+      .expect(404);
+
+    // Journal : valeurs masquées et empreintes, jamais de numéro en clair.
+    const logs = await prisma.auditLog.findMany({
+      where: { action: { startsWith: 'hr.payout_details_' } },
+      orderBy: { createdAt: 'asc' },
+    });
+    expect(logs.map((l) => l.action)).toEqual([
+      'hr.payout_details_requested',
+      'hr.payout_details_approved',
+      'hr.payout_details_requested',
+      'hr.payout_details_rejected',
+    ]);
+    const text = JSON.stringify(logs);
+    for (const secret of ['677123456', '699000111', 'CM21 9999 0000', 'CM2199990000'])
+      expect(text).not.toContain(secret);
+    expect(logs[1]?.before).toMatchObject({
+      mobileMoneyNumber: '•••• 3456',
+      fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
+    });
+    expect(logs[1]?.after).toMatchObject({ mobileMoneyNumber: '•••• 0111' });
+    expect((logs[1]?.before as { fingerprint: string }).fingerprint).not.toBe(
+      (logs[1]?.after as { fingerprint: string }).fingerprint,
+    );
+    await expect(
+      prisma.payoutDetailsChange.updateMany({ data: { status: 'PENDING' } }),
+    ).rejects.toThrow(/tranchée/);
+  });
+});
+
 describe('avances sur salaire', () => {
   it('versement 421 / trésorerie, puis remboursement par retenue sur la paie', async () => {
     await enable(f.schoolId, ['accounting']);
@@ -558,7 +685,7 @@ describe('écritures manuelles de trésorerie', () => {
         { accountNumber: '571', credit: amount },
       ],
     });
-    const post = (b: unknown, session = s.compta) =>
+    const post = (b: object, session = s.compta) =>
       http().post('/accounting/entries').set(session.auth).send(b);
 
     // Sous le seuil : passée aussitôt.

@@ -43,6 +43,11 @@ export interface TranscriptData {
   generalAverageCenti: number | null;
   totalCoefficient: number;
   generatedAt: string;
+  /**
+   * Écart avec un bulletin publié de la période (notes rouvertes depuis la publication) : le
+   * relevé reflète les notes actuelles, le bulletin publié reste le document de référence.
+   */
+  publicationNotice: string | null;
 }
 
 const GROUP_ORDER: SubjectGroup[] = ['LITERARY', 'SCIENTIFIC', 'OTHER'];
@@ -170,6 +175,37 @@ export class TranscriptsService {
     }
     const totals = general((csId) => perSubject(csId).average);
 
+    // Bulletins publiés de la période : moyenne trimestrielle recalculée comparée à l'instantané.
+    const published = await this.db.reportCard.findMany({
+      where: {
+        studentId,
+        termId: { in: period.terms.map((t) => t.id) },
+        status: 'PUBLISHED',
+      },
+      select: { termId: true, generalAverageCenti: true, needsRepublish: true },
+    });
+    const termAverage = (termId: string): number | null | undefined => {
+      if (scope === 'term') return generalAverageCenti;
+      if (scope === 'year') return columnGenerals[period.terms.findIndex((t) => t.id === termId)];
+      return undefined;
+    };
+    const diverging = period.terms.filter((t) => {
+      const card = published.find((c) => c.termId === t.id);
+      if (!card) return false;
+      const computed = termAverage(t.id);
+      return (
+        card.needsRepublish || (computed !== undefined && computed !== card.generalAverageCenti)
+      );
+    });
+    const publicationNotice =
+      diverging.length > 0
+        ? `Notes modifiées depuis la publication du bulletin (${diverging
+            .map((t) => t.name)
+            .join(
+              ', ',
+            )}) : ce relevé reflète les notes actuelles et diffère du bulletin publié, qui fait foi jusqu’à sa republication.`
+        : null;
+
     const subjects = classSubjects.map((cs): TranscriptSubject => {
       const r = perSubject(cs.id);
       return {
@@ -216,6 +252,7 @@ export class TranscriptsService {
       generalAverageCenti,
       totalCoefficient: totals.totalCoefficient,
       generatedAt: new Date().toISOString(),
+      publicationNotice,
     };
     return data;
   }

@@ -38,6 +38,7 @@ interface Transcript {
   columnGeneralAverages: (number | null)[];
   generalAverageCenti: number | null;
   totalCoefficient: number;
+  publicationNotice: string | null;
 }
 
 const SCOPES: [Scope, string][] = [
@@ -164,6 +165,14 @@ export default function TranscriptsPage() {
               </Button>
             }
           />
+          {t.publicationNotice ? (
+            <p
+              role="status"
+              className="mb-3 rounded-[12px] bg-warn-soft p-3 text-sm font-medium text-ink"
+            >
+              {t.publicationNotice}
+            </p>
+          ) : null}
           {/* Téléphone : cartes empilées. */}
           <ul className="flex flex-col gap-2 lg:hidden">
             {t.groups.flatMap((g) =>

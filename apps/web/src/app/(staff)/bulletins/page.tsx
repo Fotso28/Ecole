@@ -31,6 +31,8 @@ interface CardRow {
   rankLabel: string;
   classSize: number;
   publishedAt: string | null;
+  needsRepublish: boolean;
+  republishReason: string | null;
   decision: string | null;
   annualAverageCenti: number | null;
   annualRankLabel: string | null;
@@ -239,14 +241,23 @@ export default function ReportCardsPage() {
               </div>
               <Badge
                 tone={
-                  c.status === 'PUBLISHED' ? 'night' : c.status === 'DRAFT' ? 'warn' : 'neutral'
+                  c.status === 'PUBLISHED' && c.needsRepublish
+                    ? 'danger'
+                    : c.status === 'PUBLISHED'
+                      ? 'night'
+                      : c.status === 'DRAFT'
+                        ? 'warn'
+                        : 'neutral'
                 }
+                title={c.needsRepublish ? (c.republishReason ?? undefined) : undefined}
               >
-                {c.status === 'PUBLISHED'
-                  ? `Publié · v${c.version}`
-                  : c.status === 'DRAFT'
-                    ? `Brouillon · v${c.version}`
-                    : 'Remplacé'}
+                {c.status === 'PUBLISHED' && c.needsRepublish
+                  ? `À republier · v${c.version}`
+                  : c.status === 'PUBLISHED'
+                    ? `Publié · v${c.version}`
+                    : c.status === 'DRAFT'
+                      ? `Brouillon · v${c.version}`
+                      : 'Remplacé'}
               </Badge>
               <div className="flex w-full gap-2 sm:w-auto">
                 {can('reportcards.generate') ? (

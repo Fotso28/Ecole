@@ -127,9 +127,17 @@ test('comptabilité : scolarité, saisie, contre-passation, dépense validée, �
   await logout(page);
   await loginStaff(page, 'direction@demo.cm');
   await page.goto('/comptabilite/ecritures');
+  await expect(page.getByRole('heading', { name: 'Écritures', level: 1 })).toBeVisible();
   await pendingEntry.getByRole('button', { name: /^Valider/ }).click();
-  await expect(page.getByText(/Écriture CA-\d{4}-\d{6} validée et enregistrée/)).toBeVisible();
   await expect(pendingEntry).toHaveCount(0);
+  // L'écriture (opérations diverses par défaut) est passée avec son numéro.
+  await expect(
+    page
+      .locator('li')
+      .filter({ hasText: `Avance de caisse ${tag}` })
+      .filter({ hasText: /OD-\d{4}-\d{6}/ })
+      .first(),
+  ).toBeVisible();
 
   // États financiers et export Excel.
   await navigate(page, info, 'États financiers');

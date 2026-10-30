@@ -78,6 +78,8 @@ export default function TimetablePage() {
   const [moving, setMoving] = useState<Entry | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
   const pending = useRef<{ entry: Entry; x: number; y: number; pointerId: number } | null>(null);
+  // Dernier état du glisser, lu au relâchement sans dépendre du rendu en cours.
+  const dragRef = useRef<DragState | null>(null);
   const editable = can('academic.write');
 
   useEffect(() => {
@@ -180,25 +182,29 @@ export default function TimetablePage() {
   const onPointerMove = (e: ReactPointerEvent<HTMLElement>) => {
     const start = pending.current;
     if (!start || start.pointerId !== e.pointerId) return;
-    if (!drag && Math.hypot(e.clientX - start.x, e.clientY - start.y) < DRAG_THRESHOLD) return;
+    if (!dragRef.current && Math.hypot(e.clientX - start.x, e.clientY - start.y) < DRAG_THRESHOLD)
+      return;
     e.preventDefault();
     const target = targetAt(e.clientX, e.clientY, start.entry);
     const same =
       target?.dayOfWeek === start.entry.dayOfWeek && target.startTime === start.entry.startTime;
-    setDrag({
+    const next: DragState = {
       entry: start.entry,
       x: e.clientX,
       y: e.clientY,
       target: target && !same ? target : null,
       conflicts: target && !same ? check(start.entry, target) : [],
-    });
+    };
+    dragRef.current = next;
+    setDrag(next);
   };
 
   const endDrag = (e: ReactPointerEvent<HTMLElement>, cancelled = false) => {
     const start = pending.current;
     if (!start || start.pointerId !== e.pointerId) return;
     pending.current = null;
-    const current = drag;
+    const current = dragRef.current;
+    dragRef.current = null;
     setDrag(null);
     if (cancelled || !current?.target) return;
     if (current.conflicts.length > 0) {

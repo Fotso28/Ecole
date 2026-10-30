@@ -1,16 +1,43 @@
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test';
+import { API_URL } from '../playwright.config';
 import {
   expectNoHorizontalOverflow,
   isMobile,
   loginParent,
   loginStaff,
   openPortalTab,
+  PASSWORD,
 } from './helpers';
 
 const PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
   'base64',
 );
+
+/**
+ * Numéro d'un parent distinct par test et par projet : la limite de codes SMS par numéro n'est
+ * jamais atteinte, et les autres parcours (4e A, a11y) gardent leurs parents.
+ */
+async function parentPhone(request: APIRequestContext, index: number): Promise<string> {
+  const login = await request.post(`${API_URL}/auth/login`, {
+    data: { email: 'direction@demo.cm', password: PASSWORD },
+  });
+  const { accessToken } = (await login.json()) as { accessToken: string };
+  const list = (await (
+    await request.get(`${API_URL}/students?pageSize=100`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+  ).json()) as { items: { class: { name: string } | null; guardian: { phone: string } | null }[] };
+  const phones = [
+    ...new Set(
+      list.items
+        .filter((s) => s.class?.name !== '4e A' && s.guardian)
+        .map((s) => s.guardian!.phone)
+        .filter((p) => !p.endsWith('677123456')),
+    ),
+  ];
+  return phones[index]!.replace('+237', '');
+}
 
 async function center(locator: Locator) {
   const box = await locator.boundingBox();
@@ -77,7 +104,9 @@ test.describe('emploi du temps', () => {
     // Sur téléphone, on reste sur la journée affichée ; sur ordinateur, on change de jour.
     const conflictCell = mobile ? cell(1, '07:30') : cell(2, '07:30');
     const freeDay = mobile ? 1 : 4;
-    const freeCell = cell(freeDay, '14:00');
+    // Sur téléphone, cible visible à l'écran (un toucher hors de la fenêtre est annulé).
+    const freeStart = mobile ? '12:20' : '14:00';
+    const freeCell = cell(freeDay, freeStart);
     const status = page.locator('[data-drag-status]');
     await dragTo(page, mobile, maths.locator('[data-drag-handle]'), [
       {
@@ -94,9 +123,11 @@ test.describe('emploi du temps', () => {
         },
       },
     ]);
-    await expect(page.getByText(/Cours déplacé au (lundi|jeudi) à 14:00/)).toBeVisible();
+    await expect(
+      page.getByText(`Cours déplacé au ${mobile ? 'lundi' : 'jeudi'} à ${freeStart}`),
+    ).toBeVisible();
     const moved = freeCell.locator('[data-lesson]', { hasText: 'Mathématiques' });
-    await expect(moved).toContainText('14:00–14:55');
+    await expect(moved).toContainText(mobile ? '12:20–13:15' : '14:00–14:55');
 
     // Alternative au clavier : bouton « Déplacer » et choix du créneau.
     await moved.getByRole('button', { name: /^Déplacer Mathématiques/ }).focus();
@@ -117,9 +148,9 @@ test.describe('emploi du temps', () => {
 });
 
 test.describe('portail des parents', () => {
-  test('quatre onglets et « Plus » sur un écran de 360 px', async ({ page }) => {
+  test('quatre onglets et « Plus » sur un écran de 360 px', async ({ page, request }, info) => {
     await page.setViewportSize({ width: 360, height: 740 });
-    await loginParent(page, '677123456');
+    await loginParent(page, await parentPhone(request, isMobile(info) ? 10 : 11));
     const nav = page.getByRole('navigation', { name: 'Navigation' });
     await expect(nav.getByRole('link')).toHaveCount(4);
     const plus = nav.getByRole('button', { name: /^Plus/ });
@@ -158,8 +189,9 @@ test.describe('hors connexion', () => {
   test('le parent relit ses dernières pages, puis la déconnexion purge le cache', async ({
     page,
     context,
-  }) => {
-    await loginParent(page, '677123456');
+    request,
+  }, info) => {
+    await loginParent(page, await parentPhone(request, isMobile(info) ? 12 : 13));
     await page.evaluate(() => navigator.serviceWorker.ready.then(() => undefined));
     // Page contrôlée par le service worker : les données consultées sont mises en cache.
     await page.reload();

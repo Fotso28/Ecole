@@ -1,6 +1,10 @@
 import type { Module, Permission, StaffRole } from '@ecole/shared';
 import {
+  Banknote,
   BookOpen,
+  Briefcase,
+  Clock,
+  HandCoins,
   CalendarDays,
   ClipboardCheck,
   FileBadge,
@@ -183,6 +187,36 @@ export const NAV: NavGroup[] = [
         icon: Receipt,
         permission: 'finance.read',
         module: 'finance',
+      },
+    ],
+  },
+  {
+    label: 'Ressources humaines',
+    items: [
+      {
+        href: '/rh',
+        label: 'Dossiers du personnel',
+        short: 'Dossiers',
+        icon: Briefcase,
+        permission: 'hr.read',
+        module: 'hr',
+      },
+      {
+        href: '/rh/heures',
+        label: 'Heures de cours',
+        short: 'Heures',
+        icon: Clock,
+        permission: 'hr.read',
+        module: 'hr',
+      },
+      { href: '/rh/paie', label: 'Paie', icon: Banknote, permission: 'hr.read', module: 'hr' },
+      {
+        href: '/rh/avances',
+        label: 'Avances sur salaire',
+        short: 'Avances',
+        icon: HandCoins,
+        permission: 'hr.read',
+        module: 'hr',
       },
     ],
   },

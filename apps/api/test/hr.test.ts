@@ -367,7 +367,7 @@ describe('paie mensuelle', () => {
   });
 
   const slipOf = (body: { payslips: { employeeId: string }[] }, employeeId: string) =>
-    body.payslips.find((p) => p.employeeId === employeeId) as {
+    body.payslips.find((p) => p.employeeId === employeeId) as unknown as {
       id: string;
       gross: number;
       net: number;

@@ -9,6 +9,7 @@ import { PrismaModule } from './common/prisma';
 import { HealthController } from './health.controller';
 import { AcademicModule } from './modules/academic/academic.module';
 import { AlertsModule } from './modules/alerts/alerts.module';
+import { AccountingModule } from './modules/accounting/accounting.module';
 import { AttendanceModule } from './modules/attendance/attendance.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -69,6 +70,7 @@ import { ReenrollmentModule } from './modules/reenrollment/reenrollment.module';
     VerifyModule,
     TranscriptsModule,
     ExamsModule,
+    AccountingModule,
     DevModule,
     DocumentsModule,
     DisciplineModule,

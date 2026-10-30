@@ -2,6 +2,7 @@ import type { INestApplicationContext } from '@nestjs/common';
 import { runAsSystem } from './common/context';
 import { CalendarService } from './modules/calendar/calendar.module';
 import { AlertsService } from './modules/alerts/alerts.service';
+import { AccountingService } from './modules/accounting/accounting.service';
 import { FinanceService } from './modules/finance/finance.service';
 import { NotificationsService } from './modules/notifications/notifications.service';
 
@@ -16,6 +17,8 @@ export const JOBS = {
   eventReminders: { pattern: '0 18 * * *', tz: 'Africa/Douala' },
   /** Alertes à l'équipe technique (paiements, notifications, sauvegarde, santé de l'API). */
   alerts: { every: 60_000 },
+  /** Écritures comptables des opérations de scolarité (idempotent, rattrape l'historique). */
+  accounting: { every: 60_000 },
 } as const;
 
 export type JobName = keyof typeof JOBS;
@@ -32,6 +35,13 @@ export async function runJob(app: INestApplicationContext, name: string): Promis
       return runAsSystem('job:event-reminders', () => app.get(CalendarService).sendReminders());
     case 'alerts':
       return runAsSystem('job:alerts', () => app.get(AlertsService).runChecks());
+    case 'accounting':
+      return runAsSystem('job:accounting', () =>
+        app
+          .get(AccountingService)
+          .syncAllSchools()
+          .then((r) => r.posted),
+      );
     default:
       throw new Error(`Tâche inconnue : ${name}`);
   }

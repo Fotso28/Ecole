@@ -1,3 +1,4 @@
+export * from './accounting';
 export * from './billing';
 export * from './files';
 export * from './communication';

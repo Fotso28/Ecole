@@ -40,7 +40,7 @@ async function main(): Promise<void> {
         async () => {
           const result = await runJob(app, job.name);
           if (
-            !['outbox', 'alerts'].includes(job.name) ||
+            !['outbox', 'alerts', 'accounting'].includes(job.name) ||
             (typeof result === 'number' && result > 0) ||
             (Array.isArray(result) && result.length > 0)
           )

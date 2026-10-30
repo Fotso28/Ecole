@@ -65,6 +65,9 @@ export const PERMISSIONS = [
   'exams.manage',
   'exams.grade',
   'exams.anonymity.reveal',
+  'accounting.read',
+  'accounting.write',
+  'accounting.close',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -130,6 +133,9 @@ export const ROLE_PERMISSIONS: Record<StaffRole, readonly Permission[]> = {
     'finance.payments.reverse',
     'finance.cash.close',
     'communication.write',
+    'accounting.read',
+    'accounting.write',
+    'accounting.close',
   ],
   TEACHER: [
     'academic.read',
@@ -183,5 +189,6 @@ export const MODULES = [
   'timetable',
   'exams',
   'documents',
+  'accounting',
 ] as const;
 export type Module = (typeof MODULES)[number];

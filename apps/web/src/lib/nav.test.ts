@@ -99,6 +99,17 @@ describe('navigation par rôle', () => {
     expect(noFinance).toContain('/eleves');
   });
 
+  it('ouvre la comptabilité à la comptabilité et à la direction, si le module est souscrit', () => {
+    const modules = ['students', 'finance', 'accounting'];
+    const pages = ['/comptabilite', '/comptabilite/ecritures', '/comptabilite/depenses'];
+    expect(hrefs(me(['ACCOUNTANT'], modules))).toEqual(expect.arrayContaining(pages));
+    expect(hrefs(me(['DIRECTOR'], modules))).toEqual(
+      expect.arrayContaining([...pages, '/comptabilite/etats', '/comptabilite/plan']),
+    );
+    expect(hrefs(me(['SECRETARY'], modules))).not.toContain('/comptabilite');
+    expect(hrefs(me(['ACCOUNTANT']))).not.toContain('/comptabilite');
+  });
+
   it('choisit quatre destinations pour le menu inférieur du téléphone', () => {
     expect(primaryNav(me(['TEACHER'])).map((i) => i.href)).toEqual([
       '/enseignant',

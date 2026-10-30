@@ -419,29 +419,36 @@ model ClassSubject {
 }
 
 model Student {
-  id             String    @id @default(cuid())
-  schoolId       String
-  matricule      String
-  firstName      String
-  lastName       String
-  gender         Gender
-  birthDate      DateTime  @db.Date
-  birthPlace     String?
-  nationality    String    @default("Camerounaise")
-  photoConsent   Boolean   @default(false)
-  previousSchool String?
-  deletedAt      DateTime?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  id               String    @id @default(cuid())
+  schoolId         String
+  matricule        String
+  firstName        String
+  lastName         String
+  gender           Gender
+  birthDate        DateTime  @db.Date
+  birthPlace       String?
+  nationality      String    @default("Camerounaise")
+  photoConsent     Boolean   @default(false)
+  /// Date et auteur du dernier changement du consentement à la photo (loi sur les données personnelles).
+  photoConsentAt   DateTime?
+  photoConsentById String?
+  /// Photo d'identité, chiffrée ; déposée seulement avec le consentement, retirée avec lui.
+  photoFileId      String?
+  previousSchool   String?
+  deletedAt        DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   school      School            @relation(fields: [schoolId], references: [id], onDelete: Restrict)
   guardians   StudentGuardian[]
   enrollments Enrollment[]
   documents   StudentDocument[]
   health      HealthRecord?
+  photoFile   StoredFile?       @relation("StudentPhoto", fields: [photoFileId], references: [id], onDelete: SetNull)
 
   @@unique([schoolId, matricule])
   @@index([schoolId, lastName])
+  @@index([schoolId, lastName, firstName])
 }
 
 model Guardian {
@@ -493,6 +500,7 @@ model Enrollment {
 
   @@unique([studentId, academicYearId])
   @@index([schoolId, classId])
+  @@index([schoolId, academicYearId, status])
 }
 
 model StudentDocument {
@@ -745,6 +753,7 @@ model Payment {
   @@unique([method, operatorReference])
   @@index([schoolId, studentId])
   @@index([status, createdAt])
+  @@index([schoolId, createdAt])
 }
 
 model PaymentAllocation {
@@ -1136,6 +1145,7 @@ model AdminDocument {
 
 enum FileCategory {
   STUDENT_DOCUMENT
+  STUDENT_PHOTO
   JUSTIFICATION
   COURSE_MATERIAL
 }
@@ -1163,6 +1173,7 @@ model StoredFile {
   studentDocuments StudentDocument[]
   justifications   Justification[]
   courseMaterials  CourseMaterial[]
+  studentPhotos    Student[]         @relation("StudentPhoto")
 
   @@index([schoolId, category])
 }

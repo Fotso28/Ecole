@@ -12,7 +12,15 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { api, refreshSession, setAccessToken, setSessionLostHandler } from './api';
+import {
+  api,
+  getAccessToken,
+  lastRefreshFailure,
+  refreshSession,
+  setAccessToken,
+  setSessionLostHandler,
+} from './api';
+import { isOffline, purgeOfflineData, readOfflineProfile, saveOfflineProfile } from './offline';
 import type { Me, SessionResponse } from './types';
 
 type Status = 'loading' | 'authenticated' | 'anonymous';
@@ -35,6 +43,26 @@ interface AuthValue {
 
 const AuthContext = createContext<AuthValue | null>(null);
 
+/** Déconnexion demandée hors connexion : le cookie de session est révoqué au retour du réseau. */
+const LOGOUT_PENDING = 'ecole.logout-pending';
+function logoutPending(): boolean {
+  try {
+    return localStorage.getItem(LOGOUT_PENDING) === '1';
+  } catch {
+    return false;
+  }
+}
+async function finishPendingLogout(): Promise<boolean> {
+  try {
+    const res = await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
+    if (!res.ok) return false;
+    localStorage.removeItem(LOGOUT_PENDING);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<Status>('loading');
   const [me, setMe] = useState<Me | null>(null);
@@ -43,6 +71,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loadMe = useCallback(async () => {
     const data = await api<Me>('/auth/me');
+    saveOfflineProfile(data);
     setMe(data);
     setStatus('authenticated');
   }, []);
@@ -52,11 +81,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setMe(null);
     setStatus('anonymous');
     queryClient.clear();
+    void purgeOfflineData();
   }, [queryClient]);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
+      if (logoutPending()) {
+        await finishPendingLogout();
+        if (!cancelled) clear();
+        return;
+      }
       const ok = await refreshSession();
       if (cancelled) return;
       if (ok) {
@@ -66,6 +101,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } catch {
           // Session invalide : retour à l'écran de connexion.
         }
+      } else if (lastRefreshFailure() === 'network') {
+        // Hors connexion : lecture des dernières données avec le profil gardé sur l'appareil.
+        const profile = readOfflineProfile();
+        if (profile) {
+          setMe(profile);
+          setStatus('authenticated');
+          return;
+        }
       }
       if (!cancelled) clear();
     })();
@@ -73,6 +116,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       cancelled = true;
     };
   }, [loadMe, clear]);
+
+  // Retour du réseau après une ouverture hors connexion : la session est revérifiée.
+  useEffect(() => {
+    if (status !== 'authenticated') return;
+    const onOnline = async () => {
+      if (getAccessToken()) return;
+      if (await refreshSession()) {
+        await loadMe().catch(() => undefined);
+      } else if (lastRefreshFailure() === 'denied') {
+        clear();
+        router.replace(me?.kind === 'parent' ? '/parent/connexion' : '/connexion?expiree=1');
+      }
+    };
+    window.addEventListener('online', onOnline);
+    return () => window.removeEventListener('online', onOnline);
+  }, [status, me, loadMe, clear, router]);
 
   useEffect(() => {
     setSessionLostHandler(() => {
@@ -84,6 +143,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const startSession = useCallback(
     async (session: SessionResponse) => {
+      await purgeOfflineData();
       setAccessToken(session.accessToken);
       queryClient.clear();
       await loadMe();
@@ -130,6 +190,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         );
       },
       logout: async () => {
+        if (isOffline()) {
+          try {
+            localStorage.setItem(LOGOUT_PENDING, '1');
+          } catch {
+            // Stockage indisponible.
+          }
+        }
         try {
           await api('/auth/logout', { method: 'POST' });
         } finally {

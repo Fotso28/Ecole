@@ -56,6 +56,15 @@ const journalSchema = z.object({
   to: isoDate.optional(),
   method: z.enum(PAYMENT_METHODS).optional(),
   status: z.enum(['PENDING', 'SUCCESS', 'FAILED', 'CANCELLED']).optional(),
+  /** Pagination par curseur : identifiant du dernier paiement de la page précédente. */
+  cursor: z.string().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+const unpaidSchema = z.object({
+  classId: z.string().min(1).optional(),
+  academicYearId: z.string().min(1).optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(200).default(50),
 });
 const exportSchema = z.object({ from: isoDate, to: isoDate });
 const webhookSchema = z
@@ -135,7 +144,7 @@ export class FinanceController {
   @RequirePermissions('finance.read')
   @Get('payments')
   journal(@Query(new ZodPipe(journalSchema)) q: z.infer<typeof journalSchema>) {
-    return this.finance.journal(q);
+    return this.finance.journalPage(q);
   }
 
   @RequirePermissions('finance.read')
@@ -216,11 +225,11 @@ export class FinanceController {
 
   @RequirePermissions('finance.read')
   @Get('unpaid')
-  async unpaid(
-    @Query('classId') classId?: string,
-    @Query('academicYearId') academicYearId?: string,
-  ) {
-    return this.finance.unpaid(academicYearId ?? (await this.scope.currentYear()).id, classId);
+  async unpaid(@Query(new ZodPipe(unpaidSchema)) q: z.infer<typeof unpaidSchema>) {
+    return this.finance.unpaid(q.academicYearId ?? (await this.scope.currentYear()).id, q.classId, {
+      page: q.page,
+      pageSize: q.pageSize,
+    });
   }
 }
 

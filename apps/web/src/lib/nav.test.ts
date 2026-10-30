@@ -115,6 +115,20 @@ describe('navigation par rôle', () => {
     expect(primaryNav(me(['DIRECTOR'])).length).toBe(4);
   });
 
+  it('ne dépasse jamais cinq entrées dans le menu du bas (quatre destinations et « Menu »)', () => {
+    const roles: StaffRole[] = [
+      'DIRECTOR',
+      'CENSOR',
+      'SUPERVISOR',
+      'SECRETARY',
+      'ACCOUNTANT',
+      'TEACHER',
+      'NURSE',
+    ];
+    for (const role of roles) expect(primaryNav(me([role])).length).toBeLessThanOrEqual(4);
+    expect(primaryNav(me(roles)).length).toBeLessThanOrEqual(4);
+  });
+
   it('active l’élément du plus long préfixe', () => {
     const items = visibleNav(me(['DIRECTOR'])).flatMap((g) => g.items);
     expect(activeHref('/caisse/journal', items)).toBe('/caisse/journal');

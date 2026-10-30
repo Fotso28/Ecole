@@ -1,6 +1,6 @@
 'use client';
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Download } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, EmptyState, ErrorBlock, LoadingBlock, PageHeader } from '@/components/ui/card';
 import { InputField, SelectField } from '@/components/ui/field';
+import { LoadMore } from '@/components/ui/load-more';
 import { Sheet } from '@/components/ui/sheet';
 import { useToast } from '@/components/ui/toast';
 import { api, downloadFile, openPdf } from '@/lib/api';
@@ -35,10 +36,17 @@ export default function JournalPage() {
   const [method, setMethod] = useState('');
   const [reverse, setReverse] = useState<Row | null>(null);
   const qs = new URLSearchParams({ from, to, ...(method ? { method } : {}) }).toString();
-  const q = useQuery({
+  // Pagination par curseur : 50 paiements par page, chargés à la demande.
+  const q = useInfiniteQuery({
     queryKey: ['journal', qs],
-    queryFn: () => api<Row[]>(`/finance/payments?${qs}`),
+    queryFn: ({ pageParam }) =>
+      api<{ items: Row[]; nextCursor: string | null; collected: number | null }>(
+        `/finance/payments?${qs}${pageParam ? `&cursor=${pageParam}` : ''}`,
+      ),
+    initialPageParam: '',
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
   });
+  const rows = q.data?.pages.flatMap((p) => p.items) ?? [];
   const doReverse = useMutation({
     mutationFn: (reason: string) =>
       api(`/finance/payments/${reverse?.id}/reverse`, { method: 'POST', body: { reason } }),
@@ -49,10 +57,7 @@ export default function JournalPage() {
     },
     onError: (e) => toast(e instanceof Error ? e.message : 'Erreur', 'error'),
   });
-  const total =
-    q.data
-      ?.filter((p) => p.status === 'SUCCESS' && !p.reversed)
-      .reduce((s, p) => s + p.amount, 0) ?? 0;
+  const total = q.data?.pages[0]?.collected ?? 0;
 
   return (
     <>
@@ -95,74 +100,83 @@ export default function JournalPage() {
         <LoadingBlock />
       ) : q.isError ? (
         <ErrorBlock error={q.error} onRetry={() => q.refetch()} />
-      ) : q.data.length === 0 ? (
+      ) : rows.length === 0 ? (
         <EmptyState title="Aucun paiement sur la période" />
       ) : (
-        <ul className="flex flex-col gap-2">
-          {q.data.map((p) => (
-            <li
-              key={p.id}
-              className="flex flex-wrap items-center gap-3 rounded-[14px] border border-line bg-white p-3"
-            >
-              <div className="flex min-w-0 flex-1 flex-col">
-                {p.student ? (
-                  <Link
-                    href={`/eleves/${p.student.id}`}
-                    className="truncate font-semibold hover:underline"
-                  >
-                    {p.student.lastName} {p.student.firstName}
-                  </Link>
-                ) : null}
-                <span className="text-[13px] text-muted">
-                  {p.methodLabel} · {formatDateTime(p.confirmedAt ?? p.createdAt)}
-                  {p.receipt ? ` · ${p.receipt.number}` : ''}
-                </span>
-              </div>
-              <strong className={cn('tabular', p.reversed && 'text-muted line-through')}>
-                {formatFcfa(p.amount)}
-              </strong>
-              {p.reversed ? (
-                <Badge tone="danger">Annulé</Badge>
-              ) : p.status === 'SUCCESS' ? (
-                <Badge tone="success">Encaissé</Badge>
-              ) : p.status === 'PENDING' ? (
-                <Badge tone="info">En attente</Badge>
-              ) : (
-                <Badge>{p.status === 'FAILED' ? 'Échec' : 'Expiré'}</Badge>
-              )}
-              <div className="flex w-full gap-2 sm:w-auto">
-                {p.receipt ? (
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    className="flex-1 sm:flex-none"
-                    onClick={() =>
-                      openPdf(`/finance/payments/${p.id}/receipt.pdf`).catch(() =>
-                        toast('Reçu indisponible', 'error'),
-                      )
-                    }
-                  >
-                    Reçu
-                  </Button>
-                ) : null}
-                {/* Une remise d'espèces s'annule par une autre personne que le caissier. */}
-                {can('finance.payments.reverse') &&
-                p.status === 'SUCCESS' &&
-                !p.reversed &&
-                !(p.method === 'CASH' && p.receivedById === me?.user.id) ? (
-                  <Button
-                    variant="danger"
-                    size="sm"
-                    className="flex-1 sm:flex-none"
-                    onClick={() => setReverse(p)}
-                  >
-                    Annuler
-                  </Button>
-                ) : null}
-              </div>
-            </li>
-          ))}
-        </ul>
+        <>
+          <ul className="flex flex-col gap-2">
+            {rows.map((p) => (
+              <li
+                key={p.id}
+                className="flex flex-wrap items-center gap-3 rounded-[14px] border border-line bg-white p-3"
+              >
+                <div className="flex min-w-0 flex-1 flex-col">
+                  {p.student ? (
+                    <Link
+                      href={`/eleves/${p.student.id}`}
+                      className="truncate font-semibold hover:underline"
+                    >
+                      {p.student.lastName} {p.student.firstName}
+                    </Link>
+                  ) : null}
+                  <span className="text-[13px] text-muted">
+                    {p.methodLabel} · {formatDateTime(p.confirmedAt ?? p.createdAt)}
+                    {p.receipt ? ` · ${p.receipt.number}` : ''}
+                  </span>
+                </div>
+                <strong className={cn('tabular', p.reversed && 'text-muted line-through')}>
+                  {formatFcfa(p.amount)}
+                </strong>
+                {p.reversed ? (
+                  <Badge tone="danger">Annulé</Badge>
+                ) : p.status === 'SUCCESS' ? (
+                  <Badge tone="success">Encaissé</Badge>
+                ) : p.status === 'PENDING' ? (
+                  <Badge tone="info">En attente</Badge>
+                ) : (
+                  <Badge>{p.status === 'FAILED' ? 'Échec' : 'Expiré'}</Badge>
+                )}
+                <div className="flex w-full gap-2 sm:w-auto">
+                  {p.receipt ? (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="flex-1 sm:flex-none"
+                      onClick={() =>
+                        openPdf(`/finance/payments/${p.id}/receipt.pdf`).catch(() =>
+                          toast('Reçu indisponible', 'error'),
+                        )
+                      }
+                    >
+                      Reçu
+                    </Button>
+                  ) : null}
+                  {/* Une remise d'espèces s'annule par une autre personne que le caissier. */}
+                  {can('finance.payments.reverse') &&
+                  p.status === 'SUCCESS' &&
+                  !p.reversed &&
+                  !(p.method === 'CASH' && p.receivedById === me?.user.id) ? (
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      className="flex-1 sm:flex-none"
+                      onClick={() => setReverse(p)}
+                    >
+                      Annuler
+                    </Button>
+                  ) : null}
+                </div>
+              </li>
+            ))}
+          </ul>
+          <LoadMore
+            shown={rows.length}
+            hasMore={!!q.hasNextPage}
+            loading={q.isFetchingNextPage}
+            onMore={() => void q.fetchNextPage()}
+            noun="paiements"
+          />
+        </>
       )}
       <Sheet open={!!reverse} onClose={() => setReverse(null)} title="Annuler ce paiement ?">
         <form

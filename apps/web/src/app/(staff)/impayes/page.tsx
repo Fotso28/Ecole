@@ -1,6 +1,6 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { Wallet } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
@@ -14,11 +14,15 @@ import {
   Stat,
 } from '@/components/ui/card';
 import { SelectField } from '@/components/ui/field';
+import { LoadMore } from '@/components/ui/load-more';
 import { api } from '@/lib/api';
 import { formatFcfa, formatShortDate, plural } from '@/lib/format';
 import { useClasses } from '@/lib/queries';
 
 interface Unpaid {
+  total: number;
+  page: number;
+  pageSize: number;
   students: {
     student: { id: string; firstName: string; lastName: string; matricule: string };
     class: { id: string; name: string };
@@ -49,10 +53,19 @@ export default function UnpaidPage() {
     queryKey: ['finance-summary'],
     queryFn: () => api<Summary>('/finance/summary'),
   });
-  const q = useQuery({
+  const q = useInfiniteQuery({
     queryKey: ['unpaid', classId],
-    queryFn: () => api<Unpaid>(`/finance/unpaid${classId ? `?classId=${classId}` : ''}`),
+    queryFn: ({ pageParam }) =>
+      api<Unpaid>(
+        `/finance/unpaid?pageSize=30&page=${pageParam}${classId ? `&classId=${classId}` : ''}`,
+      ),
+    initialPageParam: 1,
+    getNextPageParam: (last) =>
+      last.page * last.pageSize < last.total ? last.page + 1 : undefined,
+    placeholderData: keepPreviousData,
   });
+  const first = q.data?.pages[0];
+  const students = q.data?.pages.flatMap((p) => p.students) ?? [];
   return (
     <>
       <PageHeader
@@ -94,7 +107,7 @@ export default function UnpaidPage() {
           <Card>
             <CardHeader title="Par classe" />
             <ul className="flex flex-col">
-              {q.data.classes.map((c) => (
+              {first?.classes.map((c) => (
                 <li
                   key={c.classId}
                   className="flex flex-col gap-1.5 border-t border-line py-2.5 first:border-t-0"
@@ -120,38 +133,48 @@ export default function UnpaidPage() {
               ))}
             </ul>
           </Card>
-          {q.data.students.length === 0 ? (
+          {students.length === 0 ? (
             <EmptyState title="Aucun impayé échu">Toutes les familles sont à jour.</EmptyState>
           ) : (
-            <ul className="flex flex-col gap-2">
-              {q.data.students.map((s) => (
-                <li
-                  key={s.student.id}
-                  className="flex items-center gap-3 rounded-[14px] border border-line bg-white p-3"
-                >
-                  <div className="flex min-w-0 flex-1 flex-col">
-                    <Link
-                      href={`/eleves/${s.student.id}`}
-                      className="truncate font-semibold hover:underline"
-                    >
-                      {s.student.lastName} {s.student.firstName}
-                    </Link>
-                    <span className="text-[13px] text-muted">
-                      {s.class.name} · en retard depuis le{' '}
-                      {s.oldestDueDate ? formatShortDate(s.oldestDueDate) : '—'}
-                    </span>
-                  </div>
-                  <strong className="text-danger tabular">{formatFcfa(s.overdue)}</strong>
-                  <Link
-                    href={`/caisse?eleve=${s.student.id}`}
-                    aria-label={`Encaisser pour ${s.student.lastName} ${s.student.firstName}`}
-                    className="flex size-11 items-center justify-center rounded-[10px] border border-line-strong"
+            <div className="flex flex-col gap-2">
+              <ul className="flex flex-col gap-2">
+                {students.map((s) => (
+                  <li
+                    key={s.student.id}
+                    className="flex items-center gap-3 rounded-[14px] border border-line bg-white p-3"
                   >
-                    <Wallet className="size-4" aria-hidden />
-                  </Link>
-                </li>
-              ))}
-            </ul>
+                    <div className="flex min-w-0 flex-1 flex-col">
+                      <Link
+                        href={`/eleves/${s.student.id}`}
+                        className="truncate font-semibold hover:underline"
+                      >
+                        {s.student.lastName} {s.student.firstName}
+                      </Link>
+                      <span className="text-[13px] text-muted">
+                        {s.class.name} · en retard depuis le{' '}
+                        {s.oldestDueDate ? formatShortDate(s.oldestDueDate) : '—'}
+                      </span>
+                    </div>
+                    <strong className="text-danger tabular">{formatFcfa(s.overdue)}</strong>
+                    <Link
+                      href={`/caisse?eleve=${s.student.id}`}
+                      aria-label={`Encaisser pour ${s.student.lastName} ${s.student.firstName}`}
+                      className="flex size-11 items-center justify-center rounded-[10px] border border-line-strong"
+                    >
+                      <Wallet className="size-4" aria-hidden />
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+              <LoadMore
+                shown={students.length}
+                total={first?.total}
+                hasMore={!!q.hasNextPage}
+                loading={q.isFetchingNextPage}
+                onMore={() => void q.fetchNextPage()}
+                noun="familles en retard"
+              />
+            </div>
           )}
         </div>
       )}

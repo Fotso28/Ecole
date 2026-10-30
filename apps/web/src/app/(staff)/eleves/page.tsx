@@ -1,14 +1,15 @@
 'use client';
 
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, Search, Upload, UserPlus } from 'lucide-react';
+import { keepPreviousData, useInfiniteQuery } from '@tanstack/react-query';
+import { Search, Upload, UserPlus } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState } from 'react';
 import { Badge, ENROLLMENT_BADGE } from '@/components/ui/badge';
-import { Button, ButtonLink } from '@/components/ui/button';
+import { ButtonLink } from '@/components/ui/button';
 import { EmptyState, ErrorBlock, LoadingBlock, PageHeader } from '@/components/ui/card';
 import { controlClass } from '@/components/ui/field';
+import { LoadMore } from '@/components/ui/load-more';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { formatCameroonPhone, formatFcfa, initials, plural } from '@/lib/format';
@@ -32,7 +33,6 @@ function StudentsContent() {
   const [search, setSearch] = useState(params.get('q') ?? '');
   const status = params.get('statut') ?? '';
   const classId = params.get('classe') ?? '';
-  const page = Number(params.get('page') ?? '1') || 1;
   const classes = useClasses();
 
   const setParam = (updates: Record<string, string>) => {
@@ -41,7 +41,7 @@ function StudentsContent() {
       if (v) next.set(k, v);
       else next.delete(k);
     }
-    if (!('page' in updates)) next.delete('page');
+    next.delete('page');
     router.replace(`${pathname}?${next.toString()}`, { scroll: false });
   };
 
@@ -52,27 +52,32 @@ function StudentsContent() {
     return () => clearTimeout(id);
   }, [search]);
 
-  const query = new URLSearchParams({ page: String(page), pageSize: '20' });
+  // Pages de 30 élèves ajoutées à la demande : une école de 2 000 élèves reste fluide au téléphone.
+  const query = new URLSearchParams({ pageSize: '30' });
   if (params.get('q')) query.set('search', params.get('q') ?? '');
   if (status) query.set('status', status);
   if (classId) query.set('classId', classId);
-  const q = useQuery({
+  const q = useInfiniteQuery({
     queryKey: ['students', query.toString()],
-    queryFn: () =>
+    queryFn: ({ pageParam }) =>
       api<Paged<StudentListItem> & { counts: Record<string, number> }>(
-        `/students?${query.toString()}`,
+        `/students?${query.toString()}&page=${pageParam}`,
       ),
+    initialPageParam: 1,
+    getNextPageParam: (last) =>
+      last.page * last.pageSize < last.total ? last.page + 1 : undefined,
     placeholderData: keepPreviousData,
   });
-  const pages = q.data ? Math.max(1, Math.ceil(q.data.total / q.data.pageSize)) : 1;
-  const totalAll = q.data ? Object.values(q.data.counts).reduce((a, b) => a + b, 0) : 0;
+  const first = q.data?.pages[0];
+  const items = q.data?.pages.flatMap((p) => p.items) ?? [];
+  const totalAll = first ? Object.values(first.counts).reduce((a, b) => a + b, 0) : 0;
 
   return (
     <>
       <PageHeader
         title="Élèves"
         subtitle={
-          q.data ? `${plural(totalAll, 'élève inscrit', 'élèves inscrits')} cette année` : undefined
+          first ? `${plural(totalAll, 'élève inscrit', 'élèves inscrits')} cette année` : undefined
         }
         actions={
           can('students.write') ? (
@@ -126,7 +131,7 @@ function StudentsContent() {
       >
         {STATUSES.map(([value, label]) => {
           const on = status === value;
-          const count = value ? (q.data?.counts[value] ?? 0) : totalAll;
+          const count = value ? (first?.counts[value] ?? 0) : totalAll;
           return (
             <button
               key={value || 'all'}
@@ -151,14 +156,14 @@ function StudentsContent() {
         <LoadingBlock />
       ) : q.isError ? (
         <ErrorBlock error={q.error} onRetry={() => q.refetch()} />
-      ) : q.data.items.length === 0 ? (
+      ) : items.length === 0 ? (
         <EmptyState title="Aucun élève ne correspond">
           Modifiez la recherche ou les filtres.
         </EmptyState>
       ) : (
         <>
           <ul className="flex flex-col gap-2 md:hidden">
-            {q.data.items.map((s) => (
+            {items.map((s) => (
               <li key={s.id}>
                 <Link
                   href={`/eleves/${s.id}`}
@@ -205,7 +210,7 @@ function StudentsContent() {
                 </tr>
               </thead>
               <tbody>
-                {q.data.items.map((s) => (
+                {items.map((s) => (
                   <tr key={s.id} className="border-t border-line hover:bg-paper/60">
                     <td className="px-4 py-2.5">
                       <div className="flex items-center gap-3">
@@ -256,31 +261,14 @@ function StudentsContent() {
             </table>
           </div>
 
-          <nav aria-label="Pagination" className="flex items-center justify-between gap-3">
-            <span className="text-sm text-muted tabular">
-              Page {page} sur {pages} · {plural(q.data.total, 'élève', 'élèves')}
-            </span>
-            <div className="flex gap-2">
-              <Button
-                variant="secondary"
-                size="icon"
-                aria-label="Page précédente"
-                disabled={page <= 1}
-                onClick={() => setParam({ page: String(page - 1) })}
-              >
-                <ChevronLeft className="size-5" aria-hidden />
-              </Button>
-              <Button
-                variant="secondary"
-                size="icon"
-                aria-label="Page suivante"
-                disabled={page >= pages}
-                onClick={() => setParam({ page: String(page + 1) })}
-              >
-                <ChevronRight className="size-5" aria-hidden />
-              </Button>
-            </div>
-          </nav>
+          <LoadMore
+            shown={items.length}
+            total={first?.total}
+            hasMore={!!q.hasNextPage}
+            loading={q.isFetchingNextPage}
+            onMore={() => void q.fetchNextPage()}
+            noun="élèves"
+          />
         </>
       )}
     </>

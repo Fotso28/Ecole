@@ -57,6 +57,7 @@ const xlsxImportSchema = z.object({
     .transform((v) => v === 'true'),
 });
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+const photoConsentSchema = z.object({ consent: z.boolean() });
 const healthQuerySchema = z.object({
   reason: z.string().trim().min(5, 'Motif obligatoire (5 caractères minimum)').max(300),
 });
@@ -195,6 +196,35 @@ export class StudentsController {
   @Get('students/:id/documents/:documentId/file')
   documentFile(@Param('id') id: string, @Param('documentId') documentId: string) {
     return this.students.documentLink(id, documentId);
+  }
+
+  @RequirePermissions('students.write')
+  @Put('students/:id/photo-consent')
+  setPhotoConsent(
+    @Param('id') id: string,
+    @Body(new ZodPipe(photoConsentSchema)) body: z.infer<typeof photoConsentSchema>,
+  ) {
+    return this.students.setPhotoConsent(id, body.consent);
+  }
+
+  @RequirePermissions('students.write')
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(FileUpload)
+  @Post('students/:id/photo')
+  uploadPhoto(@Param('id') id: string, @UploadedFile() file: Upload | undefined) {
+    return this.students.uploadPhoto(id, file);
+  }
+
+  @RequirePermissions('students.write')
+  @Delete('students/:id/photo')
+  removePhoto(@Param('id') id: string) {
+    return this.students.removePhoto(id);
+  }
+
+  @RequirePermissions('students.read')
+  @Get('students/:id/photo')
+  photo(@Param('id') id: string) {
+    return this.students.photoLink(id);
   }
 
   @RequirePermissions('health.read')

@@ -116,3 +116,15 @@ export async function loginPlatformAdmin(page: Page, secret: string): Promise<vo
   await page.getByRole('button', { name: 'Valider' }).click();
   await page.waitForURL('**/plateforme/facturation');
 }
+
+/** Ouvre un onglet du portail des parents, dans la barre du bas ou dans le menu « Plus ». */
+export async function openPortalTab(page: Page, name: string): Promise<void> {
+  const nav = page.getByRole('navigation', { name: 'Navigation' });
+  const direct = nav.getByRole('link', { name, exact: true });
+  if (await direct.count()) {
+    await direct.click();
+    return;
+  }
+  await nav.getByRole('button', { name: /^Plus/ }).click();
+  await page.getByRole('dialog', { name: 'Plus' }).getByRole('link', { name }).click();
+}

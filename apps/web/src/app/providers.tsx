@@ -1,10 +1,11 @@
 'use client';
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { ToastProvider } from '@/components/ui/toast';
 import { ApiError } from '@/lib/api';
 import { AuthProvider } from '@/lib/auth';
+import { registerServiceWorker } from '@/lib/offline';
 
 export function Providers({ children }: { children: ReactNode }) {
   const [client] = useState(
@@ -22,6 +23,7 @@ export function Providers({ children }: { children: ReactNode }) {
         },
       }),
   );
+  useEffect(() => registerServiceWorker(), []);
   return (
     <QueryClientProvider client={client}>
       <ToastProvider>

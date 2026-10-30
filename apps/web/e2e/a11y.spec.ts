@@ -59,6 +59,18 @@ test('écrans de la direction', async ({ page }) => {
     await expect(page.locator('main h1').first()).toBeVisible();
     await expectAccessible(page, path);
   }
+  // Emploi du temps : choix d'un créneau au clavier (alternative au glisser-déposer).
+  await page.goto('/caisse/journal');
+  await expect(page.locator('main h1').first()).toBeVisible();
+  await expectAccessible(page, '/caisse/journal');
+  await page.goto('/emploi-du-temps');
+  await page.getByLabel('Classe').selectOption({ label: '4e A' });
+  await page
+    .getByRole('button', { name: /^Déplacer / })
+    .first()
+    .click();
+  await expect(page.getByRole('dialog', { name: /^Déplacer / })).toBeVisible();
+  await expectAccessible(page, '/emploi-du-temps (déplacer un cours)');
   // Fiche élève et dépôt d'une pièce d'inscription.
   await page.goto('/eleves?q=Ngono');
   await page.getByRole('link', { name: /Ngono Marie-Claire/ }).click();
@@ -154,6 +166,21 @@ test('portail des parents', async ({ page, request }, info) => {
     await expect(page.locator('main').first()).toBeVisible();
     await expectAccessible(page, path);
   }
+  // Menu « Plus » de la barre du bas, et bandeau hors connexion.
+  await page
+    .getByRole('navigation', { name: 'Navigation' })
+    .getByRole('button', { name: /^Plus/ })
+    .click();
+  await expect(page.getByRole('dialog', { name: 'Plus' })).toBeVisible();
+  await expectAccessible(page, '/portail (menu Plus)');
+  await page.keyboard.press('Escape');
+  await page.context().setOffline(true);
+  await expect(page.getByText(/^Hors connexion/)).toBeVisible();
+  const { violations } = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+    .analyze();
+  expect(violations.filter((v) => v.impact === 'serious' || v.impact === 'critical')).toEqual([]);
+  await page.context().setOffline(false);
 });
 
 test('facturation de la plateforme', async ({ page, request }) => {

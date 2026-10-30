@@ -11,6 +11,7 @@ import { z } from 'zod';
 import { AuditService } from '../../common/audit.service';
 import { RequireModule, RequirePermissions } from '../../common/decorators';
 import { ZodPipe } from '../../common/zod.pipe';
+import { FilesService } from '../files/files.service';
 import { PdfModule } from '../pdf/pdf.module';
 import { DocumentsPdf } from './documents.pdf';
 import { DocumentsService, type AdminDocumentData } from './documents.service';
@@ -24,6 +25,7 @@ export class DocumentsController {
     private readonly documents: DocumentsService,
     private readonly pdf: DocumentsPdf,
     private readonly audit: AuditService,
+    private readonly files: FilesService,
   ) {}
 
   @RequirePermissions('documents.read')
@@ -86,6 +88,8 @@ export class DocumentsController {
       status: doc.status,
       issuedAt: doc.issuedAt,
       data: doc.data as unknown as AdminDocumentData,
+      // Une photo retirée (consentement retiré, photo remplacée) n'est plus imprimée.
+      photo: doc.type === 'STUDENT_CARD' ? await this.files.content(doc.photoKey) : null,
     });
     await this.audit.log({
       action: 'documents.printed',

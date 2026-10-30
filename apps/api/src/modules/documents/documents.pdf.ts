@@ -38,6 +38,8 @@ export interface RenderableDocument {
   status: 'ISSUED' | 'CANCELLED';
   issuedAt: Date;
   data: AdminDocumentData;
+  /** Photo d'identité en clair (JPEG ou PNG), absente si retirée ou sans consentement. */
+  photo?: Buffer | null;
 }
 
 function toBuffer(doc: PDFKit.PDFDocument): Promise<Buffer> {
@@ -246,15 +248,25 @@ export class DocumentsPdf {
         { width: W - 16, lineBreak: false, ellipsis: true },
       );
 
-    // Emplacement de la photo d'identité (à brancher sur le stockage de fichiers).
+    // Photo d'identité, ou cadre vide sans consentement.
     const px = 8;
     const py = 36;
+    let photoDrawn = false;
+    if (d.photo) {
+      try {
+        doc.image(d.photo, px, py, { fit: [52, 64], align: 'center', valign: 'center' });
+        photoDrawn = true;
+      } catch {
+        // Image illisible : le cadre vide reste imprimé.
+      }
+    }
     doc.rect(px, py, 52, 64).lineWidth(0.6).strokeColor(RULE).stroke();
-    doc
-      .fillColor(MUTED)
-      .font('Helvetica')
-      .fontSize(6)
-      .text('PHOTO', px, py + 29, { width: 52, align: 'center' });
+    if (!photoDrawn)
+      doc
+        .fillColor(MUTED)
+        .font('Helvetica')
+        .fontSize(6)
+        .text('PHOTO', px, py + 29, { width: 52, align: 'center' });
 
     const fx = 68;
     let fy = 36;

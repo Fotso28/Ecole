@@ -27,6 +27,12 @@ export const templates = {
     `${p.school} : rappel, ${p.label} de ${p.student} (${formatFcfa(p.amount)}) était due le ${p.dueDate}. Payez par Mobile Money depuis l'application ou à la caisse.`,
   reportCardPublished: (p: { student: string; term: string; average: number | null }) =>
     `Le bulletin du ${p.term} de ${p.student} est disponible${p.average === null ? '' : ` (moyenne ${formatGrade(p.average)}/20)`}.`,
+  annualReportCardPublished: (p: {
+    student: string;
+    average: number | null;
+    decision: string | null;
+  }) =>
+    `Le bulletin de fin d'année de ${p.student} est disponible${p.average === null ? '' : ` (moyenne annuelle ${formatGrade(p.average)}/20)`}${p.decision ? `. Décision du conseil : ${p.decision}` : ''}.`,
   announcement: (p: { school: string; title: string }) =>
     `${p.school} : ${p.title}. Détails dans l'application.`,
 };

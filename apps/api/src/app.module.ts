@@ -25,6 +25,7 @@ import { StaffModule } from './modules/staff/staff.module';
 import { StudentsModule } from './modules/students/students.module';
 import { TeacherModule } from './modules/teacher/teacher.module';
 import { TimetableModule } from './modules/timetable/timetable.module';
+import { TranscriptsModule } from './modules/transcripts/transcripts.module';
 import { VerifyModule } from './modules/verify/verify.module';
 
 @Module({
@@ -55,6 +56,7 @@ import { VerifyModule } from './modules/verify/verify.module';
     SettingsModule,
     TimetableModule,
     VerifyModule,
+    TranscriptsModule,
     DevModule,
   ],
   controllers: [HealthController],

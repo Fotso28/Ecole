@@ -2,5 +2,6 @@ export * from './finance';
 export * from './grades';
 export * from './identity';
 export * from './permissions';
+export * from './results';
 export * from './schemas';
 export * from './timetable';

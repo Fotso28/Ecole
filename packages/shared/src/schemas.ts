@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { PAYMENT_METHODS } from './finance';
 import { normalizeCameroonPhone } from './identity';
 import { STAFF_ROLES } from './permissions';
+import { YEAR_END_DECISIONS } from './results';
 
 export const isoDate = z
   .string()
@@ -219,7 +220,19 @@ export const reportCardPublishSchema = reportCardGenerateSchema.extend({
 export const councilDecisionSchema = z.object({
   decision: z.enum(['HONOR_ROLL', 'ENCOURAGEMENT', 'WARNING', 'BLAME', 'NONE']),
   comment: z.string().trim().max(300).optional(),
+  /** Décision de fin d'année, réservée au dernier trimestre ; `null` l'efface. */
+  yearEndDecision: z.enum(YEAR_END_DECISIONS).nullable().optional(),
 });
+/** Relevé de notes : séquence ou trimestre (identifiant obligatoire), ou année (courante par défaut). */
+export const transcriptQuerySchema = z
+  .object({
+    scope: z.enum(['sequence', 'term', 'year']),
+    periodId: id.optional(),
+  })
+  .refine((q) => q.scope === 'year' || !!q.periodId, {
+    message: 'Période obligatoire pour une séquence ou un trimestre',
+    path: ['periodId'],
+  });
 
 // Finance
 export const feeItemCreateSchema = z.object({

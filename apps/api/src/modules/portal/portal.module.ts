@@ -8,11 +8,17 @@ import {
   NotFoundException,
   Param,
   Post,
+  Query,
   Res,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
-import { formatGrade, justificationCreateSchema, portalPaymentSchema } from '@ecole/shared';
+import {
+  formatGrade,
+  justificationCreateSchema,
+  portalPaymentSchema,
+  transcriptQuerySchema,
+} from '@ecole/shared';
 import type { Response } from 'express';
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
@@ -27,7 +33,10 @@ import { FinanceService } from '../finance/finance.service';
 import { toParsed } from '../grades/grades.compute';
 import { PdfModule } from '../pdf/pdf.module';
 import { PdfService } from '../pdf/pdf.service';
-import type { ReportCardData } from '../report-cards/report-cards.service';
+import { isFinalTerm, type ReportCardData } from '../report-cards/report-cards.service';
+import { renderTranscript } from '../transcripts/transcript.pdf';
+import { TranscriptsModule } from '../transcripts/transcripts.module';
+import { TranscriptsService } from '../transcripts/transcripts.service';
 
 /**
  * Portail parent : un compte global (téléphone) relié aux dossiers de ses enfants dans
@@ -47,6 +56,7 @@ export class PortalService {
     private readonly finance: FinanceService,
     private readonly attendance: AttendanceService,
     private readonly pdf: PdfService,
+    private readonly transcripts: TranscriptsService,
   ) {}
 
   private async childLink(studentId: string) {
@@ -113,54 +123,79 @@ export class PortalService {
           orderBy: { createdAt: 'desc' },
           include: { class: { include: { level: true } } },
         });
-        const [account, grades, absences, reportCards, announcements] = await Promise.all([
-          this.finance.account(studentId),
-          this.db.grade.findMany({
-            where: { studentId, evaluation: { status: { in: ['SUBMITTED', 'LOCKED'] } } },
-            orderBy: { updatedAt: 'desc' },
-            take: 8,
-            include: {
-              evaluation: {
-                include: { classSubject: { include: { subject: true } }, sequence: true },
+        const [account, grades, absences, reportCards, announcements, gradedSequences] =
+          await Promise.all([
+            this.finance.account(studentId),
+            this.db.grade.findMany({
+              where: { studentId, evaluation: { status: { in: ['SUBMITTED', 'LOCKED'] } } },
+              orderBy: { updatedAt: 'desc' },
+              take: 8,
+              include: {
+                evaluation: {
+                  include: { classSubject: { include: { subject: true } }, sequence: true },
+                },
               },
-            },
-          }),
-          this.db.attendanceRecord.findMany({
-            where: { studentId, status: { in: ['ABSENT', 'LATE'] } },
-            include: { session: true, justification: { select: { status: true } } },
-            orderBy: { session: { date: 'desc' } },
-            take: 20,
-          }),
-          this.db.reportCard.findMany({
-            where: { studentId, status: 'PUBLISHED' },
-            orderBy: { publishedAt: 'desc' },
-            select: {
-              id: true,
-              version: true,
-              generalAverageCenti: true,
-              rank: true,
-              classSize: true,
-              publishedAt: true,
-              data: true,
-            },
-          }),
-          this.db.announcement.findMany({
-            where: {
-              OR: [
-                { scope: 'SCHOOL' },
-                ...(enrollment
-                  ? [
-                      { scope: 'CLASS' as const, targetId: enrollment.classId },
-                      { scope: 'LEVEL' as const, targetId: enrollment.class.levelId },
-                      { scope: 'CYCLE' as const, targetId: enrollment.class.level.cycleId },
-                    ]
-                  : []),
-              ],
-            },
-            orderBy: { publishedAt: 'desc' },
-            take: 5,
-          }),
-        ]);
+            }),
+            this.db.attendanceRecord.findMany({
+              where: { studentId, status: { in: ['ABSENT', 'LATE'] } },
+              include: { session: true, justification: { select: { status: true } } },
+              orderBy: { session: { date: 'desc' } },
+              take: 20,
+            }),
+            this.db.reportCard.findMany({
+              where: { studentId, status: 'PUBLISHED' },
+              orderBy: { publishedAt: 'desc' },
+              select: {
+                id: true,
+                version: true,
+                generalAverageCenti: true,
+                rank: true,
+                classSize: true,
+                publishedAt: true,
+                data: true,
+              },
+            }),
+            this.db.announcement.findMany({
+              where: {
+                OR: [
+                  { scope: 'SCHOOL' },
+                  ...(enrollment
+                    ? [
+                        { scope: 'CLASS' as const, targetId: enrollment.classId },
+                        { scope: 'LEVEL' as const, targetId: enrollment.class.levelId },
+                        { scope: 'CYCLE' as const, targetId: enrollment.class.level.cycleId },
+                      ]
+                    : []),
+                ],
+              },
+              orderBy: { publishedAt: 'desc' },
+              take: 5,
+            }),
+            enrollment
+              ? this.db.sequence.findMany({
+                  where: {
+                    term: { academicYearId: enrollment.academicYearId },
+                    evaluations: {
+                      some: {
+                        classSubject: { classId: enrollment.classId },
+                        status: { in: ['SUBMITTED', 'LOCKED'] },
+                      },
+                    },
+                  },
+                  include: { term: { select: { order: true } } },
+                })
+              : Promise.resolve([]),
+          ]);
+        const yearTerms = enrollment
+          ? await this.db.term.findMany({
+              where: { academicYearId: enrollment.academicYearId },
+              select: { id: true, name: true, order: true },
+              orderBy: { order: 'asc' },
+            })
+          : [];
+        const publishedTermIds = new Set(
+          reportCards.map((r) => (r.data as unknown as ReportCardData).term.id),
+        );
         return {
           student: {
             id: link.student.id,
@@ -201,15 +236,35 @@ export class PortalService {
             status: r.status,
             justification: r.justification?.status ?? null,
           })),
-          reportCards: reportCards.map((r) => ({
-            id: r.id,
-            term: (r.data as unknown as ReportCardData).term.name,
-            version: r.version,
-            generalAverageCenti: r.generalAverageCenti,
-            rank: r.rank,
-            classSize: r.classSize,
-            publishedAt: r.publishedAt,
-          })),
+          reportCards: reportCards.map((r) => {
+            const data = r.data as unknown as ReportCardData;
+            return {
+              id: r.id,
+              term: data.term.name,
+              version: r.version,
+              generalAverageCenti: r.generalAverageCenti,
+              rank: r.rank,
+              classSize: r.classSize,
+              publishedAt: r.publishedAt,
+              annualAverageCenti: data.annual?.generalAverageCenti ?? null,
+              annualRankLabel: data.annual?.rankLabel ?? null,
+              yearEndDecision: data.yearEndDecision?.label ?? null,
+            };
+          }),
+          // Relevés disponibles : séquences notées ; trimestres et année une fois le bulletin publié.
+          transcripts: {
+            sequences: gradedSequences
+              .sort((a, b) => a.term.order - b.term.order || a.order - b.order)
+              .map((sq) => ({ id: sq.id, name: sq.name })),
+            terms: yearTerms
+              .filter((tm) => publishedTermIds.has(tm.id))
+              .map((tm) => ({ id: tm.id, name: tm.name })),
+            year:
+              enrollment &&
+              yearTerms.some((tm) => isFinalTerm(tm, yearTerms) && publishedTermIds.has(tm.id))
+                ? { id: enrollment.academicYearId }
+                : null,
+          },
           announcements: announcements.map((a) => ({
             id: a.id,
             title: a.title,
@@ -270,6 +325,48 @@ export class PortalService {
     return runAsSystem('portal-report-card-pdf', () => this.pdf.reportCard(card.id), card.schoolId);
   }
 
+  /**
+   * Relevé de notes d'un enfant. Les relevés de trimestre et d'année ne sont disponibles qu'une
+   * fois le bulletin correspondant publié, pour ne pas divulguer de moyennes provisoires.
+   */
+  async transcriptPdf(studentId: string, q: z.infer<typeof transcriptQuerySchema>) {
+    const link = await this.childLink(studentId);
+    return runAsSystem(
+      'portal-transcript',
+      async () => {
+        let periodId = q.periodId;
+        if (q.scope !== 'sequence') {
+          let termId = q.periodId;
+          if (q.scope === 'year') {
+            const enrollment = await this.db.enrollment.findFirst({
+              where: { studentId, ...(periodId ? { academicYearId: periodId } : {}) },
+              orderBy: { createdAt: 'desc' },
+            });
+            if (!enrollment) throw new NotFoundException('Relevé indisponible');
+            periodId = enrollment.academicYearId;
+            const terms = await this.db.term.findMany({
+              where: { academicYearId: periodId },
+              select: { id: true, order: true },
+            });
+            termId = terms.find((tm) => isFinalTerm(tm, terms))?.id;
+          }
+          const published = termId
+            ? await this.db.reportCard.count({
+                where: { studentId, termId, status: 'PUBLISHED' },
+              })
+            : 0;
+          if (published === 0)
+            throw new NotFoundException('Relevé disponible après la publication du bulletin');
+        }
+        const data = await this.transcripts.compute(studentId, q.scope, periodId);
+        const buffer = await renderTranscript(data);
+        await this.transcripts.logIssued(data, 'portal');
+        return buffer;
+      },
+      link.schoolId,
+    );
+  }
+
   async receiptPdf(paymentId: string): Promise<Buffer> {
     const payment = await runAsSystem('portal-receipt', () =>
       this.db.payment.findUnique({ where: { id: paymentId } }),
@@ -327,6 +424,17 @@ export class PortalController {
   }
 
   @ParentRoute()
+  @Get('children/:id/transcript.pdf')
+  async transcript(
+    @Param('id') id: string,
+    @Query(new ZodPipe(transcriptQuerySchema)) q: z.infer<typeof transcriptQuerySchema>,
+    @Res() res: Response,
+  ) {
+    res.setHeader('content-type', 'application/pdf');
+    res.send(await this.portal.transcriptPdf(id, q));
+  }
+
+  @ParentRoute()
   @Get('report-cards/:id/pdf')
   async reportCard(@Param('id') id: string, @Res() res: Response) {
     res.setHeader('content-type', 'application/pdf');
@@ -335,7 +443,7 @@ export class PortalController {
 }
 
 @Module({
-  imports: [FinanceModule, AttendanceModule, PdfModule],
+  imports: [FinanceModule, AttendanceModule, PdfModule, TranscriptsModule],
   controllers: [PortalController],
   providers: [PortalService],
 })

@@ -39,6 +39,8 @@ export class VerifyController {
           latestVersion: latest?.version ?? null,
           generalAverage:
             card.generalAverageCenti === null ? null : formatGrade(card.generalAverageCenti),
+          annualAverage:
+            card.annualAverageCenti === null ? null : formatGrade(card.annualAverageCenti),
           publishedAt: card.publishedAt,
         };
       }

@@ -1,12 +1,16 @@
-import { Controller, Get, Injectable, Module } from '@nestjs/common';
+import { Controller, Get, Injectable, Module, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { staffContext } from '../../common/context';
+import type { Response } from 'express';
+import { AuditService } from '../../common/audit.service';
+import { currentSchoolId, staffContext } from '../../common/context';
 import { addDays, todayInCameroon, toDbDate } from '../../common/dates';
 import { RequirePermissions } from '../../common/decorators';
 import { Db, InjectDb } from '../../common/prisma';
 import { ScopeService } from '../../common/scope.service';
 import { FinanceModule } from '../finance/finance.module';
 import { FinanceService } from '../finance/finance.service';
+import { indicatorsPdf, indicatorsWorkbook, type IndicatorsExport } from './exports';
+import { ResultsService } from './results.service';
 
 const ACTION_LABELS: Record<string, string> = {
   'finance.payment_received': 'a encaissé un paiement',
@@ -156,18 +160,77 @@ export class DashboardService {
 @ApiBearerAuth()
 @Controller('dashboard')
 export class DashboardController {
-  constructor(private readonly dashboard: DashboardService) {}
+  constructor(
+    private readonly dashboard: DashboardService,
+    private readonly results: ResultsService,
+    private readonly audit: AuditService,
+    @InjectDb() private readonly db: Db,
+  ) {}
 
   @RequirePermissions('dashboard.read')
   @Get()
   overview() {
     return this.dashboard.overview();
   }
+
+  /** Taux de réussite par classe, par trimestre et sur l'année. */
+  @RequirePermissions('dashboard.read', 'reportcards.read')
+  @Get('results')
+  passRates() {
+    return this.results.indicators();
+  }
+
+  @RequirePermissions('dashboard.read')
+  @Get('export.xlsx')
+  async excel(@Res() res: Response) {
+    const data = await this.exportData('xlsx');
+    res.setHeader(
+      'content-type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.setHeader(
+      'content-disposition',
+      `attachment; filename="indicateurs-${data.overview.year.name}.xlsx"`,
+    );
+    res.send(await indicatorsWorkbook(data));
+  }
+
+  @RequirePermissions('dashboard.read')
+  @Get('export.pdf')
+  async pdf(@Res() res: Response) {
+    const data = await this.exportData('pdf');
+    res.setHeader('content-type', 'application/pdf');
+    res.setHeader(
+      'content-disposition',
+      `inline; filename="indicateurs-${data.overview.year.name}.pdf"`,
+    );
+    res.send(await indicatorsPdf(data));
+  }
+
+  /** Mêmes indicateurs que l'écran : finances et résultats selon les permissions. */
+  private async exportData(format: 'xlsx' | 'pdf'): Promise<IndicatorsExport> {
+    const ctx = staffContext();
+    const [overview, results, school] = await Promise.all([
+      this.dashboard.overview(),
+      ctx.permissions.has('reportcards.read') ? this.results.indicators() : Promise.resolve(null),
+      this.db.school.findUniqueOrThrow({
+        where: { id: currentSchoolId() },
+        select: { name: true },
+      }),
+    ]);
+    await this.audit.log({
+      action: 'dashboard.exported',
+      entity: 'School',
+      entityId: ctx.schoolId,
+      after: { format, finance: !!overview.finance, results: !!results },
+    });
+    return { school: school.name, overview, results, generatedAt: new Date() };
+  }
 }
 
 @Module({
   imports: [FinanceModule],
   controllers: [DashboardController],
-  providers: [DashboardService],
+  providers: [DashboardService, ResultsService],
 })
 export class DashboardModule {}

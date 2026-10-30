@@ -1,15 +1,26 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import {
+  annualAverage,
+  annualClassResults,
   appreciation,
   classStatistics,
   formatRank,
   generalAverage,
+  passRate,
   periodAverage,
   rankWithTies,
   subjectAverage,
   toMinutes,
+  YEAR_END_DECISION_LABELS,
 } from '@ecole/shared';
-import { CouncilDecisionType, Prisma, SubjectGroup } from '@prisma/client';
+import {
+  CouncilDecisionType,
+  Prisma,
+  SubjectGroup,
+  type Evaluation,
+  type Grade,
+  type YearEndDecisionType,
+} from '@prisma/client';
 import { AuditService } from '../../common/audit.service';
 import { currentSchoolId, staffContext } from '../../common/context';
 import { sha256, verificationCode } from '../../common/crypto';
@@ -44,6 +55,27 @@ export interface ReportCardSubject {
   totalCenti: number | null;
   rank: string;
   appreciation: string | null;
+  /** Bulletin de fin d'année : moyenne de chaque trimestre, moyenne et rang annuels. */
+  termAverages?: (number | null)[];
+  annualAverageCenti?: number | null;
+  annualRank?: string;
+}
+
+/** Bilan annuel, présent sur le bulletin du dernier trimestre de l'année. */
+export interface ReportCardAnnual {
+  terms: { id: string; name: string; order: number }[];
+  termGeneralAverages: (number | null)[];
+  generalAverageCenti: number | null;
+  rank: number | null;
+  rankLabel: string;
+  tied: boolean;
+  ranked: number;
+  appreciation: string | null;
+  /** Trimestres sans moyenne : la moyenne annuelle porte sur les autres. */
+  missingTerms: string[];
+  classStats: { averageCenti: number | null; minCenti: number | null; maxCenti: number | null };
+  /** Taux de réussite annuel de la classe, en dixièmes de pour cent. */
+  classPassRatePermille: number | null;
 }
 
 export interface ReportCardData {
@@ -89,6 +121,8 @@ export interface ReportCardData {
     incidents: number;
   };
   decision: { type: CouncilDecisionType; label: string; comment: string | null } | null;
+  annual?: ReportCardAnnual;
+  yearEndDecision?: { type: YearEndDecisionType; label: string } | null;
   generatedAt: string;
   /** Empreinte des notes et des élèves utilisés : la publication refuse un brouillon périmé. */
   inputsDigest?: string;
@@ -97,6 +131,47 @@ export interface ReportCardData {
 }
 
 const hours = (minutes: number) => Math.round((minutes / 60) * 10) / 10;
+
+type Cell = { seq: (number | null)[]; term: number | null };
+type GradedEvaluation = Evaluation & { grades: Grade[] };
+
+/** Moyennes par élève et matière sur les séquences d'un trimestre (clé « élève:matière de classe »). */
+export function computeCells(
+  students: readonly { id: string }[],
+  classSubjects: readonly { id: string }[],
+  sequences: readonly { id: string }[],
+  evaluations: readonly GradedEvaluation[],
+): Map<string, Cell> {
+  const cell = new Map<string, Cell>();
+  for (const s of students) {
+    for (const cs of classSubjects) {
+      const seq = sequences.map((sq) => {
+        const evs = evaluations.filter((e) => e.classSubjectId === cs.id && e.sequenceId === sq.id);
+        if (evs.length === 0) return null;
+        const r = subjectAverage(
+          evs.map((e) => ({
+            weight: e.weight,
+            maxScore: e.maxScore,
+            grade: toParsed(e.grades.find((g) => g.studentId === s.id)),
+          })),
+        );
+        return r.averageCenti;
+      });
+      cell.set(`${s.id}:${cs.id}`, { seq, term: periodAverage(seq) });
+    }
+  }
+  return cell;
+}
+
+/** Le bulletin du dernier trimestre d'une année d'au moins deux trimestres est un bulletin annuel. */
+export function isFinalTerm(
+  term: { id: string },
+  yearTerms: readonly { id: string; order: number }[],
+): boolean {
+  if (yearTerms.length < 2) return false;
+  const last = [...yearTerms].sort((a, b) => b.order - a.order)[0];
+  return last?.id === term.id;
+}
 
 @Injectable()
 export class ReportCardsService {
@@ -109,7 +184,7 @@ export class ReportCardsService {
 
   /** Calcule et enregistre les bulletins (brouillons) d'une classe pour un trimestre. */
   async generate(classId: string, termId: string) {
-    const { cls, term } = await this.classTerm(classId, termId);
+    const { cls, term, yearTerms, final } = await this.classTerm(classId, termId);
     const school = await this.db.school.findUniqueOrThrow({
       where: { id: currentSchoolId() },
       select: { name: true, city: true },
@@ -117,10 +192,10 @@ export class ReportCardsService {
 
     const { students, enrollments, classSubjects, evaluations, issues, digest } = await this.inputs(
       classId,
-      term,
+      final ? yearTerms.flatMap((t) => t.sequences) : term.sequences,
     );
     if (students.length === 0) throw new ConflictException('Aucun élève inscrit dans cette classe');
-    if (evaluations.length === 0)
+    if (!evaluations.some((e) => term.sequences.some((sq) => sq.id === e.sequenceId)))
       throw new ConflictException('Aucune note soumise pour ce trimestre');
     const teacherIds = [
       ...new Set(
@@ -139,27 +214,7 @@ export class ReportCardsService {
     };
 
     // Moyennes par élève, matière et séquence.
-    type Cell = { seq: (number | null)[]; term: number | null };
-    const cell = new Map<string, Cell>();
-    for (const s of students) {
-      for (const cs of classSubjects) {
-        const seq = term.sequences.map((sq) => {
-          const evs = evaluations.filter(
-            (e) => e.classSubjectId === cs.id && e.sequenceId === sq.id,
-          );
-          if (evs.length === 0) return null;
-          const r = subjectAverage(
-            evs.map((e) => ({
-              weight: e.weight,
-              maxScore: e.maxScore,
-              grade: toParsed(e.grades.find((g) => g.studentId === s.id)),
-            })),
-          );
-          return r.averageCenti;
-        });
-        cell.set(`${s.id}:${cs.id}`, { seq, term: periodAverage(seq) });
-      }
-    }
+    const cell = computeCells(students, classSubjects, term.sequences, evaluations);
     const general = new Map(
       students.map((s) => [
         s.id,
@@ -186,6 +241,9 @@ export class ReportCardsService {
       ]),
     );
     const stats = classStatistics(students.map((s) => general.get(s.id)?.averageCenti ?? null));
+    const annual = final
+      ? this.annualResults(students, classSubjects, yearTerms, term.id, cell, evaluations)
+      : null;
 
     // Assiduité sur la période du trimestre.
     const records = await this.db.attendanceRecord.findMany({
@@ -273,6 +331,7 @@ export class ReportCardsService {
                     totalCenti: avg === null ? null : avg * cs.coefficient,
                     rank: formatRank(subjectRanks.get(cs.id)?.get(s.id)),
                     appreciation: avg === null ? null : appreciation(avg),
+                    ...(annual ? annual.forSubject(s.id, cs.id) : {}),
                   };
                 });
               const sub = generalAverage(
@@ -325,6 +384,17 @@ export class ReportCardsService {
                 comment: decision.comment,
               }
             : null,
+          ...(annual
+            ? {
+                annual: annual.forStudent(s.id),
+                yearEndDecision: decision?.yearEndDecision
+                  ? {
+                      type: decision.yearEndDecision,
+                      label: YEAR_END_DECISION_LABELS[decision.yearEndDecision],
+                    }
+                  : null,
+              }
+            : {}),
           generatedAt,
           inputsDigest: digest,
           issues,
@@ -347,6 +417,8 @@ export class ReportCardsService {
             rankTied: rank?.tied ?? false,
             classSize: students.length,
             verificationCode: verificationCode(12),
+            annualAverageCenti: data.annual?.generalAverageCenti ?? null,
+            annualRank: data.annual?.rank ?? null,
           },
         });
         results.push({ studentId: s.id, version, generalAverageCenti: g?.averageCenti ?? null });
@@ -356,19 +428,108 @@ export class ReportCardsService {
           action: 'reportcards.generated',
           entity: 'Class',
           entityId: classId,
-          after: { termId, count: students.length, issues },
+          after: { termId, count: students.length, issues, annual: final },
         },
         tx,
       );
     });
-    return { generated: results.length, results, issues };
+    return { generated: results.length, results, issues, annual: final };
+  }
+
+  /**
+   * Bilan annuel d'une classe : moyennes trimestrielles de chaque matière (calculées à partir des
+   * notes soumises de toute l'année), moyennes et rangs annuels par matière et généraux.
+   */
+  private annualResults(
+    students: readonly { id: string }[],
+    classSubjects: readonly { id: string; coefficient: number }[],
+    yearTerms: readonly { id: string; name: string; order: number; sequences: { id: string }[] }[],
+    currentTermId: string,
+    currentCells: Map<string, Cell>,
+    evaluations: readonly GradedEvaluation[],
+  ) {
+    const perTerm = yearTerms.map((t) =>
+      t.id === currentTermId
+        ? currentCells
+        : computeCells(students, classSubjects, t.sequences, evaluations),
+    );
+    const key = (studentId: string, csId: string) => `${studentId}:${csId}`;
+    const termGenerals = new Map(
+      students.map((s) => [
+        s.id,
+        perTerm.map(
+          (cells) =>
+            generalAverage(
+              classSubjects.map((cs) => ({
+                coefficient: cs.coefficient,
+                averageCenti: cells.get(key(s.id, cs.id))?.term ?? null,
+              })),
+            ).averageCenti,
+        ),
+      ]),
+    );
+    const general = annualClassResults(
+      students.map((s) => ({ id: s.id, termGeneralAverages: termGenerals.get(s.id) ?? [] })),
+    );
+    const subjectTerms = (studentId: string, csId: string) =>
+      perTerm.map((cells) => cells.get(key(studentId, csId))?.term ?? null);
+    const subjectAnnual = new Map<string, number | null>();
+    for (const s of students)
+      for (const cs of classSubjects)
+        subjectAnnual.set(key(s.id, cs.id), annualAverage(subjectTerms(s.id, cs.id)).averageCenti);
+    const subjectRanks = new Map(
+      classSubjects.map((cs) => [
+        cs.id,
+        rankWithTies(
+          students.map((s) => ({
+            id: s.id,
+            valueCenti: subjectAnnual.get(key(s.id, cs.id)) ?? null,
+          })),
+        ),
+      ]),
+    );
+    const averages = students.map((s) => general.get(s.id)?.averageCenti ?? null);
+    const stats = classStatistics(averages);
+    const classPassRatePermille = passRate(averages).ratePermille;
+    const terms = yearTerms.map((t) => ({ id: t.id, name: t.name, order: t.order }));
+    return {
+      forSubject: (studentId: string, csId: string) => ({
+        termAverages: subjectTerms(studentId, csId),
+        annualAverageCenti: subjectAnnual.get(key(studentId, csId)) ?? null,
+        annualRank: formatRank(subjectRanks.get(csId)?.get(studentId)),
+      }),
+      forStudent: (studentId: string): ReportCardAnnual => {
+        const g = general.get(studentId);
+        const avg = g?.averageCenti ?? null;
+        return {
+          terms,
+          termGeneralAverages: termGenerals.get(studentId) ?? [],
+          generalAverageCenti: avg,
+          rank: g?.rank?.rank ?? null,
+          rankLabel: formatRank(g?.rank),
+          tied: g?.rank?.tied ?? false,
+          ranked: g?.rank?.ranked ?? 0,
+          appreciation: avg === null ? null : appreciation(avg),
+          missingTerms: (g?.missingTerms ?? []).map((i) => terms[i]?.name ?? ''),
+          classStats: {
+            averageCenti: stats.averageCenti,
+            minCenti: stats.minCenti,
+            maxCenti: stats.maxCenti,
+          },
+          classPassRatePermille,
+        };
+      },
+    };
   }
 
   /** Saisies manquantes d'une classe pour un trimestre (affichées avant la publication). */
   async completeness(classId: string, termId: string) {
-    const { term } = await this.classTerm(classId, termId);
-    const { issues } = await this.inputs(classId, term);
-    return { issues };
+    const { term, yearTerms, final } = await this.classTerm(classId, termId);
+    const { issues } = await this.inputs(
+      classId,
+      final ? yearTerms.flatMap((t) => t.sequences) : term.sequences,
+    );
+    return { issues, annual: final };
   }
 
   private async classTerm(classId: string, termId: string) {
@@ -383,14 +544,19 @@ export class ReportCardsService {
     });
     if (!term || term.academicYearId !== cls.academicYearId)
       throw new NotFoundException('Trimestre introuvable pour cette classe');
-    return { cls, term };
+    const yearTerms = await this.db.term.findMany({
+      where: { academicYearId: cls.academicYearId },
+      include: { sequences: { orderBy: { order: 'asc' } } },
+      orderBy: { order: 'asc' },
+    });
+    return { cls, term, yearTerms, final: isFinalTerm(term, yearTerms) };
   }
 
   /**
    * Données d'entrée des bulletins : élèves, matières, évaluations soumises, saisies manquantes
    * (feuille non soumise, note absente) et empreinte permettant de détecter un brouillon périmé.
    */
-  private async inputs(classId: string, term: { sequences: { id: string; name: string }[] }) {
+  private async inputs(classId: string, sequences: readonly { id: string; name: string }[]) {
     const [students, enrollments, classSubjects] = await Promise.all([
       this.scope.classStudents(classId),
       this.db.enrollment.findMany({
@@ -406,7 +572,7 @@ export class ReportCardsService {
     const all = await this.db.evaluation.findMany({
       where: {
         classSubjectId: { in: classSubjects.map((c) => c.id) },
-        sequenceId: { in: term.sequences.map((s) => s.id) },
+        sequenceId: { in: sequences.map((s) => s.id) },
       },
       include: { grades: true },
       orderBy: { id: 'asc' },
@@ -414,7 +580,7 @@ export class ReportCardsService {
     const evaluations = all.filter((e) => e.status === 'SUBMITTED' || e.status === 'LOCKED');
     const issues: string[] = [];
     for (const cs of classSubjects) {
-      for (const sq of term.sequences) {
+      for (const sq of sequences) {
         const label = `${cs.subject.name} · ${sq.name}`;
         const evs = all.filter((e) => e.classSubjectId === cs.id && e.sequenceId === sq.id);
         if (evs.some((e) => e.status === 'DRAFT')) {
@@ -457,8 +623,11 @@ export class ReportCardsService {
       where: { classId, termId, status: 'DRAFT' },
     });
     if (drafts.length === 0) throw new ConflictException('Aucun bulletin en brouillon à publier');
-    const { term } = await this.classTerm(classId, termId);
-    const { issues, digest } = await this.inputs(classId, term);
+    const { term, yearTerms, final } = await this.classTerm(classId, termId);
+    const { issues, digest } = await this.inputs(
+      classId,
+      final ? yearTerms.flatMap((t) => t.sequences) : term.sequences,
+    );
     if (drafts.some((d) => (d.data as unknown as ReportCardData).inputsDigest !== digest))
       throw new ConflictException(
         'Les notes ou les élèves ont changé depuis la préparation : préparez à nouveau les bulletins',
@@ -492,12 +661,18 @@ export class ReportCardsService {
             {
               schoolId: d.schoolId,
               recipient: phone,
-              template: 'reportCardPublished',
-              body: templates.reportCardPublished({
-                student: `${data.student.firstName} ${data.student.lastName}`,
-                term: term.name.toLowerCase(),
-                average: d.generalAverageCenti,
-              }),
+              template: data.annual ? 'annualReportCardPublished' : 'reportCardPublished',
+              body: data.annual
+                ? templates.annualReportCardPublished({
+                    student: `${data.student.firstName} ${data.student.lastName}`,
+                    average: data.annual.generalAverageCenti,
+                    decision: data.yearEndDecision?.label ?? null,
+                  })
+                : templates.reportCardPublished({
+                    student: `${data.student.firstName} ${data.student.lastName}`,
+                    term: term.name.toLowerCase(),
+                    average: d.generalAverageCenti,
+                  }),
               payload: { reportCardId: d.id },
             },
             tx,
@@ -536,6 +711,7 @@ export class ReportCardsService {
         rankTied: true,
         classSize: true,
         publishedAt: true,
+        annualAverageCenti: true,
         data: true,
       },
     });
@@ -557,6 +733,9 @@ export class ReportCardsService {
           classSize: c.classSize,
           publishedAt: c.publishedAt,
           decision: data.decision?.label ?? null,
+          annualAverageCenti: c.annualAverageCenti,
+          annualRankLabel: data.annual?.rankLabel ?? null,
+          yearEndDecision: data.yearEndDecision?.label ?? null,
         };
       })
       .sort(
@@ -575,20 +754,54 @@ export class ReportCardsService {
     termId: string,
     decision: CouncilDecisionType,
     comment?: string,
+    yearEndDecision?: YearEndDecisionType | null,
   ) {
     await this.db.student.findUniqueOrThrow({ where: { id: studentId } });
-    await this.db.term.findUniqueOrThrow({ where: { id: termId } });
+    const term = await this.db.term.findUniqueOrThrow({ where: { id: termId } });
+    if (yearEndDecision) {
+      const yearTerms = await this.db.term.findMany({
+        where: { academicYearId: term.academicYearId },
+        select: { id: true, order: true },
+      });
+      if (!isFinalTerm(term, yearTerms))
+        throw new ConflictException(
+          'La décision de fin d’année se prend au conseil du dernier trimestre',
+        );
+    }
     const decidedById = staffContext().userId;
+    const before = await this.db.councilDecision.findUnique({
+      where: { studentId_termId: { studentId, termId } },
+    });
     const result = await this.db.councilDecision.upsert({
       where: { studentId_termId: { studentId, termId } },
-      create: { schoolId: currentSchoolId(), studentId, termId, decision, comment, decidedById },
-      update: { decision, comment, decidedById },
+      create: {
+        schoolId: currentSchoolId(),
+        studentId,
+        termId,
+        decision,
+        comment,
+        decidedById,
+        yearEndDecision: yearEndDecision ?? null,
+      },
+      update: {
+        decision,
+        comment,
+        decidedById,
+        ...(yearEndDecision !== undefined ? { yearEndDecision } : {}),
+      },
     });
     await this.audit.log({
       action: 'reportcards.decision',
       entity: 'CouncilDecision',
       entityId: result.id,
-      after: { decision, comment },
+      before: before
+        ? {
+            decision: before.decision,
+            comment: before.comment,
+            yearEndDecision: before.yearEndDecision,
+          }
+        : undefined,
+      after: { decision, comment, yearEndDecision: result.yearEndDecision },
     });
     return result;
   }

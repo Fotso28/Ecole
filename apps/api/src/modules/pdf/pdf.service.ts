@@ -1,31 +1,37 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { formatCameroonPhone, formatFcfa, formatGrade, PAYMENT_METHOD_LABELS } from '@ecole/shared';
+import {
+  formatCameroonPhone,
+  formatFcfa,
+  formatGrade,
+  formatRate,
+  PAYMENT_METHOD_LABELS,
+} from '@ecole/shared';
 import PDFDocument from 'pdfkit';
 import * as QRCode from 'qrcode';
 import { env } from '../../config/env';
 import { Db, InjectDb } from '../../common/prisma';
 import type { ReportCardData } from '../report-cards/report-cards.service';
 
-const INK = '#14201A';
-const MUTED = '#55615A';
-const RULE = '#8A928D';
-const NIGHT = '#0E2A20';
+export const INK = '#14201A';
+export const MUTED = '#55615A';
+export const RULE = '#8A928D';
+export const NIGHT = '#0E2A20';
 const SPECIAL_SPACES = new RegExp(
   `[${String.fromCharCode(0x202f)}${String.fromCharCode(0xa0)}]`,
   'g',
 );
 
 /** Les polices standard PDF ne connaissent pas les espaces fines : on les remplace. */
-function t(s: string | null | undefined): string {
+export function t(s: string | null | undefined): string {
   return (s ?? '').replace(SPECIAL_SPACES, ' ');
 }
 
 const money = (n: number) => t(formatFcfa(n));
-const grade = (c: number | null | undefined) =>
+export const grade = (c: number | null | undefined) =>
   c === null || c === undefined ? '—' : formatGrade(c);
-const frDate = (iso: string) => iso.slice(0, 10).split('-').reverse().join('/');
+export const frDate = (iso: string) => iso.slice(0, 10).split('-').reverse().join('/');
 
-function toBuffer(doc: PDFKit.PDFDocument): Promise<Buffer> {
+export function toBuffer(doc: PDFKit.PDFDocument): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     doc.on('data', (c: Buffer) => chunks.push(c));
@@ -56,6 +62,7 @@ export class PdfService {
     const card = await this.db.reportCard.findUnique({ where: { id } });
     if (!card) throw new NotFoundException('Bulletin introuvable');
     const data = card.data as unknown as ReportCardData;
+    const annual = data.annual;
     const doc = new PDFDocument({
       size: 'A4',
       margin: 30,
@@ -111,14 +118,20 @@ export class PdfService {
       .fillColor(NIGHT)
       .font('Helvetica-Bold')
       .fontSize(11)
-      .text(t(`BULLETIN DE NOTES · ${data.term.name.toUpperCase()}`), left + 8, y + 6);
+      .text(
+        t(
+          `${annual ? 'BULLETIN DE FIN D’ANNÉE' : 'BULLETIN DE NOTES'} · ${data.term.name.toUpperCase()}`,
+        ),
+        left + 8,
+        y + 6,
+      );
     doc
       .fontSize(9)
       .text(`Année scolaire ${data.year}`, left + 8, y + 7, { width: W - 16, align: 'right' });
     y += 30;
 
     // Identité.
-    doc.rect(left, y, W, 40).lineWidth(0.8).strokeColor(RULE).stroke();
+    doc.rect(left, y, W, 46).lineWidth(0.8).strokeColor(RULE).stroke();
     const idCell = (label: string, value: string, x: number, yy: number, w: number) => {
       doc.fillColor(MUTED).font('Helvetica').fontSize(7.5).text(label, x, yy, { width: w });
       doc
@@ -147,24 +160,26 @@ export class PdfService {
       'Né(e) le',
       `${frDate(data.student.birthDate)}${data.student.birthPlace ? ` à ${data.student.birthPlace}` : ''}`,
       left + 6,
-      y + 21,
+      y + 25,
       cw * 2 - 10,
     );
     idCell(
       'Sexe · redoublant(e)',
       `${data.student.gender} · ${data.student.repeating ? 'Oui' : 'Non'}`,
       left + cw * 2,
-      y + 21,
+      y + 25,
       cw - 6,
     );
-    idCell('Professeur principal', data.class.mainTeacher ?? '—', left + cw * 3, y + 21, cw - 6);
-    y += 48;
+    idCell('Professeur principal', data.class.mainTeacher ?? '—', left + cw * 3, y + 25, cw - 6);
+    y += 54;
 
-    // Tableau des notes.
+    // Tableau des notes. Au dernier trimestre, les moyennes des trimestres précédents et la
+    // moyenne annuelle remplacent la colonne de l'enseignant.
     const seqCols = data.sequences.length;
+    const pastTerms = annual ? annual.terms.filter((tm) => tm.id !== data.term.id) : [];
     const cols = [
       { key: 'subject', label: 'Matière', w: 0, align: 'left' as const },
-      { key: 'teacher', label: 'Enseignant', w: 70, align: 'left' as const },
+      ...(annual ? [] : [{ key: 'teacher', label: 'Enseignant', w: 70, align: 'left' as const }]),
       ...data.sequences.map((s, i) => ({
         key: `s${i}`,
         label: s.name.replace('Séquence', 'Séq.'),
@@ -175,6 +190,13 @@ export class PdfService {
       { key: 'coef', label: 'Coef.', w: 30, align: 'right' as const },
       { key: 'total', label: 'M × C', w: 42, align: 'right' as const },
       { key: 'rank', label: 'Rang', w: 36, align: 'right' as const },
+      ...pastTerms.map((tm) => ({
+        key: `t${tm.order}`,
+        label: `T${tm.order}`,
+        w: 34,
+        align: 'right' as const,
+      })),
+      ...(annual ? [{ key: 'annual', label: 'Moy. an.', w: 42, align: 'right' as const }] : []),
       { key: 'app', label: 'Appréciation', w: 70, align: 'left' as const },
     ];
     const fixed = cols.reduce((s, c) => s + c.w, 0);
@@ -228,6 +250,12 @@ export class PdfService {
           app: s.appreciation ?? '',
         };
         for (let i = 0; i < seqCols; i++) values[`s${i}`] = grade(s.sequenceAverages[i]);
+        if (annual) {
+          annual.terms.forEach((tm, i) => {
+            values[`t${tm.order}`] = grade(s.termAverages?.[i]);
+          });
+          values.annual = grade(s.annualAverageCenti);
+        }
         drawRow(values);
       }
       drawRow(
@@ -330,7 +358,66 @@ export class PdfService {
         .text(`Appréciation générale : ${t(data.totals.appreciation)}`, dx + 8, y + boxH - 18, {
           width: bw - 16,
         });
-    y += boxH + 14;
+    y += boxH + 8;
+
+    // Bilan annuel (bulletin du dernier trimestre).
+    if (annual) {
+      const annualH = 50;
+      doc.rect(left, y, W, annualH).fill('#E3F0EA');
+      doc.rect(left, y, W, annualH).lineWidth(1.5).strokeColor(NIGHT).stroke();
+      doc
+        .fillColor(NIGHT)
+        .font('Helvetica-Bold')
+        .fontSize(8)
+        .text('BILAN ANNUEL', left + 8, y + 6);
+      doc
+        .fillColor(INK)
+        .font('Helvetica-Bold')
+        .fontSize(16)
+        .text(grade(annual.generalAverageCenti), left + 8, y + 18, { continued: true });
+      doc.font('Helvetica').fontSize(9).text(' / 20');
+      doc
+        .fontSize(8)
+        .text(`Rang annuel ${annual.rankLabel} sur ${annual.ranked}`, left + 8, y + 37, {
+          width: 150,
+        });
+      const midX = left + 150;
+      const midW = W * 0.58 - 158;
+      doc.text(
+        annual.terms
+          .map((tm, i) => `T${tm.order} : ${grade(annual.termGeneralAverages[i])}`)
+          .join(' · '),
+        midX,
+        y + 8,
+        { width: midW },
+      );
+      if (annual.missingTerms.length)
+        doc.text(t(`Sans moyenne : ${annual.missingTerms.join(', ')}`), midX, y + 21, {
+          width: midW,
+        });
+      doc.text(
+        `Classe : ${grade(annual.classStats.averageCenti)} · réussite ${t(formatRate(annual.classPassRatePermille))}`,
+        midX,
+        y + 34,
+        { width: midW },
+      );
+      const yx = left + W * 0.58;
+      doc
+        .fillColor(NIGHT)
+        .font('Helvetica-Bold')
+        .fontSize(8)
+        .text('DÉCISION DE FIN D’ANNÉE', yx, y + 6, { width: W * 0.42 - 8 });
+      doc
+        .fillColor(INK)
+        .font('Helvetica-Bold')
+        .fontSize(11)
+        .text(t(data.yearEndDecision?.label ?? 'En attente du conseil de classe'), yx, y + 20, {
+          width: W * 0.42 - 8,
+        });
+      y += annualH + 14;
+    } else {
+      y += 6;
+    }
 
     // Signatures.
     const sw = (W - 16) / 3;

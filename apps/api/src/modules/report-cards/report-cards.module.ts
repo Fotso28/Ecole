@@ -61,7 +61,13 @@ export class ReportCardsController {
   @RequirePermissions('reportcards.generate')
   @Put('decisions')
   decision(@Body(new ZodPipe(decisionBody)) body: z.infer<typeof decisionBody>) {
-    return this.cards.setDecision(body.studentId, body.termId, body.decision, body.comment);
+    return this.cards.setDecision(
+      body.studentId,
+      body.termId,
+      body.decision,
+      body.comment,
+      body.yearEndDecision,
+    );
   }
 
   @RequirePermissions('reportcards.read')

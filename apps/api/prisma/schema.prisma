@@ -109,6 +109,15 @@ enum CouncilDecisionType {
   NONE
 }
 
+/// Décision de fin d'année du conseil de classe (dernier trimestre).
+enum YearEndDecisionType {
+  PROMOTED
+  PROMOTED_BY_COUNCIL
+  REPEAT
+  EXCLUDED_WORK
+  EXCLUDED_CONDUCT
+}
+
 enum PaymentMethod {
   CASH
   BANK
@@ -591,6 +600,9 @@ model ReportCard {
   publishedAt         DateTime?
   publishedById       String?
   createdAt           DateTime         @default(now())
+  /// Bulletin de fin d'année : moyenne générale et rang annuels.
+  annualAverageCenti  Int?
+  annualRank          Int?
 
   @@unique([studentId, termId, version])
   @@index([schoolId, classId, termId])
@@ -605,6 +617,8 @@ model CouncilDecision {
   comment     String?
   decidedById String
   createdAt   DateTime            @default(now())
+  /// Décision de fin d'année, saisie au dernier trimestre seulement.
+  yearEndDecision YearEndDecisionType?
 
   @@unique([studentId, termId])
 }

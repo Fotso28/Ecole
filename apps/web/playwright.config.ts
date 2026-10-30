@@ -18,6 +18,8 @@ export const apiEnv = {
   QUEUES_ENABLED: 'false',
   WEB_ORIGIN: `http://localhost:${WEB_PORT}`,
   PUBLIC_VERIFY_URL: `http://localhost:${WEB_PORT}/verifier`,
+  STORAGE_PROVIDER: 'local',
+  STORAGE_LOCAL_DIR: '../api/storage/e2e',
 };
 
 export const API_URL = `http://localhost:${API_PORT}`;

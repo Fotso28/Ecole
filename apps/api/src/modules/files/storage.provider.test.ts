@@ -27,7 +27,7 @@ describe('stockage local', () => {
   });
 
   it('enregistre, relit et supprime un fichier', async () => {
-    await storage.put('ecole1/supports/2026/abc', Buffer.from('contenu'), 'application/pdf');
+    await storage.put('ecole1/supports/2026/abc', Buffer.from('contenu'));
     expect((await readFile(path.join(dir, 'ecole1/supports/2026/abc'))).toString()).toBe('contenu');
     expect((await storage.get('ecole1/supports/2026/abc')).toString()).toBe('contenu');
     await storage.remove('ecole1/supports/2026/abc');
@@ -76,11 +76,11 @@ describe('stockage compatible S3', () => {
 
   it('délivre une URL signée de courte durée avec le nom et le type du fichier', async () => {
     const url = new URL(
-      await storage.presignedUrl('ecole1/supports/2026/abc', {
+      (await storage.presignedUrl('ecole1/supports/2026/abc', {
         expiresIn: 300,
         fileName: 'Fiche d’exercices.pdf',
         contentType: 'application/pdf',
-      }),
+      }))!,
     );
     expect(url.origin).toBe('https://s3.gra.io.cloud.ovh.net');
     expect(url.pathname).toBe('/ecole-fichiers/ecole1/supports/2026/abc');
@@ -91,6 +91,19 @@ describe('stockage compatible S3', () => {
     expect(url.searchParams.get('response-content-disposition')).toContain(
       "filename*=UTF-8''Fiche%20d%E2%80%99exercices.pdf",
     );
+  });
+});
+
+describe('stockage S3 non joignable par les navigateurs', () => {
+  it('ne délivre pas de lien direct : l’API sert le fichier', async () => {
+    const internal = new S3FileStorage(new S3Client({ region: 'us-east-1' }), 'ecole', false);
+    expect(
+      await internal.presignedUrl('ecole1/supports/2026/abc', {
+        expiresIn: 300,
+        fileName: 'a.pdf',
+        contentType: 'application/pdf',
+      }),
+    ).toBeNull();
   });
 });
 

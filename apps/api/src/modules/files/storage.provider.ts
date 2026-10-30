@@ -82,6 +82,8 @@ export class S3FileStorage implements FileStorage {
   constructor(
     private readonly client: S3Client,
     private readonly bucket: string,
+    /** Faux si le stockage n'est pas joignable par les navigateurs (MinIO interne). */
+    private readonly presign = true,
   ) {}
 
   static fromEnv(config: Env): S3FileStorage {
@@ -94,7 +96,7 @@ export class S3FileStorage implements FileStorage {
         secretAccessKey: config.S3_SECRET_ACCESS_KEY ?? '',
       },
     });
-    return new S3FileStorage(client, config.S3_BUCKET ?? '');
+    return new S3FileStorage(client, config.S3_BUCKET ?? '', config.S3_PRESIGNED_DOWNLOADS);
   }
 
   async put(key: string, body: Buffer, contentType: string): Promise<void> {
@@ -122,8 +124,9 @@ export class S3FileStorage implements FileStorage {
     await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
   }
 
-  async presignedUrl(key: string, options: SignedUrlOptions): Promise<string> {
+  async presignedUrl(key: string, options: SignedUrlOptions): Promise<string | null> {
     assertSafeKey(key);
+    if (!this.presign) return null;
     return getSignedUrl(
       this.client,
       new GetObjectCommand({

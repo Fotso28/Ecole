@@ -35,6 +35,14 @@ const envSchema = z.object({
     .enum(['true', 'false'])
     .default('true')
     .transform((v) => v === 'true'),
+  /**
+   * Liens présignés directs vers le stockage S3 (fichiers non chiffrés). À désactiver quand le
+   * stockage n'est pas joignable par les navigateurs (MinIO interne) : l'API sert alors les fichiers.
+   */
+  S3_PRESIGNED_DOWNLOADS: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
   FILE_MAX_BYTES: z.coerce.number().int().positive().default(MAX_FILE_BYTES),
   FILE_URL_TTL_SECONDS: z.coerce.number().int().min(30).max(3600).default(300),
   /** Préfixe public de l'API, pour les liens de téléchargement signés du stockage local. */

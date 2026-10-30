@@ -28,6 +28,8 @@ export interface ChildOverview {
     endTime: string;
     status: 'ABSENT' | 'LATE';
     justification: 'PENDING' | 'ACCEPTED' | 'REJECTED' | null;
+    justificationId: string | null;
+    hasAttachment: boolean;
   }[];
   reportCards: {
     id: string;
@@ -45,6 +47,36 @@ export function useChildOverview(id: string | undefined) {
   return useQuery({
     queryKey: ['portal-child', id],
     queryFn: () => api<ChildOverview>(`/portal/children/${id}`),
+    enabled: !!id,
+  });
+}
+
+export interface ChildHomework {
+  className: string | null;
+  homework: {
+    id: string;
+    subjectName: string | null;
+    date: string;
+    content: string;
+    homework: string | null;
+    homeworkDueDate: string | null;
+    materials: PortalMaterial[];
+  }[];
+  materials: PortalMaterial[];
+}
+
+export interface PortalMaterial {
+  id: string;
+  title: string;
+  subjectName: string | null;
+  createdAt: string;
+  file: { id: string; name: string; mimeType: string; size: number } | null;
+}
+
+export function useChildHomework(id: string | undefined) {
+  return useQuery({
+    queryKey: ['portal-homework', id],
+    queryFn: () => api<ChildHomework>(`/portal/children/${id}/homework`),
     enabled: !!id,
   });
 }

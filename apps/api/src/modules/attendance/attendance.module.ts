@@ -373,7 +373,9 @@ export class AttendanceService {
       status: j.status,
       reason: j.reason,
       createdAt: j.createdAt,
-      attachment: presentFile(j.file),
+      // Nom et détails de la pièce (souvent médicale) réservés à qui traite les justificatifs.
+      attachment: this.scope.can('attendance.justify') ? presentFile(j.file) : null,
+      hasAttachment: !!presentFile(j.file),
       student: students.find((s) => s.id === j.studentId) ?? null,
       records: j.records.map((r) => ({
         id: r.id,

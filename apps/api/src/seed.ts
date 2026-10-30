@@ -480,6 +480,21 @@ async function main(): Promise<void> {
       },
     });
   }
+  // Cahier de texte : dernière séance de mathématiques en 4e A, avec un devoir à faire.
+  const mathCs = classSubjects['4e A']?.MATH ?? '';
+  await base.lessonLog.create({
+    data: {
+      schoolId,
+      classId: classes['4e A'] ?? '',
+      classSubjectId: mathCs,
+      date: toDbDate(addDays(today, -1)),
+      startTime: '07:30',
+      content: 'Théorème de Pythagore : énoncé, démonstration et premiers exemples.',
+      homework: 'Exercices 3 à 6 page 112.',
+      homeworkDueDate: toDbDate(addDays(today, 2)),
+      authorId: staff['prof.maths@demo.cm'] ?? '',
+    },
+  });
   await base.announcement.create({
     data: {
       schoolId,

@@ -70,12 +70,18 @@ interface RequestOptions {
 
 async function send(path: string, options: RequestOptions): Promise<Response> {
   const headers: Record<string, string> = {};
-  if (options.body !== undefined) headers['content-type'] = 'application/json';
+  const isForm = options.body instanceof FormData;
+  if (options.body !== undefined && !isForm) headers['content-type'] = 'application/json';
   if (accessToken) headers.authorization = `Bearer ${accessToken}`;
   return fetch(`/api${path}`, {
     method: options.method ?? 'GET',
     headers,
-    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    body:
+      options.body === undefined
+        ? undefined
+        : isForm
+          ? (options.body as FormData)
+          : JSON.stringify(options.body),
     credentials: 'same-origin',
     signal: options.signal,
   });
@@ -146,4 +152,40 @@ export async function downloadFile(path: string, filename: string): Promise<void
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+/** Envoie un fichier (champ `file`) et des champs texte en multipart. */
+export async function uploadFile<T>(
+  path: string,
+  file: File,
+  fields: Record<string, string | undefined> = {},
+): Promise<T> {
+  const form = new FormData();
+  for (const [k, v] of Object.entries(fields)) if (v !== undefined) form.append(k, v);
+  form.append('file', file, file.name);
+  return api<T>(path, { method: 'POST', body: form });
+}
+
+export interface FileLink {
+  url: string;
+  expiresAt: string;
+  name: string;
+  mimeType: string;
+  size: number;
+}
+
+/**
+ * Ouvre un fichier protégé : l'API contrôle les droits puis remet un lien signé de courte durée,
+ * ouvert dans un nouvel onglet (préparé avant l'appel pour ne pas être bloqué par le navigateur).
+ */
+export async function openFile(path: string): Promise<void> {
+  const tab = window.open('', '_blank');
+  try {
+    const link = await api<FileLink>(path);
+    if (tab) tab.location.href = link.url;
+    else window.location.href = link.url;
+  } catch (e) {
+    tab?.close();
+    throw e;
+  }
 }

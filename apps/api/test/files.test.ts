@@ -287,6 +287,8 @@ describe('pièce jointe des justificatifs d’absence', () => {
     expect(Buffer.compare(content.body as Buffer, JPEG)).toBe(0);
 
     // L'enseignant voit le justificatif de sa classe, pas la pièce (souvent médicale).
+    const byTeacher = await http().get('/attendance/justifications').set(s.prof.auth).expect(200);
+    expect(byTeacher.body[0]).toMatchObject({ hasAttachment: true, attachment: null });
     await http()
       .get(`/attendance/justifications/${justificationId}/attachment`)
       .set(s.prof.auth)

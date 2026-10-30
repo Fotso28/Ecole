@@ -45,9 +45,13 @@ jobs:
         ports: ['5432:5432']
         options: >-
           --health-cmd "pg_isready -U ecole" --health-interval 5s --health-timeout 5s --health-retries 10
+    # API sous le rôle applicatif ecole_app (Row-Level Security), créé par test/global-setup.ts ;
+    # migrations et jeux de données avec le rôle propriétaire.
     env:
-      TEST_DATABASE_URL: postgresql://ecole:ecole@localhost:5432/ecole_test
-      DATABASE_URL: postgresql://ecole:ecole@localhost:5432/ecole_test
+      TEST_DATABASE_URL: postgresql://ecole_app:ecole_app@localhost:5432/ecole_test
+      TEST_MIGRATION_DATABASE_URL: postgresql://ecole:ecole@localhost:5432/ecole_test
+      DATABASE_URL: postgresql://ecole_app:ecole_app@localhost:5432/ecole_test
+      MIGRATION_DATABASE_URL: postgresql://ecole:ecole@localhost:5432/ecole_test
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -73,8 +77,10 @@ jobs:
         ports: ['5432:5432']
         options: >-
           --health-cmd "pg_isready -U ecole" --health-interval 5s --health-timeout 5s --health-retries 10
+    # Rôle applicatif ecole_app créé par e2e/global-setup.ts.
     env:
       E2E_DATABASE_URL: postgresql://ecole:ecole@localhost:5432/ecole_e2e
+      E2E_APP_DATABASE_URL: postgresql://ecole_app:ecole_app@localhost:5432/ecole_e2e
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

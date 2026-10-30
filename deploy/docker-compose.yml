@@ -18,8 +18,11 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-ecole}
       POSTGRES_USER: ${POSTGRES_USER:-ecole}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?définir POSTGRES_PASSWORD}
+      # Rôle applicatif ecole_app (soumis à la Row-Level Security), créé au premier démarrage.
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?définir POSTGRES_APP_PASSWORD}
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./postgres/app-role.sh:/docker-entrypoint-initdb.d/10-app-role.sh:ro
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
       interval: 10s
@@ -39,10 +42,18 @@ services:
       timeout: 5s
       retries: 10
 
+  # Migrations avec le rôle propriétaire (MIGRATION_DATABASE_URL), puis droits du rôle applicatif.
   migrate:
     image: ${API_IMAGE:-ecole-api:latest}
-    command: ['node_modules/.bin/prisma', 'migrate', 'deploy']
+    command:
+      [
+        'sh',
+        '-c',
+        'node_modules/.bin/prisma migrate deploy && node_modules/.bin/prisma db execute --url "$$MIGRATION_DATABASE_URL" --file prisma/app-role-grants.sql',
+      ]
     env_file: .env
+    environment:
+      MIGRATION_DATABASE_URL: postgresql://${POSTGRES_USER:-ecole}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ecole}
     depends_on:
       postgres:
         condition: service_healthy
@@ -57,6 +68,8 @@ services:
     environment:
       NODE_ENV: production
       PORT: '4000'
+      # L'API n'a que le rôle applicatif : le mot de passe propriétaire ne lui est pas transmis.
+      POSTGRES_PASSWORD: ''
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -71,6 +84,7 @@ services:
     env_file: .env
     environment:
       NODE_ENV: production
+      POSTGRES_PASSWORD: ''
       ALERT_HEALTH_URL: ${ALERT_HEALTH_URL:-http://api:4000/health}
       BACKUP_STATUS_FILE: /backup-status/last-status.json
     volumes:

@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, Logger, UnauthorizedException } from '@nestjs/common';
 import type { Permission, StaffRole } from '@ecole/shared';
 
 export interface StaffContext {
@@ -55,6 +55,7 @@ interface Holder {
 }
 
 const storage = new AsyncLocalStorage<Holder>();
+const systemLogger = new Logger('ModeSysteme');
 
 export function runWithContext<T>(ctx: RequestContext, fn: () => T, requestId?: string): T {
   return storage.run({ current: ctx, requestId }, fn);
@@ -85,6 +86,10 @@ export function currentRequestId(): string | undefined {
  * après vérification du lien parent-enfant). Préciser `schoolId` dès que possible.
  * La fonction est attendue à l'intérieur du contexte : les requêtes Prisma, paresseuses,
  * s'exécutent ainsi bien avec ces droits.
+ *
+ * Sans `schoolId`, la base passe en mode système (`app.rls_mode = 'system'`) : la
+ * Row-Level Security laisse voir toutes les écoles. Chaque entrée dans ce mode est journalisée
+ * (niveau debug) avec sa raison.
  */
 export function runAsSystem<T>(
   reason: string,
@@ -92,6 +97,11 @@ export function runAsSystem<T>(
   schoolId?: string,
 ): Promise<T> {
   const parent = currentContext();
+  if (!schoolId) {
+    systemLogger.debug(
+      `Mode système toutes écoles : ${reason} (contexte ${parent?.kind ?? 'aucun'})`,
+    );
+  }
   return storage.run(
     {
       requestId: currentRequestId(),

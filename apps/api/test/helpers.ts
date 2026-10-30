@@ -11,8 +11,13 @@ import { AuthService } from '../src/modules/auth/auth.service';
 import { normalizeCameroonPhone } from '@ecole/shared';
 import { MemoryEmailProvider } from '../src/modules/notifications/email.provider';
 import { MemorySmsProvider } from '../src/modules/notifications/sms.provider';
+import { TEST_OWNER_URL } from './setup-env';
 
-export const prisma = new PrismaClient();
+/**
+ * Accès direct à la base pour préparer et vérifier les données, avec le rôle propriétaire
+ * (superutilisateur, hors Row-Level Security). L'API testée, elle, utilise le rôle ecole_app.
+ */
+export const prisma = new PrismaClient({ datasourceUrl: TEST_OWNER_URL });
 
 export async function createTestApp(): Promise<INestApplication> {
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();

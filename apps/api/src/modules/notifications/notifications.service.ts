@@ -1,7 +1,8 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { NotificationChannel, NotificationOutbox, Prisma } from '@prisma/client';
 import { pickChannel, type Contact, type ContactChannel } from '@ecole/shared';
-import { Db, InjectDb, Tx } from '../../common/prisma';
+import { runAsSystem } from '../../common/context';
+import { Db, InjectDb, rlsCovers, Tx } from '../../common/prisma';
 import { EMAIL_PROVIDER, EmailProvider } from './email.provider';
 import { SMS_PROVIDER, SmsProvider } from './sms.provider';
 
@@ -59,17 +60,22 @@ export class NotificationsService {
       ...(input.payload ?? {}),
       ...(input.subject ? { subject: input.subject } : {}),
     };
-    return (tx ?? this.db).notificationOutbox.create({
-      data: {
-        schoolId: input.schoolId ?? null,
-        channel: input.channel ?? 'SMS',
-        recipient: input.recipient,
-        template: input.template,
-        body: input.body,
-        payload: payload as Prisma.InputJsonValue,
-        ...(input.availableAt ? { availableAt: input.availableAt } : {}),
-      },
-    });
+    const schoolId = input.schoolId ?? null;
+    const write = () =>
+      (tx ?? this.db).notificationOutbox.create({
+        data: {
+          schoolId,
+          channel: input.channel ?? 'SMS',
+          recipient: input.recipient,
+          template: input.template,
+          body: input.body,
+          payload: payload as Prisma.InputJsonValue,
+          ...(input.availableAt ? { availableAt: input.availableAt } : {}),
+        },
+      });
+    // Notification hors de la portée de la base (code de connexion, portail parent, plateforme) :
+    // mise en file en mode système, la Row-Level Security refuserait sinon la ligne.
+    return rlsCovers(schoolId) ? write() : runAsSystem(`outbox:${input.template}`, write);
   }
 
   /** Canal préféré de l'école (réglage `preferredChannel`), SMS par défaut. */
@@ -102,8 +108,16 @@ export class NotificationsService {
     return this.enqueue({ ...rest, body, channel, recipient }, tx);
   }
 
-  /** Réserve puis envoie un lot de notifications en attente. Renvoie le nombre traité. */
-  async dispatchPending(limit = 50, onlyId?: string): Promise<number> {
+  /**
+   * Réserve puis envoie un lot de notifications en attente. Renvoie le nombre traité.
+   * La file est commune à toutes les écoles : lecture en mode système, quel que soit l'appelant
+   * (worker, envoi immédiat d'un code de connexion).
+   */
+  dispatchPending(limit = 50, onlyId?: string): Promise<number> {
+    return runAsSystem('outbox:dispatch', () => this.dispatchBatch(limit, onlyId));
+  }
+
+  private async dispatchBatch(limit: number, onlyId?: string): Promise<number> {
     const leased = await this.db.$queryRaw<NotificationOutbox[]>`
       UPDATE "NotificationOutbox" SET "attempts" = "attempts" + 1, "availableAt" = now() + interval '2 minutes'
       WHERE "id" IN (

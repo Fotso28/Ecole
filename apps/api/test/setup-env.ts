@@ -1,7 +1,13 @@
 // Variables d'environnement des tests, chargées avant tout module applicatif.
 process.env.NODE_ENV = 'test';
-process.env.DATABASE_URL =
-  process.env.TEST_DATABASE_URL ?? 'postgresql://ecole:ecole@localhost:5432/ecole_test';
+/** Rôle applicatif ecole_app : l'API testée subit la Row-Level Security comme en production. */
+export const TEST_APP_URL =
+  process.env.TEST_DATABASE_URL ?? 'postgresql://ecole_app:ecole_app@localhost:5432/ecole_test';
+/** Rôle propriétaire (superutilisateur en local et en CI) : migrations et jeux de données. */
+export const TEST_OWNER_URL =
+  process.env.TEST_MIGRATION_DATABASE_URL ?? 'postgresql://ecole:ecole@localhost:5432/ecole_test';
+process.env.DATABASE_URL = TEST_APP_URL;
+process.env.MIGRATION_DATABASE_URL = TEST_OWNER_URL;
 process.env.JWT_SECRET = 'test-jwt-secret-with-enough-length-0123456789';
 process.env.OTP_SECRET = 'test-otp-secret-with-enough-length-0123456789';
 process.env.DATA_ENCRYPTION_KEY = 'a'.repeat(64);

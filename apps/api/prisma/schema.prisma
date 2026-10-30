@@ -5,9 +5,12 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// DATABASE_URL : rôle applicatif ecole_app, soumis à la Row-Level Security.
+// MIGRATION_DATABASE_URL : rôle propriétaire des tables, utilisé par prisma migrate.
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("MIGRATION_DATABASE_URL")
 }
 
 enum SchoolStatus {

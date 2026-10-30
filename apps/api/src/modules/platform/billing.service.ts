@@ -384,12 +384,18 @@ export class BillingService {
     }
   }
 
-  /** Numérotation commune à la plateforme, sans trou ni doublon. */
+  /**
+   * Numérotation commune à la plateforme, sans trou ni doublon. Le compteur n'appartient à aucune
+   * école (`__platform__`) : écrit en mode système, dans la transaction de la facture.
+   */
   private async nextInvoiceNumber(tx: Tx, year: number): Promise<number> {
-    const rows = await tx.$queryRaw<{ value: number }[]>`
+    const rows = await runAsSystem(
+      'billing-counter',
+      () => tx.$queryRaw<{ value: number }[]>`
       INSERT INTO "Counter" ("schoolId", "key", "value") VALUES ('__platform__', ${`subscription-invoice:${year}`}, 1)
       ON CONFLICT ("schoolId", "key") DO UPDATE SET "value" = "Counter"."value" + 1
-      RETURNING "value"`;
+      RETURNING "value"`,
+    );
     const value = rows[0]?.value;
     if (value === undefined) throw new Error('Compteur indisponible');
     return Number(value);

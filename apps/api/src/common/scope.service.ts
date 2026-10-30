@@ -22,6 +22,21 @@ export class ScopeService {
     return year;
   }
 
+  /**
+   * Année clôturée : plus d'inscription, de note, d'évaluation, d'appel ni d'emploi du temps.
+   * Les encaissements (arriérés) restent possibles.
+   */
+  async assertYearOpen(academicYearId: string, tx?: Tx) {
+    const year = await (tx ?? this.db).academicYear.findUnique({
+      where: { id: academicYearId },
+      select: { name: true, status: true },
+    });
+    if (year?.status === 'CLOSED')
+      throw new ConflictException(
+        `Année scolaire ${year.name} clôturée : aucune modification n’est possible`,
+      );
+  }
+
   /** Vrai si la permission n'est accordée que par un rôle limité aux classes de la personne. */
   isClassScoped(permission: Permission): boolean {
     const ctx = currentContext();

@@ -650,11 +650,8 @@ export class ReportCardsService {
     });
     if (drafts.length === 0) throw new ConflictException('Aucun bulletin en brouillon à publier');
     const { term, yearTerms, final } = await this.classTerm(classId, termId);
-    const { issues, digest } = await this.inputs(
-      classId,
-      final ? yearTerms.flatMap((t) => t.sequences) : term.sequences,
-      termId,
-    );
+    const sequences = final ? yearTerms.flatMap((t) => t.sequences) : term.sequences;
+    const { issues, digest, classSubjects } = await this.inputs(classId, sequences, termId);
     if (drafts.some((d) => (d.data as unknown as ReportCardData).inputsDigest !== digest))
       throw new ConflictException(
         'Les notes ou les élèves ont changé depuis la préparation : préparez à nouveau les bulletins',
@@ -667,6 +664,16 @@ export class ReportCardsService {
       });
     const actorId = staffContext().userId;
     await this.db.$transaction(async (tx) => {
+      // Les notes publiées sont verrouillées : toute correction passe par une réouverture motivée
+      // par le censeur, puis une nouvelle version du bulletin.
+      await tx.evaluation.updateMany({
+        where: {
+          classSubjectId: { in: classSubjects.map((c) => c.id) },
+          sequenceId: { in: sequences.map((s) => s.id) },
+          status: 'SUBMITTED',
+        },
+        data: { status: 'LOCKED' },
+      });
       for (const d of drafts) {
         await tx.reportCard.updateMany({
           where: { studentId: d.studentId, termId, status: 'PUBLISHED' },
@@ -739,6 +746,8 @@ export class ReportCardsService {
         classSize: true,
         publishedAt: true,
         annualAverageCenti: true,
+        needsRepublish: true,
+        republishReason: true,
         data: true,
       },
     });
@@ -759,6 +768,8 @@ export class ReportCardsService {
           rankLabel: data.totals.rankLabel,
           classSize: c.classSize,
           publishedAt: c.publishedAt,
+          needsRepublish: c.needsRepublish,
+          republishReason: c.republishReason,
           decision: data.decision?.label ?? null,
           annualAverageCenti: c.annualAverageCenti,
           annualRankLabel: data.annual?.rankLabel ?? null,

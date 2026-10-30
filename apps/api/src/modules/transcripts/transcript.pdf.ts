@@ -177,9 +177,17 @@ export function renderTranscript(data: TranscriptData): Promise<Buffer> {
   row(totals, { bold: true, fill: '#E3F0EA', height: 18 });
   y += 10;
 
-  if (y + 60 > bottom) {
+  if (y + 90 > bottom) {
     doc.addPage();
     y = 30;
+  }
+  if (data.publicationNotice) {
+    doc
+      .fillColor('#9A3412')
+      .font('Helvetica-Bold')
+      .fontSize(8)
+      .text(t(data.publicationNotice), left, y, { width: W });
+    y = doc.y + 8;
   }
   doc
     .fillColor(MUTED)

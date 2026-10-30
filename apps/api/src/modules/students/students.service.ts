@@ -286,6 +286,7 @@ export class StudentsService {
       },
     });
     for (const g of input.guardians) await this.linkGuardian(tx, student.id, g);
+    if (input.classId) await this.scope.assertYearOpen(academicYearId, tx);
     for (const type of DEFAULT_DOCUMENTS) {
       await tx.studentDocument.create({
         data: { schoolId, studentId: student.id, type, status: 'MISSING' },
@@ -719,6 +720,7 @@ export class StudentsService {
     const cls = await this.db.class.findUnique({ where: { id: classId } });
     if (!cls || cls.academicYearId !== year.id)
       throw new BadRequestException('Classe inconnue pour l’année en cours');
+    await this.scope.assertYearOpen(year.id);
     const existing = await this.db.enrollment.findFirst({
       where: { studentId, academicYearId: year.id },
     });

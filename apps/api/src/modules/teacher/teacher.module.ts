@@ -1,8 +1,8 @@
 import { Controller, Get, Injectable, Module } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { staffContext } from '../../common/context';
+import { currentSchoolId, staffContext } from '../../common/context';
 import { todayInCameroon, toDbDate } from '../../common/dates';
-import { RequirePermissions } from '../../common/decorators';
+import { RequireModule, RequirePermissions } from '../../common/decorators';
 import { Db, InjectDb } from '../../common/prisma';
 import { ScopeService } from '../../common/scope.service';
 
@@ -13,12 +13,19 @@ export class TeacherService {
     private readonly scope: ScopeService,
   ) {}
 
-  /** Journée de l'enseignant : ses cours du jour, ses classes et les appels déjà faits. */
+  /**
+   * Journée de l'enseignant : ses classes, et selon les modules activés par l'école, ses cours
+   * du jour (emploi du temps) et les appels déjà faits.
+   */
   async today() {
     const userId = staffContext().userId;
     const year = await this.scope.currentYear();
     const today = todayInCameroon();
     const dayOfWeek = ((new Date(`${today}T00:00:00Z`).getUTCDay() + 6) % 7) + 1;
+    const { modules } = await this.db.school.findUniqueOrThrow({
+      where: { id: currentSchoolId() },
+      select: { modules: true },
+    });
     const [classSubjects, entries, sessions] = await Promise.all([
       this.db.classSubject.findMany({
         where: { teacherId: userId, class: { academicYearId: year.id } },
@@ -34,14 +41,18 @@ export class TeacherService {
         },
         orderBy: [{ class: { name: 'asc' } }, { subject: { name: 'asc' } }],
       }),
-      this.db.timetableEntry.findMany({
-        where: { teacherId: userId, academicYearId: year.id, dayOfWeek },
-        orderBy: { startTime: 'asc' },
-      }),
-      this.db.attendanceSession.findMany({
-        where: { takenById: userId, date: toDbDate(today) },
-        select: { classId: true, startTime: true },
-      }),
+      modules.includes('timetable')
+        ? this.db.timetableEntry.findMany({
+            where: { teacherId: userId, academicYearId: year.id, dayOfWeek },
+            orderBy: { startTime: 'asc' },
+          })
+        : Promise.resolve([]),
+      modules.includes('attendance')
+        ? this.db.attendanceSession.findMany({
+            where: { takenById: userId, date: toDbDate(today) },
+            select: { classId: true, startTime: true },
+          })
+        : Promise.resolve([]),
     ]);
     const byCs = new Map(classSubjects.map((c) => [c.id, c]));
     return {
@@ -75,6 +86,7 @@ export class TeacherService {
 
 @ApiTags('teacher')
 @ApiBearerAuth()
+@RequireModule('grades')
 @Controller('teacher')
 export class TeacherController {
   constructor(private readonly teacher: TeacherService) {}

@@ -83,6 +83,19 @@ export default function StaffPage() {
   const [editing, setEditing] = useState<StaffRow | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const q = useQuery({ queryKey: ['staff'], queryFn: () => api<StaffRow[]>('/staff') });
+  const invitations = useQuery({
+    queryKey: ['staff', 'invitations'],
+    queryFn: () =>
+      api<{ id: string; email: string | null; roles: StaffRow['roles'] }[]>('/staff/invitations'),
+  });
+  const cancelInvitation = useMutation({
+    mutationFn: (id: string) => api(`/staff/invitations/${id}/cancel`, { method: 'POST' }),
+    onSuccess: () => {
+      toast('Invitation annulée');
+      void queryClient.invalidateQueries({ queryKey: ['staff'] });
+    },
+    onError: (e) => toast(e instanceof Error ? e.message : 'Erreur', 'error'),
+  });
   const rolesQ = useQuery({ queryKey: ['roles'], queryFn: () => api<RoleChoices>('/roles') });
   const custom = rolesQ.data?.custom ?? [];
   const customName = new Map(custom.map((r) => [r.id, r.name]));
@@ -98,11 +111,16 @@ export default function StaffPage() {
     onError: (e) => toast(e instanceof Error ? e.message : 'Erreur', 'error'),
   });
   const create = useMutation({
-    mutationFn: (body: Record<string, unknown>) => api('/staff', { method: 'POST', body }),
-    onSuccess: () => {
+    mutationFn: (body: Record<string, unknown>) =>
+      api<{ status: 'CREATED' | 'INVITED' }>('/staff', { method: 'POST', body }),
+    onSuccess: (r) => {
       setOpen(false);
       setErrors({});
-      toast('Compte créé. Transmettez le mot de passe provisoire en main propre.');
+      toast(
+        r.status === 'INVITED'
+          ? 'Cette adresse a déjà un compte : une invitation lui sera proposée à sa prochaine connexion.'
+          : 'Compte créé. Transmettez le mot de passe provisoire en main propre.',
+      );
       void queryClient.invalidateQueries({ queryKey: ['staff'] });
     },
     onError: (e) => {
@@ -196,6 +214,43 @@ export default function StaffPage() {
           ))}
         </ul>
       )}
+      {invitations.data && invitations.data.length > 0 ? (
+        <section aria-labelledby="invitations-titre" className="flex flex-col gap-2">
+          <h2 id="invitations-titre" className="text-base font-bold">
+            Invitations en attente
+          </h2>
+          <ul className="grid grid-cols-1 gap-2 md:grid-cols-2" aria-label="Invitations en attente">
+            {invitations.data.map((i) => (
+              <li key={i.id}>
+                <Card className="flex flex-col gap-2 p-3 lg:p-4">
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="min-w-0 truncate font-semibold">{i.email}</span>
+                    <Badge tone="warn">En attente</Badge>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {i.roles.map((r) => (
+                      <Badge key={r} tone="info">
+                        {ROLE_LABELS[r]}
+                      </Badge>
+                    ))}
+                  </div>
+                  {can('staff.write') ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="self-start text-danger"
+                      onClick={() => cancelInvitation.mutate(i.id)}
+                      aria-label={`Annuler l’invitation de ${i.email ?? 'cette personne'}`}
+                    >
+                      Annuler l’invitation
+                    </Button>
+                  ) : null}
+                </Card>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
       <Sheet open={open} onClose={() => setOpen(false)} title="Nouveau membre du personnel">
         <form
           className="flex flex-col gap-4"
@@ -234,7 +289,7 @@ export default function StaffPage() {
             type="text"
             minLength={10}
             required
-            hint="10 caractères minimum."
+            hint="10 caractères minimum. Si l’adresse a déjà un compte, une invitation lui est proposée à la place."
             error={errors.password}
           />
           <RoleFields custom={custom} error={errors.roles} />

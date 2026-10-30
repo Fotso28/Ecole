@@ -7,11 +7,19 @@ import { env, loadDotEnv } from './config/env';
 
 const QUEUE = 'ecole-jobs';
 
-/** Processus des tâches de fond : file BullMQ sur Redis, une tâche à la fois. */
-async function main(): Promise<void> {
+/**
+ * Processus des tâches de fond : file BullMQ sur Redis, une tâche à la fois. Avec
+ * `QUEUES_ENABLED=false` (instance de secours, essais sans Redis), il s'arrête sans rien
+ * planifier ni se connecter à Redis : aucune tâche de fond ne tourne.
+ */
+export async function main(): Promise<'disabled' | 'started'> {
   loadDotEnv();
   const config = env();
   const logger = new Logger('Worker');
+  if (!config.QUEUES_ENABLED) {
+    logger.warn('QUEUES_ENABLED=false : tâches de fond désactivées, le worker s’arrête');
+    return 'disabled';
+  }
   const { AppModule } = await import('./app.module');
   const { JOBS, runJob } = await import('./jobs');
   const { appLogger } = await import('./common/logger');
@@ -62,6 +70,8 @@ async function main(): Promise<void> {
   };
   process.on('SIGTERM', () => void stop());
   process.on('SIGINT', () => void stop());
+  return 'started';
 }
 
-void main();
+// Lancé directement (node dist/worker.js), et non importé par un test.
+if (process.argv[1]?.endsWith('worker.js')) void main();

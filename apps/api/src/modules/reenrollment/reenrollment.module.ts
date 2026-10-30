@@ -19,6 +19,7 @@ import {
 } from '@ecole/shared';
 import { z } from 'zod';
 import { AuditService } from '../../common/audit.service';
+import { ScopeService } from '../../common/scope.service';
 import { currentSchoolId } from '../../common/context';
 import { RequireModule, RequirePermissions } from '../../common/decorators';
 import { Db, InjectDb, Tx } from '../../common/prisma';
@@ -35,6 +36,7 @@ export class ReenrollmentService {
     @InjectDb() private readonly db: Db,
     private readonly audit: AuditService,
     private readonly finance: FinanceService,
+    private readonly scope: ScopeService,
   ) {}
 
   private async years(toYearId: string, fromYearId: string) {
@@ -153,6 +155,7 @@ export class ReenrollmentService {
 
   async apply(toYearId: string, input: z.infer<typeof reenrollmentSchema>) {
     const { from, to } = await this.years(toYearId, input.fromYearId);
+    await this.scope.assertYearOpen(to.id);
     const studentIds = input.items.map((i) => i.studentId);
     if (new Set(studentIds).size !== studentIds.length)
       throw new BadRequestException('Un élève figure deux fois dans la liste');

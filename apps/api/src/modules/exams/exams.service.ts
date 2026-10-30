@@ -96,6 +96,7 @@ export class ExamsService {
 
   async createSession(input: SessionInput) {
     const year = await this.scope.currentYear();
+    await this.scope.assertYearOpen(year.id);
     const classes = await this.db.class.findMany({
       where: { id: { in: input.classIds }, academicYearId: year.id },
     });
@@ -868,6 +869,7 @@ export class ExamsService {
     const paper = await this.gradablePaper(paperId);
     if (paper.session.resultsPublishedAt)
       throw new ConflictException('Résultats publiés : les notes ne peuvent plus être modifiées');
+    await this.scope.assertYearOpen(paper.session.academicYearId);
     const candidates = await this.db.examCandidate.findMany({
       where: { sessionId: paper.sessionId, classId: { in: paper.classIds } },
       select: { id: true, anonymityCode: true },
@@ -939,6 +941,7 @@ export class ExamsService {
   // -------------------------------------------------------------------------
 
   private async compute(session: ExamSession) {
+    const frozen = session.frozenCoefficients as Record<string, number> | null;
     const [papers, candidates, coefficients] = await Promise.all([
       this.db.examPaper.findMany({
         where: { sessionId: session.id },
@@ -946,22 +949,32 @@ export class ExamsService {
         orderBy: [{ date: 'asc' }, { startTime: 'asc' }],
       }),
       this.db.examCandidate.findMany({ where: { sessionId: session.id } }),
-      this.db.classSubject.findMany({
-        where: { classId: { in: session.classIds } },
-        select: { classId: true, subjectId: true, coefficient: true },
-      }),
+      // Résultats publiés : coefficients figés à la publication, pour que moyennes et rangs
+      // restent ceux annoncés aux parents.
+      frozen ? Promise.resolve([]) : this.currentCoefficients(session.classIds),
     ]);
     const grades = new Map<string, ParsedGrade>();
     for (const p of papers)
       for (const s of p.scores) grades.set(`${p.id}:${s.candidateId}`, toParsed(s));
-    const coef = new Map(coefficients.map((c) => [`${c.classId}:${c.subjectId}`, c.coefficient]));
+    const coef = new Map(
+      frozen
+        ? Object.entries(frozen)
+        : coefficients.map((c) => [`${c.classId}:${c.subjectId}`, c.coefficient] as const),
+    );
     const results = examResults(
       candidates.map((c) => ({ id: c.id, classId: c.classId })),
       papers,
       grades,
       (classId, subjectId) => coef.get(`${classId}:${subjectId}`),
     );
-    return { papers, candidates, results };
+    return { papers, candidates, results, coefficients: Object.fromEntries(coef) };
+  }
+
+  private currentCoefficients(classIds: readonly string[]) {
+    return this.db.classSubject.findMany({
+      where: { classId: { in: [...classIds] } },
+      select: { classId: true, subjectId: true, coefficient: true },
+    });
   }
 
   /**
@@ -1043,7 +1056,7 @@ export class ExamsService {
   async publish(sessionId: string, input: z.infer<typeof examPublishSchema>) {
     const session = await this.session(sessionId);
     this.assertNotPublished(session);
-    const { papers, candidates, results } = await this.compute(session);
+    const { papers, candidates, results, coefficients } = await this.compute(session);
     if (papers.length === 0) throw new ConflictException('Aucune épreuve dans cette session');
     if (candidates.length === 0) throw new ConflictException('Aucun candidat dans cette session');
     const missing = results.filter((r) => r.incomplete).length;
@@ -1059,7 +1072,11 @@ export class ExamsService {
       async (tx) => {
         const updated = await tx.examSession.updateMany({
           where: { id: sessionId, resultsPublishedAt: null },
-          data: { resultsPublishedAt: new Date(), publishedById: staffContext().userId },
+          data: {
+            resultsPublishedAt: new Date(),
+            publishedById: staffContext().userId,
+            frozenCoefficients: coefficients,
+          },
         });
         if (updated.count === 0) throw new ConflictException('Résultats déjà publiés');
         const students = await tx.student.findMany({
@@ -1107,7 +1124,9 @@ export class ExamsService {
   /**
    * Report des notes dans la grille de la séquence : une évaluation « Examen » par épreuve et par
    * classe, créée en brouillon pour suivre le circuit habituel (soumission puis validation).
-   * Une grille déjà soumise ou validée n'est pas modifiée.
+   * Les notes reportées viennent de résultats publiés : elles ne se modifient pas dans la grille
+   * (seuls les élèves sans note peuvent être complétés). Supprimer l'évaluation reportée annule
+   * le report, qui peut alors être refait. Une grille déjà soumise ou validée n'est pas modifiée.
    */
   async transfer(sessionId: string, weight: number) {
     const session = await this.session(sessionId);

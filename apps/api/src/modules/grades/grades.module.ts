@@ -25,6 +25,7 @@ import { RequireModule, RequirePermissions } from '../../common/decorators';
 import { Db, InjectDb } from '../../common/prisma';
 import { ScopeService } from '../../common/scope.service';
 import { ZodPipe } from '../../common/zod.pipe';
+import { isFinalTerm } from '../report-cards/report-cards.service';
 import { computeSheet, compactGrade, toStored } from './grades.compute';
 
 const sheetQuerySchema = z.object({
@@ -91,6 +92,8 @@ export class GradesService {
     if (!sequence || sequence.term.academicYearId !== cs.class.academicYearId) {
       throw new BadRequestException('Séquence hors de l’année scolaire de la classe');
     }
+    await this.scope.assertYearOpen(cs.class.academicYearId);
+    await this.assertNotPublished(cs.classId, input.sequenceId);
     await this.assertSheetEditable(input.classSubjectId, input.sequenceId);
     const evaluation = await this.db.evaluation.create({
       data: {
@@ -117,15 +120,24 @@ export class GradesService {
   async deleteEvaluation(id: string) {
     const evaluation = await this.db.evaluation.findUnique({ where: { id } });
     if (!evaluation) throw new NotFoundException('Évaluation introuvable');
-    await this.scope.classSubject(evaluation.classSubjectId, 'grades.write');
+    const cs = await this.scope.classSubject(evaluation.classSubjectId, 'grades.write');
     if (evaluation.status !== 'DRAFT')
       throw new ConflictException('Seule une évaluation en brouillon peut être supprimée');
-    await this.db.evaluation.delete({ where: { id } });
-    await this.audit.log({
-      action: 'grades.evaluation_deleted',
-      entity: 'Evaluation',
-      entityId: id,
-      before: evaluation,
+    await this.scope.assertYearOpen(cs.class.academicYearId);
+    await this.assertNotPublished(cs.classId, evaluation.sequenceId);
+    await this.db.$transaction(async (tx) => {
+      await tx.evaluation.delete({ where: { id } });
+      // Évaluation issue d'un report d'examen : le report pourra être refait.
+      await tx.examTransfer.deleteMany({ where: { evaluationId: id } });
+      await this.audit.log(
+        {
+          action: 'grades.evaluation_deleted',
+          entity: 'Evaluation',
+          entityId: id,
+          before: evaluation,
+        },
+        tx,
+      );
     });
     return { ok: true };
   }
@@ -189,6 +201,8 @@ export class GradesService {
     if (evaluation.status === 'SUBMITTED' && !ctx.permissions.has('grades.validate')) {
       throw new ConflictException('Notes soumises : seule la vie pédagogique peut les corriger');
     }
+    await this.scope.assertYearOpen(cs.class.academicYearId);
+    await this.assertNotPublished(cs.classId, evaluation.sequenceId);
     const enrolled = new Set((await this.scope.classStudents(cs.classId)).map((s) => s.id));
     const errors: { studentId: string; message: string }[] = [];
     const parsed = rows.map((r) => {
@@ -209,6 +223,22 @@ export class GradesService {
       where: { evaluationId, studentId: { in: rows.map((r) => r.studentId) } },
     });
     const beforeBy = new Map(before.map((g) => [g.studentId, g]));
+    // Notes reportées d'un examen publié : elles ne se corrigent pas dans la grille.
+    if (await this.db.examTransfer.count({ where: { evaluationId } })) {
+      const changed = parsed.some((p) => {
+        const prev = beforeBy.get(p.studentId);
+        return (
+          prev &&
+          (p.stored === null ||
+            (p.stored !== 'invalid' &&
+              (p.stored.status !== prev.status || p.stored.valueCenti !== prev.valueCenti)))
+        );
+      });
+      if (changed)
+        throw new ConflictException(
+          'Notes reportées d’un examen publié : elles ne se modifient pas ici (supprimez l’évaluation pour annuler le report)',
+        );
+    }
     const changes: { studentId: string; before: string; after: string }[] = [];
     await this.db.$transaction(async (tx) => {
       // Écritures groupées : une requête pour les nouvelles notes et une pour les effacements,
@@ -268,7 +298,9 @@ export class GradesService {
 
   /** Soumission au censeur : refusée tant qu'une note manque. */
   async submit(classSubjectId: string, sequenceId: string) {
-    await this.scope.classSubject(classSubjectId, 'grades.write');
+    const cs = await this.scope.classSubject(classSubjectId, 'grades.write');
+    await this.scope.assertYearOpen(cs.class.academicYearId);
+    await this.assertNotPublished(cs.classId, sequenceId);
     const sheet = await this.sheet(classSubjectId, sequenceId);
     if (sheet.evaluations.length === 0)
       throw new ConflictException('Aucune évaluation à soumettre');
@@ -296,6 +328,8 @@ export class GradesService {
   }
 
   async validate(classSubjectId: string, sequenceId: string) {
+    const cs = await this.scope.classSubject(classSubjectId, 'grades.validate');
+    await this.scope.assertYearOpen(cs.class.academicYearId);
     const draft = await this.db.evaluation.count({
       where: { classSubjectId, sequenceId, status: 'DRAFT' },
     });
@@ -313,19 +347,39 @@ export class GradesService {
     return { locked: updated.count };
   }
 
+  /**
+   * Réouverture d'une grille par la vie pédagogique, motif obligatoire. Si des bulletins publiés
+   * reposent sur ces notes, ils restent valables mais sont marqués « à republier » : la
+   * correction produira une nouvelle version.
+   */
   async reopen(classSubjectId: string, sequenceId: string, reason: string) {
-    const updated = await this.db.evaluation.updateMany({
-      where: { classSubjectId, sequenceId, status: { in: ['SUBMITTED', 'LOCKED'] } },
-      data: { status: 'DRAFT' },
+    const cs = await this.scope.classSubject(classSubjectId, 'grades.validate');
+    await this.scope.assertYearOpen(cs.class.academicYearId);
+    const termIds = await this.publicationTerms(sequenceId);
+    return this.db.$transaction(async (tx) => {
+      const updated = await tx.evaluation.updateMany({
+        where: { classSubjectId, sequenceId, status: { in: ['SUBMITTED', 'LOCKED'] } },
+        data: { status: 'DRAFT' },
+      });
+      const flagged =
+        updated.count > 0
+          ? await tx.reportCard.updateMany({
+              where: { classId: cs.classId, termId: { in: termIds }, status: 'PUBLISHED' },
+              data: { needsRepublish: true, republishReason: reason },
+            })
+          : { count: 0 };
+      await this.audit.log(
+        {
+          action: 'grades.reopened',
+          entity: 'ClassSubject',
+          entityId: classSubjectId,
+          after: { sequenceId, reportCardsToRepublish: flagged.count },
+          reason,
+        },
+        tx,
+      );
+      return { reopened: updated.count, reportCardsToRepublish: flagged.count };
     });
-    await this.audit.log({
-      action: 'grades.reopened',
-      entity: 'ClassSubject',
-      entityId: classSubjectId,
-      after: { sequenceId },
-      reason,
-    });
-    return { reopened: updated.count };
   }
 
   /** État de saisie des grilles d'une séquence (suivi du censeur). */
@@ -369,6 +423,40 @@ export class GradesService {
         (a, b) =>
           a.className.localeCompare(b.className, 'fr') ||
           a.subjectName.localeCompare(b.subjectName, 'fr'),
+      );
+  }
+
+  /**
+   * Trimestres dont les bulletins reposent sur les notes de la séquence : son trimestre et, pour
+   * le bilan annuel, le dernier trimestre de l'année.
+   */
+  private async publicationTerms(sequenceId: string): Promise<string[]> {
+    const sequence = await this.db.sequence.findUnique({
+      where: { id: sequenceId },
+      include: { term: true },
+    });
+    if (!sequence) throw new NotFoundException('Séquence introuvable');
+    const yearTerms = await this.db.term.findMany({
+      where: { academicYearId: sequence.term.academicYearId },
+      select: { id: true, order: true },
+    });
+    const final = yearTerms.find((t) => isFinalTerm(t, yearTerms));
+    return [...new Set([sequence.termId, ...(final ? [final.id] : [])])];
+  }
+
+  /** Notes figées par la publication des bulletins, tant que la grille n'a pas été rouverte. */
+  private async assertNotPublished(classId: string, sequenceId: string) {
+    const published = await this.db.reportCard.count({
+      where: {
+        classId,
+        termId: { in: await this.publicationTerms(sequenceId) },
+        status: 'PUBLISHED',
+        needsRepublish: false,
+      },
+    });
+    if (published > 0)
+      throw new ConflictException(
+        'Bulletins publiés : les notes sont verrouillées. Demandez au censeur de rouvrir la grille (motif obligatoire)',
       );
   }
 

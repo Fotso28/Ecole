@@ -22,6 +22,7 @@ import {
   transportStopSchema,
   transportSubscriptionSchema,
   transportVehicleSchema,
+  creditNoteSchema,
 } from '@ecole/shared';
 import { z } from 'zod';
 import { parentContext, runAsSystem } from '../../common/context';
@@ -168,6 +169,15 @@ export class TransportController {
     @Body(new ZodPipe(cancelSchema)) body: z.infer<typeof cancelSchema>,
   ) {
     return this.transport.cancel(subscriptionId, body.reason);
+  }
+
+  @RequirePermissions('transport.manage')
+  @Post('subscriptions/:id/credit')
+  credit(
+    @Param('id') subscriptionId: string,
+    @Body(new ZodPipe(creditNoteSchema)) body: z.infer<typeof creditNoteSchema>,
+  ) {
+    return this.transport.credit(subscriptionId, body.amount, body.reason);
   }
 
   @RequirePermissions('transport.rollcall')

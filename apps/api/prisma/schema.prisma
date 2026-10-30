@@ -261,6 +261,31 @@ model Membership {
   @@index([schoolId])
 }
 
+enum StaffInvitationStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  CANCELLED
+}
+
+/// Invitation d'un compte existant à rejoindre le personnel d'une école : la personne l'accepte
+/// à sa connexion ; rien de son compte n'est communiqué à l'école avant.
+model StaffInvitation {
+  id             String                @id @default(cuid())
+  schoolId       String
+  userId         String
+  roles          StaffRole[]
+  customRoleIds  String[]              @default([])
+  maxWeeklyHours Int?
+  status         StaffInvitationStatus @default(PENDING)
+  invitedById    String
+  createdAt      DateTime              @default(now())
+  respondedAt    DateTime?
+
+  @@index([schoolId, status])
+  @@index([userId, status])
+}
+
 model RefreshToken {
   id         String    @id @default(cuid())
   userId     String
@@ -671,6 +696,9 @@ model ReportCard {
   /// Bulletin de fin d'année : moyenne générale et rang annuels.
   annualAverageCenti  Int?
   annualRank          Int?
+  /// Notes rouvertes après publication : le bulletin publié reste valable mais doit être republié.
+  needsRepublish      Boolean          @default(false)
+  republishReason     String?
 
   @@unique([studentId, termId, version])
   @@index([schoolId, classId, termId])
@@ -860,6 +888,10 @@ model NotificationOutbox {
   availableAt DateTime            @default(now())
   sentAt      DateTime?
   createdAt   DateTime            @default(now())
+  /// Message confidentiel (code de connexion) : corps effacé une fois envoyé, abandonné ou expiré.
+  sensitive   Boolean             @default(false)
+  /// Au-delà, le message n'est plus envoyé (code expiré).
+  expiresAt   DateTime?
 
   @@index([status, availableAt])
   /// Regroupement des notifications de messagerie : plafond par destinataire sur 24 h, envois d'un fil.
@@ -1264,6 +1296,8 @@ model ExamSession {
   supervisorsPerRoom Int       @default(1)
   resultsPublishedAt DateTime?
   publishedById      String?
+  /// Coefficients figés à la publication (« classId:subjectId » → coefficient).
+  frozenCoefficients Json?
   createdById        String
   createdAt          DateTime  @default(now())
 
@@ -1899,6 +1933,8 @@ model TransportSubscription {
   cancelledAt    DateTime?
   cancelledById  String?
   cancelReason   String?
+  /// Abonnement résilié remplacé par un nouvel abonnement de la même année : avoir déjà fait.
+  replacedAt     DateTime?
 
   line TransportLine @relation(fields: [lineId], references: [id], onDelete: Restrict)
   stop TransportStop @relation(fields: [stopId], references: [id], onDelete: Restrict)

@@ -127,7 +127,18 @@ describe('stock de fournitures et d’uniformes', () => {
       .set(s.compta.auth)
       .send({ reason: 'Erreur de taille' })
       .expect(201);
-    expect(rev.body).toMatchObject({ type: 'REVERSAL', quantity: 2, invoiced: true });
+    expect(rev.body).toMatchObject({
+      type: 'REVERSAL',
+      quantity: 2,
+      invoiced: true,
+      credited: 9000,
+      notCredited: 0,
+    });
+    // Avoir automatique sur la ligne de facture de la vente annulée.
+    const line = await prisma.invoiceLine.findUniqueOrThrow({
+      where: { id: sale.body.invoiceLineId },
+    });
+    expect([line.amount, line.discount]).toEqual([9000, 9000]);
     await http()
       .post(`/stock/movements/${sale.body.id}/reverse`)
       .set(s.compta.auth)
@@ -138,7 +149,23 @@ describe('stock de fournitures et d’uniformes', () => {
       .set(s.compta.auth)
       .send({ reason: 'Encore' })
       .expect(409);
-    await sell(shirt.id, 9).expect(201);
+    const big = await sell(shirt.id, 9).expect(201);
+    // Avoir partiel par le gestionnaire du stock, plafonné au reste dû de la vente.
+    await http()
+      .post(`/stock/movements/${big.body.id}/credit`)
+      .set(s.secretariat.auth)
+      .send({ amount: 4500, reason: 'Chemise défectueuse' })
+      .expect(201);
+    await http()
+      .post(`/stock/movements/${big.body.id}/credit`)
+      .set(s.secretariat.auth)
+      .send({ amount: 40000, reason: 'Chemise défectueuse' })
+      .expect(409);
+    await http()
+      .post(`/stock/movements/${shirt.purchaseId}/credit`)
+      .set(s.secretariat.auth)
+      .send({ amount: 100, reason: 'Pas une vente' })
+      .expect(404);
     // Annuler l'achat rendrait le stock négatif.
     await http()
       .post(`/stock/movements/${shirt.purchaseId}/reverse`)

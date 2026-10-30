@@ -184,6 +184,40 @@ describe('portail et réglages de l’établissement', () => {
         idempotencyKey: randomUUID(),
       })
       .expect(403);
+    // Finances et notes masquées quand l'école de l'enfant n'a pas activé le module.
+    const children = await http().get('/portal/children').set(parent.auth).expect(200);
+    expect(children.body[0]).toMatchObject({
+      modules: { grades: true, finance: false },
+      balance: 0,
+      nextDue: null,
+    });
+    const overview = await http().get(`/portal/children/${child.id}`).set(parent.auth).expect(200);
+    expect(overview.body.finance).toBeNull();
+    const payment = await prisma.payment.create({
+      data: {
+        schoolId: f.schoolId,
+        studentId: child.id,
+        amount: 5000,
+        method: 'CASH',
+        status: 'SUCCESS',
+        idempotencyKey: randomUUID(),
+      },
+    });
+    await http().get(`/portal/payments/${payment.id}/receipt.pdf`).set(parent.auth).expect(404);
+    await prisma.school.update({
+      where: { id: f.schoolId },
+      data: { modules: school.modules.filter((m) => m !== 'grades') },
+    });
+    const noGrades = await http().get(`/portal/children/${child.id}`).set(parent.auth).expect(200);
+    expect(noGrades.body.modules).toEqual({ grades: false, finance: true });
+    expect(noGrades.body.grades).toEqual([]);
+    expect(noGrades.body.reportCards).toEqual([]);
+    expect(noGrades.body.finance).not.toBeNull();
+    await http()
+      .get(`/portal/children/${child.id}/transcript.pdf?scope=sequence&periodId=${f.seq1Id}`)
+      .set(parent.auth)
+      .expect(404);
+
     await prisma.school.update({ where: { id: f.schoolId }, data: { status: 'SUSPENDED' } });
     const list = await http().get('/portal/children').set(parent.auth).expect(200);
     expect(list.body).toEqual([]);
@@ -428,5 +462,19 @@ describe('emploi du temps', () => {
         className: '4e A',
         attendanceTaken: false,
       });
+
+    // Modules désactivés : sans emploi du temps, pas de cours du jour ; sans notes, route fermée.
+    const school = await prisma.school.findUniqueOrThrow({ where: { id: f.schoolId } });
+    await prisma.school.update({
+      where: { id: f.schoolId },
+      data: { modules: school.modules.filter((m) => m !== 'timetable') },
+    });
+    const noTimetable = await http().get('/teacher/today').set(s.prof.auth).expect(200);
+    expect(noTimetable.body.lessons).toEqual([]);
+    await prisma.school.update({
+      where: { id: f.schoolId },
+      data: { modules: school.modules.filter((m) => m !== 'grades') },
+    });
+    await http().get('/teacher/today').set(s.prof.auth).expect(403);
   });
 });

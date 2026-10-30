@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { id, isoDate, timeOfDay } from './schemas';
+import { fcfaAmount, id, isoDate, timeOfDay } from './schemas';
 
 /** Transport scolaire : lignes, arrêts, véhicules, abonnements et appel dans le car. */
 
@@ -103,7 +103,7 @@ export function missedBoarding(
 
 // Schémas
 const label = z.string().trim().min(1, 'Champ obligatoire').max(80);
-const fcfa = z.number().int('Montant entier en FCFA').nonnegative();
+const fcfa = fcfaAmount;
 
 export const transportLineSchema = z.object({
   name: label,

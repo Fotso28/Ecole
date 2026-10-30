@@ -94,6 +94,7 @@ export class TimetableService {
   /** Déplace un cours (même durée) en refusant les mêmes conflits qu'à l'ajout. */
   async move(id: string, target: z.infer<typeof moveSchema>) {
     const year = await this.scope.currentYear();
+    await this.scope.assertYearOpen(year.id);
     const entry = await this.db.timetableEntry.findUnique({ where: { id } });
     if (!entry || entry.academicYearId !== year.id)
       throw new NotFoundException('Cours introuvable pour l’année en cours');
@@ -143,6 +144,7 @@ export class TimetableService {
     if (toMinutes(input.endTime) <= toMinutes(input.startTime))
       throw new BadRequestException('L’heure de fin doit suivre l’heure de début');
     const year = await this.scope.currentYear();
+    await this.scope.assertYearOpen(year.id);
     const cs = await this.db.classSubject.findUnique({
       where: { id: input.classSubjectId },
       include: { class: true },
@@ -207,6 +209,9 @@ export class TimetableService {
   }
 
   async remove(id: string) {
+    const entry = await this.db.timetableEntry.findUnique({ where: { id } });
+    if (!entry) throw new NotFoundException('Cours introuvable');
+    await this.scope.assertYearOpen(entry.academicYearId);
     await this.db.timetableEntry.delete({ where: { id } });
     await this.audit.log({
       action: 'timetable.entry_removed',

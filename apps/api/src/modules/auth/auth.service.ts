@@ -156,7 +156,14 @@ export class AuthService {
       where: { userId: user.id, active: true, school: { status: 'ACTIVE' } },
       orderBy: { createdAt: 'asc' },
     });
-    if (!membership && !user.isPlatformAdmin)
+    // Sans accès actif, la connexion reste possible pour répondre à une invitation en attente.
+    if (
+      !membership &&
+      !user.isPlatformAdmin &&
+      (await runAsSystem('login-invitations', () =>
+        this.db.staffInvitation.count({ where: { userId: user.id, status: 'PENDING' } }),
+      )) === 0
+    )
       throw new ForbiddenException('Aucun établissement associé à ce compte');
     await this.db.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
     await this.audit.log({
@@ -313,6 +320,7 @@ export class AuthService {
       return {
         user,
         kind,
+        invitations: [],
         schools: [],
         activeSchool: null,
         roles: [],
@@ -338,6 +346,21 @@ export class AuthService {
       orderBy: { createdAt: 'asc' },
     });
     const active = memberships.find((m) => m.schoolId === activeSchoolId);
+    // Invitations à rejoindre le personnel d'une autre école, à accepter ou refuser.
+    const pending = await runAsSystem('me-invitations', () =>
+      this.db.staffInvitation.findMany({
+        where: { userId, status: 'PENDING' },
+        orderBy: { createdAt: 'asc' },
+      }),
+    );
+    const invitingSchools = await this.db.school.findMany({
+      where: { id: { in: pending.map((i) => i.schoolId) }, status: 'ACTIVE' },
+      select: { id: true, name: true, city: true },
+    });
+    const invitations = pending.flatMap((i) => {
+      const school = invitingSchools.find((s) => s.id === i.schoolId);
+      return school ? [{ id: i.id, school, roles: i.roles, createdAt: i.createdAt }] : [];
+    });
     const roles = (active?.roles ?? []) as StaffRole[];
     // Mêmes droits effectifs que le garde d'authentification : le site affiche ce que l'API autorise.
     const config = active
@@ -360,6 +383,7 @@ export class AuthService {
     return {
       user,
       kind,
+      invitations,
       schools: memberships.map((m) => ({
         id: m.school.id,
         name: m.school.name,
@@ -491,6 +515,8 @@ export class AuthService {
       recipient: phone,
       template: 'otp',
       body: templates.otp(code),
+      sensitive: true,
+      expiresAt: new Date(Date.now() + OTP_TTL_MS),
     });
     // Envoi sans attendre la passerelle SMS : le temps de réponse ne révèle pas si le numéro
     // est connu. En cas d'échec, le worker reprend le message de la table d'envoi.

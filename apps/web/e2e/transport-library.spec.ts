@@ -65,6 +65,16 @@ test.describe('transport scolaire', () => {
     await expect(list.getByRole('listitem').first()).toBeVisible();
     await expect(list).toContainText('Aller seulement');
     await expectNoHorizontalOverflow(page);
+
+    // Avoir sur la facture d'un abonnement, par le gestionnaire du transport.
+    const row = list.getByRole('listitem').filter({ hasText: 'Aller seulement' }).first();
+    await row.getByRole('button', { name: /^Avoir sur l’abonnement/ }).click();
+    const credit = page.getByRole('dialog', { name: /^Avoir sur l’abonnement/ });
+    await credit.getByLabel('Montant de l’avoir (FCFA)').fill('1000');
+    await credit.getByLabel('Motif').fill('Ligne interrompue une semaine');
+    await expectNoHorizontalOverflow(page);
+    await credit.getByRole('button', { name: 'Enregistrer l’avoir' }).click();
+    await expect(page.getByText(/Avoir de 1.000.FCFA enregistré sur la facture/)).toBeVisible();
   });
 
   test('le chauffeur fait l’appel, y compris sans réseau', async ({ page, context }) => {

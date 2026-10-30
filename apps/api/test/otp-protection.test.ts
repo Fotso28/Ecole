@@ -3,6 +3,7 @@ import request from 'supertest';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { env } from '../src/config/env';
 import { AuthService } from '../src/modules/auth/auth.service';
+import { NotificationsService } from '../src/modules/notifications/notifications.service';
 import { MemorySmsProvider } from '../src/modules/notifications/sms.provider';
 import { createSchool, createTestApp, prisma, requestOtp, resetDb } from './helpers';
 
@@ -160,5 +161,41 @@ describe('épuisement des codes par un tiers', () => {
       0,
     );
     expect(await prisma.otpCode.count({ where: { phone: '+237699887766', sent: true } })).toBe(3);
+  });
+});
+
+describe('codes de connexion dans la table d’envoi', () => {
+  it('efface le corps du SMS une fois envoyé, et abandonne un code expiré sans l’envoyer', async () => {
+    const before = MemorySmsProvider.countTo(PHONE);
+    await http().post('/auth/otp/request').send({ phone: '677123456' }).expect(202);
+    const code = await lastCodeTo(before);
+    expect(code).toMatch(/^\d{6}$/);
+    await expect
+      .poll(
+        async () =>
+          (await prisma.notificationOutbox.findFirst({ where: { template: 'otp' } }))?.status,
+      )
+      .toBe('SENT');
+    const sent = await prisma.notificationOutbox.findFirstOrThrow({ where: { template: 'otp' } });
+    expect(sent.body).not.toContain(code);
+    expect(sent.sensitive).toBe(true);
+
+    // Un code resté en attente au-delà de sa validité n'est jamais envoyé, et son corps est effacé.
+    const stale = await prisma.notificationOutbox.create({
+      data: {
+        channel: 'SMS',
+        recipient: PHONE,
+        template: 'otp',
+        body: 'Votre code de connexion : 123456',
+        sensitive: true,
+        expiresAt: new Date(Date.now() - 60_000),
+      },
+    });
+    const sms = MemorySmsProvider.countTo(PHONE);
+    await app.get(NotificationsService).dispatchPending();
+    const after = await prisma.notificationOutbox.findUniqueOrThrow({ where: { id: stale.id } });
+    expect(after.status).toBe('CANCELLED');
+    expect(after.body).not.toContain('123456');
+    expect(MemorySmsProvider.countTo(PHONE)).toBe(sms);
   });
 });

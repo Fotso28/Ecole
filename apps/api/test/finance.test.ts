@@ -523,6 +523,33 @@ describe('Mobile Money', () => {
       .set(parent.auth)
       .expect(200);
     expect(receipt.body.subarray(0, 4).toString()).toBe('%PDF');
+    // L'autre tuteur voit le paiement dans la fiche de l'enfant, mais ni le numéro Mobile Money
+    // du payeur ni la référence de l'opérateur, comme pour le détail du paiement.
+    const schoolId = (await prisma.student.findUniqueOrThrow({ where: { id: student } })).schoolId;
+    const mother = await prisma.guardian.create({
+      data: { schoolId, firstName: 'Mère', lastName: 'Ngono', phone: '+237699887766' },
+    });
+    await prisma.studentGuardian.create({
+      data: { schoolId, studentId: student, guardianId: mother.id, relationship: 'MOTHER' },
+    });
+    const otherCode = await requestOtp(app, '699887766');
+    const otherParent = toSession(
+      await http()
+        .post('/auth/otp/verify')
+        .send({ phone: '699887766', code: otherCode })
+        .expect(200),
+    );
+    await http().get(`/portal/payments/${created.body.id}`).set(otherParent.auth).expect(403);
+    const overview = await http()
+      .get(`/portal/children/${student}`)
+      .set(otherParent.auth)
+      .expect(200);
+    const seen = overview.body.finance.payments.find(
+      (x: { id: string }) => x.id === created.body.id,
+    );
+    expect(seen).toMatchObject({ amount: 35000, status: 'SUCCESS' });
+    expect(JSON.stringify(overview.body)).not.toContain('677123456');
+    expect(seen.operatorReference).toBeUndefined();
     // Le portail n'accepte pas les espèces, ni un enfant qui n'est pas le sien.
     await http()
       .post('/portal/payments')
@@ -653,6 +680,32 @@ describe('pilotage', () => {
       .expect(200);
     expect(csv.text).toContain('date;recu;matricule;eleve;moyen;montant;annule;reference');
     expect(csv.text).toContain(';105000;non;');
+  });
+
+  it('exporte tous les paiements de la période, même au-delà de 500', async () => {
+    // Rentrée chargée : 520 virements enregistrés hier (insertion directe, sans imputation).
+    const schoolId = (await prisma.student.findUniqueOrThrow({ where: { id: student } })).schoolId;
+    const yesterday = new Date(`${addDays(today(), -1)}T10:00:00Z`);
+    await prisma.payment.createMany({
+      data: Array.from({ length: 520 }, (_, i) => ({
+        schoolId,
+        studentId: student,
+        amount: 1000 + i,
+        method: 'BANK' as const,
+        status: 'SUCCESS' as const,
+        idempotencyKey: `export-${i}`,
+        bankReference: `VIR-${i}`,
+        createdAt: yesterday,
+        confirmedAt: yesterday,
+      })),
+    });
+    const csv = await http()
+      .get(`/finance/payments/export.csv?from=${addDays(today(), -1)}&to=${today()}`)
+      .set(s.compta.auth)
+      .expect(200);
+    const rows = csv.text.trim().split('\n');
+    expect(rows).toHaveLength(521);
+    expect(csv.text).toContain(';1000;non;');
   });
 
   it('envoie les relances J+n une seule fois par échéance et par palier', async () => {

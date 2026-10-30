@@ -12,6 +12,7 @@ import {
   SYSTEM_ROLE,
   TENANT_MODELS,
 } from '../src/common/prisma';
+import { AccessService } from '../src/common/access.service';
 import { createSchool, prisma, resetDb } from './helpers';
 import { TEST_APP_URL } from './setup-env';
 
@@ -230,6 +231,46 @@ describe('Row-Level Security : filet sous le filtre applicatif', () => {
     );
     expect(count).toBe(1);
     expect(raw[0]?.n).toBe(1);
+  });
+});
+
+describe('Row-Level Security : rôles personnalisables', () => {
+  it('le garde lit les adaptations de rôles et les rôles propres de l’école, sans contexte posé', async () => {
+    await prisma.roleOverride.create({
+      data: { schoolId: a, role: 'SECRETARY', removed: ['students.read'] },
+    });
+    const custom = await prisma.customRole.create({
+      data: { schoolId: a, name: 'Économat', permissions: ['discipline.read'] },
+    });
+    // Rôles de l'autre école : ne doivent jamais se mêler à ceux de l'école A.
+    await prisma.roleOverride.create({
+      data: { schoolId: b, role: 'SECRETARY', added: ['hr.read'] },
+    });
+    // Témoin : sans portée, la RLS masque ces tables. Une lecture hors portée renverrait une
+    // configuration vide, et les adaptations seraient ignorées sans erreur.
+    const [hidden] = await app.$queryRaw<{ o: number; c: number }[]>`
+      SELECT (SELECT count(*)::int FROM "RoleOverride") AS o, (SELECT count(*)::int FROM "CustomRole") AS c`;
+    expect(hidden).toEqual({ o: 0, c: 0 });
+
+    // Le garde appelle AccessService avant de poser le contexte de la requête.
+    const access = new AccessService(db as never);
+    const config = await access.config(a, 1);
+    expect(config.overrides.SECRETARY).toEqual({ added: [], removed: ['students.read'] });
+    expect([...config.customRoles.keys()]).toEqual([custom.id]);
+
+    const secretary = AccessService.resolve(config, { roles: ['SECRETARY'], customRoleIds: [] });
+    expect(secretary.permissions.has('discipline.read')).toBe(false);
+    expect(secretary.permissions.has('students.read')).toBe(false);
+    expect(secretary.permissions.has('hr.read')).toBe(false);
+    const withCustom = AccessService.resolve(config, {
+      roles: ['SECRETARY'],
+      customRoleIds: [custom.id],
+    });
+    expect(withCustom.permissions.has('discipline.read')).toBe(true);
+
+    const other = await access.config(b, 1);
+    expect(other.overrides.SECRETARY).toEqual({ added: ['hr.read'], removed: [] });
+    expect(other.customRoles.size).toBe(0);
   });
 });
 

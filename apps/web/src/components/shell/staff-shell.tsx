@@ -48,9 +48,12 @@ export function StaffShell({ children }: { children: ReactNode }) {
   const mfaMissing =
     !!me.activeSchool?.mfaRequired &&
     !me.user.mfaEnabled &&
-    me.roles.some((r) => ADMIN_ROLES.includes(r));
+    (me.adminAccess ?? me.roles.some((r) => ADMIN_ROLES.includes(r)));
   const name = `${me.user.firstName} ${me.user.lastName}`;
-  const roleLabel = me.roles.map((r) => ROLE_LABELS[r]).join(' · ');
+  const roleLabel = [
+    ...me.roles.map((r) => ROLE_LABELS[r]),
+    ...(me.customRoles ?? []).map((r) => r.name),
+  ].join(' · ');
 
   const onSearch = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();

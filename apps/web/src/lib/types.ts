@@ -21,7 +21,14 @@ export interface Me {
     currentYear: { id: string; name: string } | null;
   } | null;
   roles: StaffRole[];
+  /** Rôles propres à l'école attribués à la personne. */
+  customRoles?: { id: string; name: string }[];
+  /** Droits effectifs calculés par l'API (rôles adaptés par l'école et rôles propres). */
   permissions: Permission[];
+  /** Limites de périmètre : classes de la personne, lignes de transport. */
+  scopes?: { classes: boolean; lines: boolean };
+  /** Droits administratifs (argent, personnel, réglages) : double authentification exigible. */
+  adminAccess?: boolean;
 }
 
 export interface SessionResponse {

@@ -4,7 +4,7 @@ import { SUBSCRIPTION_PRICING_LABELS } from '@ecole/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { TriangleAlert } from 'lucide-react';
 import { StateBadge } from '@/components/billing';
-import { Button } from '@/components/ui/button';
+import { Button, ButtonLink } from '@/components/ui/button';
 import { Card, CardHeader, ErrorBlock, LoadingBlock, PageHeader } from '@/components/ui/card';
 import { Checkbox, InputField, SelectField } from '@/components/ui/field';
 import { useToast } from '@/components/ui/toast';
@@ -228,6 +228,19 @@ export default function SettingsPage() {
           </Button>
         </form>
       </Card>
+      {can('roles.manage') ? (
+        <Card id="roles">
+          <CardHeader
+            title="Rôles et droits"
+            subtitle="Adaptez les droits des rôles intégrés et créez des rôles propres à l’école."
+            action={
+              <ButtonLink href="/parametres/roles" variant="secondary" size="sm">
+                Gérer les rôles
+              </ButtonLink>
+            }
+          />
+        </Card>
+      ) : null}
       {can('subscription.read') ? <SubscriptionCard /> : null}
       <Card>
         <CardHeader

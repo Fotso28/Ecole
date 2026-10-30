@@ -40,7 +40,12 @@ export default function AccountPage() {
           title={`${me.user.firstName} ${me.user.lastName}`}
           subtitle={me.user.email ?? undefined}
         />
-        <p className="text-sm text-muted">{me.roles.map((r) => ROLE_LABELS[r]).join(' · ')}</p>
+        <p className="text-sm text-muted">
+          {[
+            ...me.roles.map((r) => ROLE_LABELS[r]),
+            ...(me.customRoles ?? []).map((r) => r.name),
+          ].join(' · ')}
+        </p>
       </Card>
       <Card className="flex flex-col gap-4">
         <CardHeader

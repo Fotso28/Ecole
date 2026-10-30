@@ -9,7 +9,6 @@ import {
 import {
   coversTrip,
   fitsCapacity,
-  isLineScoped,
   occupancy,
   subscriptionFee,
   TRIP_DIRECTION_LABELS,
@@ -579,10 +578,10 @@ export class TransportService implements OnModuleInit {
 
   // ---------------------------------------------------------------- Appel dans le car
 
-  /** Personnel limité à ses lignes (rôle chauffeur ou accompagnateur seul) : son identifiant. */
+  /** Personnel limité à ses lignes (chauffeur, accompagnateur ou rôle propre limité) : son identifiant. */
   private scopedUserId(): string | null {
     const ctx = staffContext();
-    return isLineScoped(ctx.roles) ? ctx.userId : null;
+    return this.scope.isLineScoped() ? ctx.userId : null;
   }
 
   private async rollCallLine(lineId: string) {

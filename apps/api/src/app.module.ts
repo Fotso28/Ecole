@@ -27,6 +27,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { PlatformModule } from './modules/platform/platform.module';
 import { PortalModule } from './modules/portal/portal.module';
 import { ReportCardsModule } from './modules/report-cards/report-cards.module';
+import { RolesModule } from './modules/roles/roles.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { StaffModule } from './modules/staff/staff.module';
 import { StudentsModule } from './modules/students/students.module';
@@ -84,6 +85,7 @@ import { LibraryModule } from './modules/library/library.module';
     HrModule,
     TransportModule,
     LibraryModule,
+    RolesModule,
   ],
   controllers: [HealthController],
   providers: [

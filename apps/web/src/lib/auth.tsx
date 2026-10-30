@@ -19,6 +19,7 @@ import {
   refreshSession,
   setAccessToken,
   setSessionLostHandler,
+  setSessionRefreshedHandler,
 } from './api';
 import { isOffline, purgeOfflineData, readOfflineProfile, saveOfflineProfile } from './offline';
 import type { Me, SessionResponse } from './types';
@@ -140,6 +141,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
     return () => setSessionLostHandler(null);
   }, [clear, router]);
+
+  // Jeton rafraîchi : les droits effectifs sont relus (rôles modifiés entre-temps).
+  useEffect(() => {
+    setSessionRefreshedHandler(() => void loadMe().catch(() => undefined));
+    return () => setSessionRefreshedHandler(null);
+  }, [loadMe]);
 
   const startSession = useCallback(
     async (session: SessionResponse) => {

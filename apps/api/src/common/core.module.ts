@@ -1,6 +1,7 @@
 import { Global, Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { env } from '../config/env';
+import { AccessService } from './access.service';
 import { AuditService } from './audit.service';
 import { CountersService } from './counters.service';
 import { ScopeService } from './scope.service';
@@ -17,7 +18,7 @@ import { ScopeService } from './scope.service';
       }),
     }),
   ],
-  providers: [AuditService, CountersService, ScopeService],
-  exports: [AuditService, CountersService, ScopeService],
+  providers: [AccessService, AuditService, CountersService, ScopeService],
+  exports: [AccessService, AuditService, CountersService, ScopeService],
 })
 export class CoreModule {}

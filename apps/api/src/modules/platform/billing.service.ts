@@ -424,6 +424,9 @@ export class BillingService {
               include: { payments: true, reminders: true },
             }),
           );
+          // Annulation concurrente : relue sous le verrou.
+          if (fresh.state === 'CANCELLED')
+            throw new BadRequestException('Facture annulée : aucun règlement possible');
           if (input.amount > fresh.due)
             throw new BadRequestException(
               `Le règlement dépasse le reste à payer (${fresh.due} FCFA)`,
@@ -519,20 +522,36 @@ export class BillingService {
       throw new BadRequestException('Corrigez d’abord les règlements de cette facture');
     return runAsSystem(
       'billing-cancel',
-      async () => {
-        const updated = await this.db.subscriptionInvoice.update({
-          where: { id: invoiceId },
-          data: { status: 'CANCELLED', cancelledAt: new Date(), cancelReason: reason },
-          include: { payments: true, reminders: true },
-        });
-        await this.audit.log({
-          action: 'platform.subscription_invoice_cancelled',
-          entity: 'SubscriptionInvoice',
-          entityId: invoiceId,
-          reason,
-        });
-        return presentInvoice(updated);
-      },
+      () =>
+        this.db.$transaction(async (tx) => {
+          // Même verrou que l'enregistrement d'un règlement : pas d'annulation pendant qu'un
+          // règlement est saisi, ni de règlement sur une facture en cours d'annulation.
+          await tx.$queryRaw`SELECT "id" FROM "SubscriptionInvoice" WHERE "id" = ${invoiceId} FOR UPDATE`;
+          const fresh = presentInvoice(
+            await tx.subscriptionInvoice.findUniqueOrThrow({
+              where: { id: invoiceId },
+              include: { payments: true, reminders: true },
+            }),
+          );
+          if (fresh.state === 'CANCELLED') throw new BadRequestException('Facture déjà annulée');
+          if (fresh.paid > 0)
+            throw new BadRequestException('Corrigez d’abord les règlements de cette facture');
+          const updated = await tx.subscriptionInvoice.update({
+            where: { id: invoiceId },
+            data: { status: 'CANCELLED', cancelledAt: new Date(), cancelReason: reason },
+            include: { payments: true, reminders: true },
+          });
+          await this.audit.log(
+            {
+              action: 'platform.subscription_invoice_cancelled',
+              entity: 'SubscriptionInvoice',
+              entityId: invoiceId,
+              reason,
+            },
+            tx,
+          );
+          return presentInvoice(updated);
+        }),
       invoice.schoolId,
     );
   }

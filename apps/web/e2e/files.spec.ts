@@ -91,13 +91,11 @@ test.describe('fichiers et pédagogie', () => {
 
     // Un fichier d'un autre type, même renommé, est refusé avant l'envoi.
     await page.getByRole('button', { name: 'Remplacer le fichier : Acte de naissance' }).click();
-    await sheet
-      .getByLabel('Choisir un fichier')
-      .setInputFiles({
-        name: 'acte.pdf',
-        mimeType: 'application/pdf',
-        buffer: Buffer.from('<html>'),
-      });
+    await sheet.getByLabel('Choisir un fichier').setInputFiles({
+      name: 'acte.pdf',
+      mimeType: 'application/pdf',
+      buffer: Buffer.from('<html>'),
+    });
     await expect(
       sheet.getByText('Type de fichier refusé : PDF, JPEG ou PNG uniquement'),
     ).toBeVisible();

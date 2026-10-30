@@ -33,6 +33,7 @@ test('écrans de la direction', async ({ page }) => {
     '/presences',
     '/notes',
     '/bulletins',
+    '/releves',
     '/caisse',
     '/impayes',
     '/emploi-du-temps',

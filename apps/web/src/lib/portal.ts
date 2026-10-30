@@ -37,7 +37,15 @@ export interface ChildOverview {
     rank: number | null;
     classSize: number;
     publishedAt: string;
+    annualAverageCenti: number | null;
+    annualRankLabel: string | null;
+    yearEndDecision: string | null;
   }[];
+  transcripts: {
+    sequences: { id: string; name: string }[];
+    terms: { id: string; name: string }[];
+    year: { id: string } | null;
+  };
   announcements: { id: string; title: string; body: string; publishedAt: string }[];
 }
 

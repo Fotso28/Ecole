@@ -537,7 +537,7 @@ describe('tableau de bord : réussite et exports', () => {
       .expect(200);
     expect(xlsx.headers['content-type']).toContain('spreadsheetml');
     const wb = new ExcelJS.Workbook();
-    await wb.xlsx.load(xlsx.body as Buffer);
+    await wb.xlsx.load(xlsx.body as ArrayBuffer);
     expect(wb.worksheets.map((w) => w.name)).toEqual([
       'Synthèse',
       'Réussite par classe',
@@ -559,7 +559,7 @@ describe('tableau de bord : réussite et exports', () => {
       .parse(binary)
       .expect(200);
     const wb2 = new ExcelJS.Workbook();
-    await wb2.xlsx.load(compta.body as Buffer);
+    await wb2.xlsx.load(compta.body as ArrayBuffer);
     expect(wb2.worksheets.map((w) => w.name)).toEqual(['Synthèse', 'Recouvrement']);
 
     const pdf = await http()

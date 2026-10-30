@@ -1,14 +1,16 @@
 'use client';
 
+import { formatRate } from '@ecole/shared';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronRight, FileText, Receipt, ShieldCheck, Wallet } from 'lucide-react';
+import { ChevronRight, Download, FileText, Receipt, ShieldCheck, Wallet } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
-import { ButtonLink } from '@/components/ui/button';
+import { Button, ButtonLink } from '@/components/ui/button';
 import { Card, CardHeader, ErrorBlock, LoadingBlock, PageHeader, Stat } from '@/components/ui/card';
-import { api } from '@/lib/api';
+import { useToast } from '@/components/ui/toast';
+import { api, downloadFile, openPdf } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import { formatFcfa, formatTime, formatWeekday, plural } from '@/lib/format';
+import { formatFcfa, formatGrade, formatTime, formatWeekday, plural } from '@/lib/format';
 
 interface Dashboard {
   year: { id: string; name: string };
@@ -39,6 +41,140 @@ interface Dashboard {
     reportCardBatchesToPublish: number;
   };
   activity: { id: string; at: string; actor: string; label: string }[];
+}
+
+interface PassRateCell {
+  counted: number;
+  passed: number;
+  ratePermille: number | null;
+  averageCenti: number | null;
+  provisional: boolean;
+}
+
+interface Results {
+  year: { id: string; name: string };
+  terms: { id: string; name: string; order: number }[];
+  classes: {
+    classId: string;
+    className: string;
+    terms: (PassRateCell | null)[];
+    annual: PassRateCell | null;
+  }[];
+  overall: { terms: (PassRateCell | null)[]; annual: PassRateCell | null };
+}
+
+function RateValue({ cell }: { cell: PassRateCell | null }) {
+  if (!cell) return <span className="text-muted">—</span>;
+  return (
+    <span className="tabular">
+      <strong>{formatRate(cell.ratePermille)}</strong>
+      {cell.provisional ? (
+        <abbr title="Provisoire : bulletins non publiés" className="ml-0.5 text-warn no-underline">
+          *
+        </abbr>
+      ) : null}
+      <span className="block text-xs text-muted">
+        {cell.passed}/{cell.counted} · moy. {formatGrade(cell.averageCenti)}
+      </span>
+    </span>
+  );
+}
+
+/** Taux de réussite (moyenne d'au moins 10/20) par classe, par trimestre et sur l'année. */
+function PassRates() {
+  const q = useQuery({
+    queryKey: ['dashboard-results'],
+    queryFn: () => api<Results>('/dashboard/results'),
+  });
+  if (q.isPending) return <LoadingBlock label="Chargement des résultats…" />;
+  if (q.isError) return <ErrorBlock error={q.error} onRetry={() => q.refetch()} />;
+  const r = q.data;
+  const periods = [...r.terms.map((t) => t.name), 'Année'];
+  const rows = r.classes.filter((c) => [...c.terms, c.annual].some(Boolean));
+  const overall = [...r.overall.terms, r.overall.annual];
+  const provisional = [...overall, ...rows.flatMap((c) => [...c.terms, c.annual])].some(
+    (c) => c?.provisional,
+  );
+  return (
+    <Card>
+      <CardHeader
+        title="Taux de réussite"
+        subtitle="Élèves ayant au moins 10/20 de moyenne, d’après les bulletins"
+      />
+      <ul
+        className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4"
+        aria-label="Taux de l’établissement"
+      >
+        {periods.map((p, i) => (
+          <li key={p} className="rounded-[12px] bg-paper p-3">
+            <span className="block text-[13px] text-muted">{p}</span>
+            <RateValue cell={overall[i] ?? null} />
+          </li>
+        ))}
+      </ul>
+      {rows.length === 0 ? (
+        <p className="text-sm text-muted">
+          Aucun bulletin préparé pour l’instant : les taux apparaîtront avec les premiers bulletins.
+        </p>
+      ) : (
+        <>
+          {/* Téléphone : une carte par classe. */}
+          <ul className="flex flex-col gap-2 lg:hidden">
+            {rows.map((c) => (
+              <li key={c.classId} className="rounded-[12px] border border-line p-3">
+                <strong>{c.className}</strong>
+                <dl className="mt-1 grid grid-cols-2 gap-x-3 gap-y-1.5 text-sm">
+                  {periods.map((p, i) => (
+                    <div key={p}>
+                      <dt className="text-[13px] text-muted">{p}</dt>
+                      <dd>
+                        <RateValue cell={[...c.terms, c.annual][i] ?? null} />
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              </li>
+            ))}
+          </ul>
+          {/* Ordinateur : tableau. */}
+          <table className="hidden w-full text-sm lg:table">
+            <caption className="sr-only">Taux de réussite par classe</caption>
+            <thead>
+              <tr className="text-left text-xs text-muted">
+                <th scope="col" className="py-2 font-semibold">
+                  Classe
+                </th>
+                {periods.map((p) => (
+                  <th key={p} scope="col" className="py-2 text-right font-semibold">
+                    {p}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((c) => (
+                <tr key={c.classId} className="border-t border-line">
+                  <th scope="row" className="py-2 text-left font-semibold">
+                    {c.className}
+                  </th>
+                  {[...c.terms, c.annual].map((cell, i) => (
+                    <td key={periods[i]} className="py-2 text-right">
+                      <RateValue cell={cell} />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+      {provisional ? (
+        <p className="mt-3 text-[13px] text-muted">
+          * Provisoire : calculé sur des bulletins préparés mais pas encore publiés.
+        </p>
+      ) : null}
+    </Card>
+  );
 }
 
 const shortDay = new Intl.DateTimeFormat('fr-FR', {
@@ -131,8 +267,10 @@ function WeeklyChart({ weeks }: { weeks: Weekly }) {
 }
 
 export default function DashboardPage() {
-  const { me } = useAuth();
+  const { me, can } = useAuth();
+  const toast = useToast();
   const q = useQuery({ queryKey: ['dashboard'], queryFn: () => api<Dashboard>('/dashboard') });
+  const fail = (e: unknown) => toast(e instanceof Error ? e.message : 'Erreur', 'error');
   if (q.isPending) return <LoadingBlock />;
   if (q.isError) return <ErrorBlock error={q.error} onRetry={() => q.refetch()} />;
   const d = q.data;
@@ -184,6 +322,24 @@ export default function DashboardPage() {
             {me?.permissions.includes('finance.payments.create') ? (
               <ButtonLink href="/caisse">Encaisser</ButtonLink>
             ) : null}
+            <Button
+              variant="secondary"
+              onClick={() =>
+                downloadFile('/dashboard/export.xlsx', `indicateurs-${d.year.name}.xlsx`).catch(
+                  fail,
+                )
+              }
+            >
+              <Download className="size-4" aria-hidden />
+              Exporter Excel
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => openPdf('/dashboard/export.pdf').catch(fail)}
+            >
+              <FileText className="size-4" aria-hidden />
+              Exporter PDF
+            </Button>
           </>
         }
       />
@@ -285,6 +441,10 @@ export default function DashboardPage() {
             </ul>
           </Card>
         </div>
+      ) : null}
+
+      {can('reportcards.read') && me?.activeSchool?.modules.includes('grades') ? (
+        <PassRates />
       ) : null}
 
       <Card>

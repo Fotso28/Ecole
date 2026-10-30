@@ -1,5 +1,10 @@
 'use client';
 
+import {
+  suggestYearEndDecision,
+  YEAR_END_DECISION_LABELS,
+  YEAR_END_DECISIONS,
+} from '@ecole/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { FileText, Lock, TriangleAlert } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -27,6 +32,9 @@ interface CardRow {
   classSize: number;
   publishedAt: string | null;
   decision: string | null;
+  annualAverageCenti: number | null;
+  annualRankLabel: string | null;
+  yearEndDecision: string | null;
 }
 
 const DECISIONS = [
@@ -62,10 +70,13 @@ export default function ReportCardsPage() {
   const completeness = useQuery({
     queryKey: ['report-cards-completeness', classId, termId],
     queryFn: () =>
-      api<{ issues: string[] }>(`/report-cards/completeness?classId=${classId}&termId=${termId}`),
+      api<{ issues: string[]; annual: boolean }>(
+        `/report-cards/completeness?classId=${classId}&termId=${termId}`,
+      ),
     enabled: !!classId && !!termId,
   });
   const issues = completeness.data?.issues ?? [];
+  const annual = completeness.data?.annual ?? false;
   const generate = useMutation({
     mutationFn: () =>
       api<{ generated: number }>('/report-cards/generate', {
@@ -96,7 +107,7 @@ export default function ReportCardsPage() {
     onError: (e) => toast(e instanceof Error ? e.message : 'Erreur', 'error'),
   });
   const decide = useMutation({
-    mutationFn: (body: { decision: string; comment?: string }) =>
+    mutationFn: (body: { decision: string; comment?: string; yearEndDecision?: string | null }) =>
       api('/report-cards/decisions', {
         method: 'PUT',
         body: { ...body, studentId: decisionFor?.studentId, termId },
@@ -120,6 +131,13 @@ export default function ReportCardsPage() {
         title="Bulletins"
         subtitle="Préparez, vérifiez puis publiez. Un bulletin publié est figé ; toute correction crée une nouvelle version."
       />
+      {classId && termId && annual ? (
+        <p className="rounded-[12px] border border-line bg-primary-soft px-4 py-3 text-sm">
+          <strong>Bulletin de fin d’année.</strong> Il ajoute les moyennes et le rang annuels
+          (moyenne des trois trimestres) et la décision de fin d’année du conseil. Les saisies de
+          toute l’année sont contrôlées.
+        </p>
+      ) : null}
       <Card className="grid gap-3 sm:grid-cols-2">
         <SelectField label="Classe" value={classId} onChange={(e) => setClassId(e.target.value)}>
           <option value="">Choisir…</option>
@@ -208,6 +226,16 @@ export default function ReportCardsPage() {
                   Moyenne {formatGrade(c.generalAverageCenti)} · {c.rankLabel} sur {c.classSize}
                   {c.decision ? ` · ${c.decision}` : ''}
                 </span>
+                {annual ? (
+                  <span className="text-[13px] text-muted tabular">
+                    Année {formatGrade(c.annualAverageCenti)}
+                    {c.annualRankLabel ? ` · ${c.annualRankLabel}` : ''}
+                    {' · '}
+                    <span className={c.yearEndDecision ? 'font-semibold text-ink' : ''}>
+                      {c.yearEndDecision ?? 'décision de fin d’année à saisir'}
+                    </span>
+                  </span>
+                ) : null}
               </div>
               <Badge
                 tone={
@@ -303,6 +331,9 @@ export default function ReportCardsPage() {
             decide.mutate({
               decision: String(fd.get('decision')),
               comment: String(fd.get('comment') || '') || undefined,
+              ...(annual
+                ? { yearEndDecision: String(fd.get('yearEndDecision') || '') || null }
+                : {}),
             });
           }}
         >
@@ -313,6 +344,30 @@ export default function ReportCardsPage() {
               </option>
             ))}
           </SelectField>
+          {annual ? (
+            <SelectField
+              key={decisionFor?.id}
+              label="Décision de fin d’année"
+              name="yearEndDecision"
+              hint={
+                decisionFor?.annualAverageCenti != null
+                  ? `Moyenne annuelle ${formatGrade(decisionFor.annualAverageCenti)} · proposition : ${
+                      YEAR_END_DECISION_LABELS[
+                        suggestYearEndDecision(decisionFor.annualAverageCenti) ?? 'REPEAT'
+                      ]
+                    }`
+                  : 'Aucune moyenne annuelle'
+              }
+              defaultValue={suggestYearEndDecision(decisionFor?.annualAverageCenti ?? null) ?? ''}
+            >
+              <option value="">Non décidée</option>
+              {YEAR_END_DECISIONS.map((d) => (
+                <option key={d} value={d}>
+                  {YEAR_END_DECISION_LABELS[d]}
+                </option>
+              ))}
+            </SelectField>
+          ) : null}
           <TextareaField label="Appréciation du conseil" name="comment" maxLength={300} optional />
           <Button type="submit" loading={decide.isPending}>
             Enregistrer

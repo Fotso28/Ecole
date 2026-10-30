@@ -58,6 +58,13 @@ describe('navigation par rôle', () => {
     );
   });
 
+  it('ouvre les relevés de notes à la direction et au censeur, pas aux enseignants', () => {
+    expect(hrefs(me(['DIRECTOR']))).toContain('/releves');
+    expect(hrefs(me(['CENSOR']))).toContain('/releves');
+    expect(hrefs(me(['TEACHER']))).not.toContain('/releves');
+    expect(hrefs(me(['CENSOR'], ['students']))).not.toContain('/releves');
+  });
+
   it('retire les modules non souscrits', () => {
     const noFinance = hrefs(me(['DIRECTOR'], ['students', 'grades']));
     expect(noFinance).not.toContain('/caisse');

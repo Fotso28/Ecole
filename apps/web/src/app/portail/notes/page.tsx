@@ -1,6 +1,6 @@
 'use client';
 
-import { FileText } from 'lucide-react';
+import { FileText, ScrollText } from 'lucide-react';
 import { Card, CardHeader, ErrorBlock, LoadingBlock } from '@/components/ui/card';
 import { useToast } from '@/components/ui/toast';
 import { ChildSwitcher, useChildren } from '@/components/shell/parent-shell';
@@ -14,6 +14,22 @@ export default function PortalGrades() {
   const q = useChildOverview(selected?.id);
   if (!selected || q.isPending) return <LoadingBlock />;
   if (q.isError) return <ErrorBlock error={q.error} />;
+  const tr = q.data.transcripts;
+  const transcriptLinks = [
+    ...tr.sequences.map((sq) => ({
+      key: sq.id,
+      label: sq.name,
+      query: `scope=sequence&periodId=${sq.id}`,
+    })),
+    ...tr.terms.map((tm) => ({
+      key: tm.id,
+      label: tm.name,
+      query: `scope=term&periodId=${tm.id}`,
+    })),
+    ...(tr.year
+      ? [{ key: 'year', label: 'Année complète', query: `scope=year&periodId=${tr.year.id}` }]
+      : []),
+  ];
   return (
     <>
       <ChildSwitcher />
@@ -41,7 +57,44 @@ export default function PortalGrades() {
                       Moyenne {formatGrade(r.generalAverageCenti)} · rang {r.rank ?? '—'}/
                       {r.classSize} · publié le {formatShortDate(r.publishedAt)}
                     </span>
+                    {r.annualAverageCenti !== null || r.yearEndDecision ? (
+                      <span className="text-[13px] text-muted">
+                        Moyenne annuelle {formatGrade(r.annualAverageCenti)}
+                        {r.annualRankLabel ? ` · rang ${r.annualRankLabel}` : ''}
+                        {r.yearEndDecision ? (
+                          <strong className="text-ink"> · {r.yearEndDecision}</strong>
+                        ) : null}
+                      </span>
+                    ) : null}
                   </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+      <Card>
+        <CardHeader
+          title="Relevés de notes"
+          subtitle="Trimestre et année disponibles après la publication du bulletin"
+        />
+        {transcriptLinks.length === 0 ? (
+          <p className="text-sm text-muted">Aucun relevé disponible pour l’instant.</p>
+        ) : (
+          <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {transcriptLinks.map((l) => (
+              <li key={l.key}>
+                <button
+                  type="button"
+                  onClick={() =>
+                    openPdf(`/portal/children/${selected.id}/transcript.pdf?${l.query}`).catch(() =>
+                      toast('Relevé indisponible', 'error'),
+                    )
+                  }
+                  className="flex min-h-12 w-full items-center gap-3 rounded-[12px] border border-line px-3 text-left"
+                >
+                  <ScrollText className="size-5 shrink-0 text-primary" aria-hidden />
+                  <span className="flex-1 text-[15px] font-semibold">Relevé · {l.label}</span>
                 </button>
               </li>
             ))}

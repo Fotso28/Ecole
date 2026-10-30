@@ -7,12 +7,14 @@ import type { Account } from './types';
 export interface ChildOverview {
   student: { id: string; firstName: string; lastName: string; matricule: string };
   className: string | null;
+  modules: { grades: boolean; finance: boolean };
+  /** Absent si l'école de l'enfant n'a pas activé les finances. */
   finance: {
     totals: Account['totals'];
     nextDue: Account['nextDue'];
     lines: Account['lines'];
     payments: Account['payments'];
-  };
+  } | null;
   grades: {
     id: string;
     subject: string;

@@ -31,11 +31,22 @@ export const cameroonPhone = z.string().transform((v, ctx) => {
 });
 
 const name = z.string().trim().min(1, 'Champ obligatoire').max(80);
-const amount = z.number().int('Montant entier en FCFA').nonnegative();
-const positiveAmount = z
+
+/**
+ * Plafond des montants saisis (100 millions FCFA) : bien au-delà de tout frais scolaire, et loin
+ * de la limite des entiers 32 bits de la base, dont le dépassement provoquerait une erreur 500.
+ */
+export const MAX_AMOUNT_FCFA = 100_000_000;
+/** Montant entier en FCFA, positif ou nul, plafonné. */
+export const fcfaAmount = z
   .number()
   .int('Montant entier en FCFA')
-  .positive('Le montant doit être positif');
+  .nonnegative()
+  .max(MAX_AMOUNT_FCFA, 'Montant trop élevé (100 000 000 FCFA au plus)');
+/** Montant entier en FCFA strictement positif, plafonné. */
+export const positiveFcfaAmount = fcfaAmount.positive('Le montant doit être positif');
+const amount = fcfaAmount;
+const positiveAmount = positiveFcfaAmount;
 
 // Authentification
 export const loginSchema = z.object({
@@ -111,11 +122,11 @@ export const termCreateSchema = z.object({
   endDate: isoDate,
   sequences: z.array(z.object({ name: name, order: z.number().int().min(1).max(12) })).default([]),
 });
-export const cycleCreateSchema = z.object({ name: name, order: z.number().int().min(1) });
+export const cycleCreateSchema = z.object({ name: name, order: z.number().int().min(1).max(100) });
 export const levelCreateSchema = z.object({
   cycleId: id,
   name: name,
-  order: z.number().int().min(1),
+  order: z.number().int().min(1).max(100),
 });
 export const classCreateSchema = z.object({
   academicYearId: id,
@@ -252,7 +263,7 @@ export const feeItemCreateSchema = z.object({
   amount: positiveAmount,
   dueDate: isoDate,
   levelId: id.optional(),
-  order: z.number().int().min(0).default(0),
+  order: z.number().int().min(0).max(1000).default(0),
 });
 export const invoiceGenerateSchema = z.object({
   studentId: id,
@@ -302,6 +313,12 @@ export const portalPaymentSchema = z.object({
   idempotencyKey: z.string().uuid(),
 });
 export const paymentReverseSchema = z.object({ reason: z.string().trim().min(5).max(300) });
+
+/** Avoir décidé par le module qui a facturé la ligne (transport, vente de fournitures). */
+export const creditNoteSchema = z.object({
+  amount: positiveAmount,
+  reason: z.string().trim().min(5, 'Motif de 5 caractères minimum').max(200),
+});
 export const cashCloseSchema = z.object({
   countedAmount: amount,
   note: z.string().trim().max(300).optional(),
@@ -404,7 +421,7 @@ export const eventRangeSchema = z
   );
 
 export const paginationSchema = z.object({
-  page: z.coerce.number().int().min(1).default(1),
+  page: z.coerce.number().int().min(1).max(100_000).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });
 

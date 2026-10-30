@@ -1,4 +1,5 @@
 import type { INestApplication } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { runAsSystem } from '../src/common/context';
@@ -234,6 +235,78 @@ describe('lignes, véhicules et abonnements', () => {
     expect(await prisma.invoiceLine.count({ where: { id: sub.body.invoiceLineId } })).toBe(1);
     const list = await http().get('/transport/subscriptions').set(s.secretariat.auth).expect(200);
     expect(list.body[0]).toMatchObject({ status: 'CANCELLED', cancelReason: 'Déménagement' });
+  });
+
+  it('crédite l’ancien abonnement lors d’un réabonnement, sans double facturation', async () => {
+    const n = await network();
+    const first = await subscribe(a.id, n.lineA, n.stop1, 'BOTH').expect(201);
+    // 30 000 FCFA déjà payés sur l'abonnement de la ligne A.
+    await http()
+      .post('/finance/payments')
+      .set(s.compta.auth)
+      .send({
+        studentId: a.id,
+        idempotencyKey: randomUUID(),
+        amount: 30000,
+        method: 'BANK',
+        bankName: 'Banque',
+        bankReference: 'VIR-TRANSPORT-1',
+        lineIds: [first.body.invoiceLineId],
+      })
+      .expect(201);
+    await http()
+      .post(`/transport/subscriptions/${first.body.id}/cancel`)
+      .set(s.secretariat.auth)
+      .send({ reason: 'Changement de ligne' })
+      .expect(201);
+    const second = await subscribe(a.id, n.lineB, n.stopB, 'BOTH').expect(201);
+    const old = await prisma.invoiceLine.findUniqueOrThrow({
+      where: { id: first.body.invoiceLineId },
+    });
+    const next = await prisma.invoiceLine.findUniqueOrThrow({
+      where: { id: second.body.invoiceLineId },
+    });
+    // Ancienne ligne : avoir du reste dû ; nouvelle ligne : le déjà-payé vient en déduction.
+    expect([old.amount, old.discount]).toEqual([90000, 60000]);
+    expect([next.amount, next.discount]).toEqual([80000, 30000]);
+    const account = await http()
+      .get(`/finance/students/${a.id}/account`)
+      .set(s.compta.auth)
+      .expect(200);
+    const transport = account.body.lines.filter((l: { label: string }) =>
+      l.label.startsWith('Transport'),
+    );
+    expect(transport.reduce((t: number, l: { outstanding: number }) => t + l.outstanding, 0)).toBe(
+      50000,
+    );
+    expect(await prisma.auditLog.count({ where: { action: 'finance.credit_note' } })).toBe(2);
+
+    // Geste commercial par le gestionnaire du transport, limité à la ligne de l'abonnement.
+    await http()
+      .post(`/transport/subscriptions/${second.body.id}/credit`)
+      .set(s.secretariat.auth)
+      .send({ amount: 60000, reason: 'Résiliation au deuxième trimestre' })
+      .expect(409);
+    const credit = await http()
+      .post(`/transport/subscriptions/${second.body.id}/credit`)
+      .set(s.secretariat.auth)
+      .send({ amount: 10000, reason: 'Ligne interrompue deux semaines' })
+      .expect(201);
+    expect(credit.body).toEqual({ credited: 10000 });
+    // Aucun droit de remise sur la scolarité pour autant.
+    const tuition = await prisma.invoiceLine.findFirstOrThrow({
+      where: { invoice: { studentId: a.id }, label: 'Tranche 1' },
+    });
+    await http()
+      .post(`/finance/invoice-lines/${tuition.id}/discounts`)
+      .set(s.secretariat.auth)
+      .send({ amount: 10000, reason: 'Geste' })
+      .expect(403);
+    await http()
+      .post(`/transport/subscriptions/${second.body.id}/credit`)
+      .set(s.prof.auth)
+      .send({ amount: 1000, reason: 'Geste commercial' })
+      .expect(403);
   });
 
   it('réserve la gestion au secrétariat et à la direction', async () => {

@@ -11,6 +11,12 @@ export interface Me {
     mfaEnabled: boolean;
   };
   kind: 'staff' | 'parent';
+  /** Invitations à rejoindre le personnel d'une école, à accepter à la connexion. */
+  invitations?: {
+    id: string;
+    school: { id: string; name: string; city: string };
+    roles: StaffRole[];
+  }[];
   schools: { id: string; name: string; city: string; roles: StaffRole[] }[];
   activeSchool: {
     id: string;

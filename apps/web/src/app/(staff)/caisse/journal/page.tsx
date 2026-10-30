@@ -151,11 +151,11 @@ export default function JournalPage() {
                       Reçu
                     </Button>
                   ) : null}
-                  {/* Une remise d'espèces s'annule par une autre personne que le caissier. */}
+                  {/* Un paiement s'annule par une autre personne que celle qui l'a enregistré. */}
                   {can('finance.payments.reverse') &&
                   p.status === 'SUCCESS' &&
                   !p.reversed &&
-                  !(p.method === 'CASH' && p.receivedById === me?.user.id) ? (
+                  p.receivedById !== me?.user.id ? (
                     <Button
                       variant="danger"
                       size="sm"

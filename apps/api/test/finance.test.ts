@@ -191,9 +191,15 @@ describe('encaissement en espèces', () => {
     const p1 = await bank(100000);
     const p2 = await bank(100000);
     expect(p2.body.unallocated).toBe(15000);
+    // Quatre yeux pour tous les modes : l'auteur du virement ne l'annule pas lui-même.
     await http()
       .post(`/finance/payments/${p1.body.id}/reverse`)
       .set(s.compta.auth)
+      .send({ reason: 'Chèque impayé' })
+      .expect(403);
+    await http()
+      .post(`/finance/payments/${p1.body.id}/reverse`)
+      .set(s.direction.auth)
       .send({ reason: 'Chèque impayé' })
       .expect(201);
     const a = await account();
@@ -241,6 +247,8 @@ describe('encaissement en espèces', () => {
     await http().post('/finance/cash-sessions/open').set(s.compta.auth).expect(201);
     await pay({ amount: 100.5, method: 'CASH' }).expect(400);
     await pay({ amount: 0, method: 'CASH' }).expect(400);
+    // Au-delà des entiers 32 bits : erreur de saisie (400), pas d'erreur serveur.
+    await pay({ amount: 2_147_483_648, method: 'CASH' }).expect(400);
     await pay({ amount: 1000, method: 'CASH' }, s.secretariat).expect(403);
     await pay({ amount: 1000, method: 'BANK' }).expect(400);
   });

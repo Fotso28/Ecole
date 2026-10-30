@@ -11,9 +11,11 @@ test('saisie des notes : validation immédiate, enregistrement automatique, moye
   await cs.selectOption(
     (await cs.locator('option', { hasText: '4e A · Mathématiques' }).getAttribute('value')) ?? '',
   );
+  // Séquence du 2e trimestre : les bulletins du 1er trimestre, publiés par un autre parcours,
+  // verrouillent ses notes.
   const seq = page.getByLabel('Séquence');
   await seq.selectOption(
-    (await seq.locator('option', { hasText: 'Séquence 2' }).getAttribute('value')) ?? '',
+    (await seq.locator('option', { hasText: 'Séquence 3' }).getAttribute('value')) ?? '',
   );
 
   await page.getByRole('button', { name: 'Évaluation' }).click();

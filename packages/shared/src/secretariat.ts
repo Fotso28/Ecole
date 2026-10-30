@@ -68,7 +68,7 @@ export const incidentFilterSchema = z
     to: isoDate.optional(),
     type: z.enum(INCIDENT_TYPES).optional(),
     sanctionType: z.enum(SANCTION_TYPES).optional(),
-    page: z.coerce.number().int().min(1).default(1),
+    page: z.coerce.number().int().min(1).max(100_000).default(1),
     pageSize: z.coerce.number().int().min(1).max(100).default(20),
   })
   .refine((v) => !v.from || !v.to || v.from <= v.to, {
@@ -212,7 +212,7 @@ export const documentListSchema = z.object({
   status: z.enum(['ISSUED', 'CANCELLED']).optional(),
   studentId: id.optional(),
   search: z.string().trim().max(80).optional(),
-  page: z.coerce.number().int().min(1).default(1),
+  page: z.coerce.number().int().min(1).max(100_000).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });
 const optionalText = (max: number) =>

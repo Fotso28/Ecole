@@ -299,6 +299,68 @@ export class FinanceService {
     return line;
   }
 
+  /**
+   * Avoir sur une ligne hors grille (transport, vente de fournitures), décidé par le module qui
+   * l'a facturée : remise plafonnée au reste dû de la ligne, sans autre droit sur la scolarité.
+   * La part déjà payée n'est pas remboursée ici. Renvoie l'état de la ligne avant l'avoir et le
+   * montant appliqué. À appeler dans la transaction de l'action métier.
+   */
+  async creditNote(
+    input: { lineId: string; amount: number; reason: string; source: string; strict?: boolean },
+    tx: Tx,
+  ) {
+    await tx.$queryRaw`SELECT "id" FROM "InvoiceLine" WHERE "id" = ${input.lineId} AND "schoolId" = ${currentSchoolId()} FOR UPDATE`;
+    const line = await tx.invoiceLine.findUnique({
+      where: { id: input.lineId },
+      include: lineInclude,
+    });
+    if (!line) throw new NotFoundException('Échéance introuvable');
+    const before = toLineState(line, todayInCameroon());
+    if (input.strict && input.amount > before.outstanding)
+      throw new ConflictException(
+        `L’avoir dépasse le reste dû sur cette échéance (${before.outstanding} FCFA)`,
+      );
+    const applied = Math.min(Math.max(0, input.amount), before.outstanding);
+    if (applied > 0) {
+      await tx.invoiceLine.update({
+        where: { id: line.id },
+        data: {
+          discount: line.discount + applied,
+          discountReason: [line.discountReason, `Avoir : ${input.reason}`]
+            .filter(Boolean)
+            .join(' ; '),
+        },
+      });
+      await tx.ledgerEntry.create({
+        data: {
+          schoolId: currentSchoolId(),
+          studentId: line.invoice.studentId,
+          type: 'DISCOUNT',
+          amount: signedLedgerAmount('DISCOUNT', applied),
+          invoiceLineId: line.id,
+          description: `Avoir : ${input.reason}`,
+          createdById: this.actorId(),
+        },
+      });
+      await this.audit.log(
+        {
+          action: 'finance.credit_note',
+          entity: 'InvoiceLine',
+          entityId: line.id,
+          before: { discount: line.discount },
+          after: {
+            discount: line.discount + applied,
+            requested: input.amount,
+            source: input.source,
+          },
+          reason: input.reason,
+        },
+        tx,
+      );
+    }
+    return { before, applied };
+  }
+
   /** Remise ou bourse accordée sur une échéance. */
   async addDiscount(lineId: string, amount: number, reason: string) {
     return this.db.$transaction(async (tx) => {
@@ -985,9 +1047,11 @@ export class FinanceService {
         throw new ConflictException('Seul un paiement encaissé peut être annulé');
       if (payment.reversedAt) throw new ConflictException('Ce paiement a déjà été annulé');
       const actorId = this.actorId();
-      if (payment.method === 'CASH' && payment.receivedById === actorId)
+      // Quatre yeux quel que soit le mode : des espèces saisies comme virement puis annulées
+      // par la même personne échapperaient sinon au contrôle.
+      if (payment.receivedById === actorId)
         throw new ForbiddenException(
-          'Un encaissement en espèces doit être annulé par une autre personne que le caissier',
+          'Un paiement doit être annulé par une autre personne que celle qui l’a enregistré',
         );
       await tx.payment.update({
         where: { id },

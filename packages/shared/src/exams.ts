@@ -577,7 +577,7 @@ export const examRoomAddSchema = z.object({
 
 export const examSeatMoveSchema = z.object({
   roomId: z.string().min(1),
-  seat: z.number().int().min(1),
+  seat: z.number().int().min(1).max(10_000),
 });
 
 export const examSupervisionSchema = z.object({

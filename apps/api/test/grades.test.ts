@@ -527,6 +527,85 @@ describe('bulletins', () => {
     });
   });
 
+  it('verrouille les notes publiées ; une réouverture motivée marque les bulletins à republier', async () => {
+    await fillTerm();
+    const body = { classId: f.class4AId, termId: f.term1Id };
+    await http().post('/report-cards/generate').set(s.censeur.auth).send(body).expect(201);
+    await http().post('/report-cards/publish').set(s.direction.auth).send(body).expect(201);
+    const evs = await prisma.evaluation.findMany({
+      where: { classSubject: { classId: f.class4AId } },
+    });
+    expect(new Set(evs.map((e) => e.status))).toEqual(new Set(['LOCKED']));
+
+    // Notes figées : ni nouvelle évaluation, ni correction, même par la vie pédagogique.
+    const ev = evs.find((e) => e.classSubjectId === f.cs.maths4A && e.sequenceId === f.seq2Id)!;
+    const blocked = await http()
+      .post('/grades/evaluations')
+      .set(s.prof.auth)
+      .send({
+        classSubjectId: f.cs.maths4A,
+        sequenceId: f.seq2Id,
+        name: 'Interrogation',
+        type: 'QUIZ',
+        weight: 1,
+      })
+      .expect(409);
+    expect(blocked.body.message).toMatch(/Bulletins publiés/);
+    await grades(s.censeur, ev.id, { [ids.ngono]: '20' }, 409);
+
+    // Réouverture : motif obligatoire, bulletins marqués « à republier », action journalisée.
+    await http()
+      .post('/grades/sheet/reopen')
+      .set(s.censeur.auth)
+      .send({ classSubjectId: f.cs.maths4A, sequenceId: f.seq2Id })
+      .expect(400);
+    const reopened = await http()
+      .post('/grades/sheet/reopen')
+      .set(s.censeur.auth)
+      .send({ classSubjectId: f.cs.maths4A, sequenceId: f.seq2Id, reason: 'Erreur de report' })
+      .expect(201);
+    expect(reopened.body).toEqual({ reopened: 1, reportCardsToRepublish: 4 });
+    const log = await prisma.auditLog.findFirstOrThrow({ where: { action: 'grades.reopened' } });
+    expect(log.reason).toBe('Erreur de report');
+    const list = await http()
+      .get(`/report-cards?classId=${f.class4AId}&termId=${f.term1Id}`)
+      .set(s.censeur.auth)
+      .expect(200);
+    expect(list.body.every((c: { needsRepublish: boolean }) => c.needsRepublish)).toBe(true);
+
+    // Le relevé du trimestre signale l'écart avec le bulletin publié.
+    await grades(s.prof, ev.id, { [ids.ngono]: '17,5' });
+    await http()
+      .post('/grades/sheet/submit')
+      .set(s.prof.auth)
+      .send({ classSubjectId: f.cs.maths4A, sequenceId: f.seq2Id })
+      .expect(201);
+    const transcript = await http()
+      .get(`/transcripts/students/${ids.ngono}?scope=term&periodId=${f.term1Id}`)
+      .set(s.censeur.auth)
+      .expect(200);
+    expect(transcript.body.generalAverageCenti).toBe(1339);
+    expect(transcript.body.publicationNotice).toMatch(/diffère du bulletin publié/);
+
+    // Republication : nouvelle version, l'ancienne est remplacée.
+    await http().post('/report-cards/generate').set(s.censeur.auth).send(body).expect(201);
+    await http().post('/report-cards/publish').set(s.direction.auth).send(body).expect(201);
+    const versions = await prisma.reportCard.findMany({
+      where: { studentId: ids.ngono },
+      orderBy: { version: 'asc' },
+    });
+    expect(versions.map((v) => [v.version, v.status, v.needsRepublish])).toEqual([
+      [1, 'SUPERSEDED', true],
+      [2, 'PUBLISHED', false],
+    ]);
+    const after = await http()
+      .get(`/transcripts/students/${ids.ngono}?scope=term&periodId=${f.term1Id}`)
+      .set(s.censeur.auth)
+      .expect(200);
+    expect(after.body.publicationNotice).toBeNull();
+    await grades(s.prof, ev.id, { [ids.ngono]: '12' }, 409);
+  });
+
   it('refuse de publier des bulletins incomplets sans motif, ou périmés', async () => {
     await fillTerm();
     // Le français de la séquence 2 est rouvert puis laissé en brouillon.

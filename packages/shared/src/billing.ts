@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { MODULES, type Module } from './permissions';
-import { isoDate } from './schemas';
+import { fcfaAmount, isoDate, positiveFcfaAmount } from './schemas';
 
 /** Facturation de l'abonnement des établissements (montants annuels en FCFA entiers). */
 
@@ -133,7 +133,7 @@ export const schoolPeriod = z
   .regex(/^\d{4}-\d{4}$/, 'Année scolaire au format AAAA-AAAA')
   .refine((p) => Number(p.slice(5)) === Number(p.slice(0, 4)) + 1, 'Années non consécutives');
 
-const fcfa = z.number().int('Montant entier en FCFA').nonnegative();
+const fcfa = fcfaAmount;
 
 export const subscriptionPlanSchema = z
   .object({
@@ -159,7 +159,7 @@ export const subscriptionInvoiceIssueSchema = z.object({
 });
 
 export const subscriptionPaymentSchema = z.object({
-  amount: z.number().int('Montant entier en FCFA').positive('Le montant doit être positif'),
+  amount: positiveFcfaAmount,
   method: z.enum(SUBSCRIPTION_PAYMENT_METHODS),
   reference: z.string().trim().max(80).optional(),
   paidOn: isoDate,

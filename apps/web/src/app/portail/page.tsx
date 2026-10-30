@@ -30,35 +30,37 @@ export default function PortalHome() {
   return (
     <>
       <ChildSwitcher />
-      <section className="flex flex-col gap-3.5 rounded-[18px] bg-night p-4 text-white">
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-sm text-night-text">
-            {selected.firstName} · {selected.className ?? '—'}
-          </span>
-          <span
-            className={`rounded-full px-2.5 py-0.5 text-xs font-bold text-ink ${selected.overdue > 0 ? 'bg-[#f6c7c2]' : 'bg-primary-soft'}`}
-          >
-            {selected.overdue > 0 ? 'En retard' : 'À jour'}
-          </span>
-        </div>
-        <div>
-          <span className="text-sm text-night-text">Reste à payer</span>
-          <strong className="block font-display text-[34px] leading-tight tabular">
-            {formatFcfa(selected.balance)}
-          </strong>
-        </div>
-        {selected.nextDue ? (
-          <span className="text-sm text-night-ink">
-            Prochaine échéance : {formatFcfa(selected.nextDue.amount)} le{' '}
-            {formatShortDate(selected.nextDue.dueDate)}
-          </span>
-        ) : null}
-        {selected.balance > 0 ? (
-          <ButtonLink href="/portail/paiement" variant="saffron" size="lg" block>
-            Payer {selected.nextDue ? formatFcfa(selected.nextDue.amount) : ''}
-          </ButtonLink>
-        ) : null}
-      </section>
+      {selected.modules?.finance !== false ? (
+        <section className="flex flex-col gap-3.5 rounded-[18px] bg-night p-4 text-white">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-sm text-night-text">
+              {selected.firstName} · {selected.className ?? '—'}
+            </span>
+            <span
+              className={`rounded-full px-2.5 py-0.5 text-xs font-bold text-ink ${selected.overdue > 0 ? 'bg-[#f6c7c2]' : 'bg-primary-soft'}`}
+            >
+              {selected.overdue > 0 ? 'En retard' : 'À jour'}
+            </span>
+          </div>
+          <div>
+            <span className="text-sm text-night-text">Reste à payer</span>
+            <strong className="block font-display text-[34px] leading-tight tabular">
+              {formatFcfa(selected.balance)}
+            </strong>
+          </div>
+          {selected.nextDue ? (
+            <span className="text-sm text-night-ink">
+              Prochaine échéance : {formatFcfa(selected.nextDue.amount)} le{' '}
+              {formatShortDate(selected.nextDue.dueDate)}
+            </span>
+          ) : null}
+          {selected.balance > 0 ? (
+            <ButtonLink href="/portail/paiement" variant="saffron" size="lg" block>
+              Payer {selected.nextDue ? formatFcfa(selected.nextDue.amount) : ''}
+            </ButtonLink>
+          ) : null}
+        </section>
+      ) : null}
 
       {q.isPending ? (
         <LoadingBlock />

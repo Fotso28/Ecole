@@ -14,6 +14,7 @@ import {
   stockPurchaseSchema,
   stockReversalSchema,
   stockSaleSchema,
+  creditNoteSchema,
 } from '@ecole/shared';
 import { z } from 'zod';
 import { RequireModule, RequirePermissions } from '../../common/decorators';
@@ -184,6 +185,15 @@ export class StockController {
     @Body(new ZodPipe(stockReversalSchema)) body: z.infer<typeof stockReversalSchema>,
   ) {
     return this.stock.reverse(movementId, body.reason);
+  }
+
+  @RequirePermissions('stock.write')
+  @Post('movements/:id/credit')
+  credit(
+    @Param('id') movementId: string,
+    @Body(new ZodPipe(creditNoteSchema)) body: z.infer<typeof creditNoteSchema>,
+  ) {
+    return this.stock.credit(movementId, body.amount, body.reason);
   }
 
   @RequirePermissions('stock.inventory')

@@ -282,6 +282,24 @@ describe('règlements et relances', () => {
     ).toBe(3);
   });
 
+  it('ne laisse jamais une facture annulée avec un règlement, même en simultané', async () => {
+    const results = await Promise.all([
+      pay(30000),
+      http()
+        .post(`/platform/billing/invoices/${invoiceId}/cancel`)
+        .set(admin.auth)
+        .send({ reason: 'Erreur de saisie' }),
+    ]);
+    // L'une des deux opérations passe, l'autre est refusée.
+    expect(results.map((r) => r.status).sort()).toEqual([201, 400]);
+    const invoice = await prisma.subscriptionInvoice.findUniqueOrThrow({
+      where: { id: invoiceId },
+      include: { payments: true },
+    });
+    const paid = invoice.payments.reduce((t, p) => t + p.amount, 0);
+    expect(invoice.status === 'CANCELLED' && paid > 0).toBe(false);
+  });
+
   it('relance par SMS via la table d’envoi et trace la relance', async () => {
     const res = await http()
       .post(`/platform/billing/invoices/${invoiceId}/reminders`)

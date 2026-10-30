@@ -247,6 +247,8 @@ describe('encaissement en espèces', () => {
     await http().post('/finance/cash-sessions/open').set(s.compta.auth).expect(201);
     await pay({ amount: 100.5, method: 'CASH' }).expect(400);
     await pay({ amount: 0, method: 'CASH' }).expect(400);
+    // Au-delà des entiers 32 bits : erreur de saisie (400), pas d'erreur serveur.
+    await pay({ amount: 2_147_483_648, method: 'CASH' }).expect(400);
     await pay({ amount: 1000, method: 'CASH' }, s.secretariat).expect(403);
     await pay({ amount: 1000, method: 'BANK' }).expect(400);
   });

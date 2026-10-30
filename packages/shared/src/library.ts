@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { id, isoDate } from './schemas';
+import { fcfaAmount, id, isoDate } from './schemas';
 
 /** Bibliothèque (catalogue, emprunts, retards) et stock de fournitures et d'uniformes. */
 
@@ -285,17 +285,21 @@ export const stockItemSchema = z.object({
   category: z.enum(STOCK_CATEGORIES),
   /** Tailles proposées (uniformes) ; vide pour un article sans taille. */
   sizes: z.array(z.string().trim().min(1).max(10)).max(20).default([]),
-  unitPrice: z.number().int().min(0),
+  unitPrice: fcfaAmount,
   alertThreshold: z.number().int().min(0).max(100_000).default(0),
 });
 
-const quantity = z.number().int('Quantité entière').positive('Quantité positive');
+const quantity = z
+  .number()
+  .int('Quantité entière')
+  .positive('Quantité positive')
+  .max(100_000, 'Quantité trop élevée');
 
 export const stockPurchaseSchema = z.object({
   itemId: id,
   size: z.string().trim().max(10).default(''),
   quantity,
-  unitCost: z.number().int().min(0),
+  unitCost: fcfaAmount,
   supplier: z.string().trim().min(1, 'Fournisseur obligatoire').max(120),
   reference: z.string().trim().max(60).nullable().optional(),
 });
@@ -327,7 +331,7 @@ export const stockInventorySchema = z.object({
       z.object({
         itemId: id,
         size: z.string().trim().max(10).default(''),
-        counted: z.number().int().min(0),
+        counted: z.number().int().min(0).max(1_000_000),
         reason: z.string().trim().max(200).nullable().optional(),
       }),
     )

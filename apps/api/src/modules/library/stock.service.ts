@@ -17,6 +17,7 @@ import {
   stockPurchaseSchema,
   stockSaleSchema,
   stockValuation,
+  MAX_AMOUNT_FCFA,
 } from '@ecole/shared';
 import { Prisma, StockItem } from '@prisma/client';
 import { z } from 'zod';
@@ -219,6 +220,8 @@ export class StockService {
         this.assertSize(item, input.size);
         this.assertIssue(item, bySize, input.size, input.quantity);
         const amount = item.unitPrice * input.quantity;
+        if (amount > MAX_AMOUNT_FCFA)
+          throw new BadRequestException('Montant de la vente trop élevé');
         let invoiceLineId: string | null = null;
         if (amount > 0) {
           const year = await this.scope.currentYear(tx);
@@ -296,8 +299,9 @@ export class StockService {
   }
 
   /**
-   * Correction d'un mouvement par un mouvement inverse (une seule fois). La facture d'une vente
-   * corrigée n'est pas modifiée : l'éventuel avoir passe par une remise dans la scolarité.
+   * Correction d'un mouvement par un mouvement inverse (une seule fois). Une vente annulée reçoit
+   * automatiquement un avoir sur sa ligne de facture, à hauteur du reste dû ; la part déjà payée
+   * reste à rembourser par la scolarité (`notCredited`).
    */
   async reverse(movementId: string, reason: string) {
     return this.db.$transaction(async (tx) => {
@@ -334,7 +338,51 @@ export class StockService {
         },
         tx,
       );
-      return { ...m, invoiced: original.invoiceLineId !== null };
+      let credited = 0;
+      let notCredited = 0;
+      if (original.type === 'SALE' && original.invoiceLineId) {
+        const amount = (original.unitPrice ?? 0) * Math.abs(original.quantity);
+        const { applied } = await this.finance.creditNote(
+          {
+            lineId: original.invoiceLineId,
+            amount,
+            reason: `vente annulée : ${reason}`,
+            source: 'stock',
+          },
+          tx,
+        );
+        credited = applied;
+        notCredited = amount - applied;
+      }
+      return { ...m, invoiced: original.invoiceLineId !== null, credited, notCredited };
+    });
+  }
+
+  /**
+   * Avoir partiel sur la facture d'une vente (geste commercial, article défectueux), par le
+   * gestionnaire du stock : limité à la ligne de cette vente et à son reste dû.
+   */
+  async credit(movementId: string, amount: number, reason: string) {
+    const m = await this.db.stockMovement.findUnique({ where: { id: movementId } });
+    if (!m || m.type !== 'SALE') throw new NotFoundException('Vente introuvable');
+    if (!m.invoiceLineId) throw new ConflictException('Cette vente n’a pas été facturée');
+    const lineId = m.invoiceLineId;
+    return this.db.$transaction(async (tx) => {
+      const { applied } = await this.finance.creditNote(
+        { lineId, amount, reason, source: 'stock', strict: true },
+        tx,
+      );
+      await this.audit.log(
+        {
+          action: 'stock.credited',
+          entity: 'StockMovement',
+          entityId: movementId,
+          after: { invoiceLineId: lineId, amount: applied },
+          reason,
+        },
+        tx,
+      );
+      return { credited: applied };
     });
   }
 

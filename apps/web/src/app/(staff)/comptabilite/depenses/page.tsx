@@ -19,6 +19,7 @@ const STATUS = {
   PENDING_APPROVAL: { tone: 'warn', label: 'À valider' },
   POSTED: { tone: 'success', label: 'Comptabilisée' },
   REJECTED: { tone: 'neutral', label: 'Rejetée' },
+  CANCELLED: { tone: 'neutral', label: 'Annulée' },
 } as const;
 
 const errorMessage = (e: unknown) => (e instanceof Error ? e.message : 'Erreur');
@@ -30,6 +31,7 @@ export default function ExpensesPage() {
   const [status, setStatus] = useState('');
   const [creating, setCreating] = useState(false);
   const [rejecting, setRejecting] = useState<ExpenseView | null>(null);
+  const [cancelling, setCancelling] = useState<ExpenseView | null>(null);
   const q = useQuery({
     queryKey: ['accounting', 'expenses', status],
     queryFn: () => api<ExpenseView[]>(`/accounting/expenses${status ? `?status=${status}` : ''}`),
@@ -58,10 +60,34 @@ export default function ExpensesPage() {
     },
     onError: (e) => toast(errorMessage(e), 'error'),
   });
+  const cancel = useMutation({
+    mutationFn: (reason: string) =>
+      api<{ reversals: string[] }>(`/accounting/expenses/${cancelling?.id}/cancel`, {
+        method: 'POST',
+        body: { reason },
+      }),
+    onSuccess: (r) => {
+      setCancelling(null);
+      toast(`Dépense annulée · contre-passations ${r.reversals.join(', ')}`);
+      void refresh();
+    },
+    onError: (e) => toast(errorMessage(e), 'error'),
+  });
   const threshold = settings.data?.expenseApprovalThreshold;
 
   const actions = (e: ExpenseView) =>
-    can('accounting.write') && e.status === 'PENDING_APPROVAL' ? (
+    can('accounting.write') && e.status === 'POSTED' ? (
+      <div className="flex w-full gap-2 lg:w-auto lg:justify-end">
+        <Button
+          size="sm"
+          variant="secondary"
+          className="flex-1 lg:flex-none"
+          onClick={() => setCancelling(e)}
+        >
+          Annuler<span className="sr-only"> la dépense {e.label}</span>
+        </Button>
+      </div>
+    ) : can('accounting.write') && e.status === 'PENDING_APPROVAL' ? (
       <div className="flex w-full gap-2 lg:w-auto lg:justify-end">
         {/* La validation revient à une autre personne que l'auteur de la saisie. */}
         {e.createdById !== me?.user.id ? (
@@ -146,6 +172,11 @@ export default function ExpensesPage() {
                 {e.rejectedReason ? (
                   <p className="text-[13px] text-muted">Motif : {e.rejectedReason}</p>
                 ) : null}
+                {e.cancelReason ? (
+                  <p className="text-[13px] text-muted">
+                    Annulée{e.cancelledBy ? ` par ${e.cancelledBy}` : ''} : {e.cancelReason}
+                  </p>
+                ) : null}
                 {actions(e)}
               </li>
             ))}
@@ -189,6 +220,11 @@ export default function ExpensesPage() {
                       {e.rejectedReason ? (
                         <span className="block text-[13px] text-muted">
                           Motif : {e.rejectedReason}
+                        </span>
+                      ) : null}
+                      {e.cancelReason ? (
+                        <span className="block text-[13px] text-muted">
+                          Annulée{e.cancelledBy ? ` par ${e.cancelledBy}` : ''} : {e.cancelReason}
                         </span>
                       ) : null}
                     </td>
@@ -237,6 +273,28 @@ export default function ExpensesPage() {
           <InputField label="Motif du rejet" name="reason" required minLength={5} />
           <Button type="submit" variant="danger" loading={reject.isPending}>
             Rejeter la dépense
+          </Button>
+        </form>
+      </Sheet>
+      <Sheet
+        open={!!cancelling}
+        onClose={() => setCancelling(null)}
+        title="Annuler cette dépense ?"
+      >
+        <form
+          className="flex flex-col gap-4"
+          onSubmit={(ev) => {
+            ev.preventDefault();
+            cancel.mutate(String(new FormData(ev.currentTarget).get('reason')));
+          }}
+        >
+          <p className="text-sm text-muted">
+            Les écritures d’achat et de règlement sont contre-passées à la date du jour. La dépense
+            et ses écritures d’origine restent visibles, avec le motif d’annulation.
+          </p>
+          <InputField label="Motif de l’annulation" name="reason" required minLength={5} />
+          <Button type="submit" variant="danger" loading={cancel.isPending}>
+            Annuler la dépense
           </Button>
         </form>
       </Sheet>

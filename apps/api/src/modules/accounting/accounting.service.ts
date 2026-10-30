@@ -26,13 +26,16 @@ import {
   isPostable,
   JOURNAL_CODES,
   JOURNAL_LABELS,
+  manualEntryNeedsApproval,
   manualEntrySchema,
   PAYMENT_METHOD_ACCOUNTS,
+  REVENUE_ACCOUNTS,
   payrollMonthBounds,
   payrollPosting,
   staffPayoutPosting,
   stockPurchasePosting,
   SYSCOHADA_CHART,
+  treasuryOutflow,
   tuitionPosting,
   validateSubAccount,
   type AccountBalance,
@@ -336,6 +339,13 @@ export class AccountingService {
         throw new ConflictException(
           `${pendingExpenses} dépense(s) de cet exercice attendent encore leur validation`,
         );
+      const pendingEntries = await tx.manualEntryRequest.count({
+        where: { status: 'PENDING', date: { gte: year.startDate, lte: year.endDate } },
+      });
+      if (pendingEntries > 0)
+        throw new ConflictException(
+          `${pendingEntries} écriture(s) de trésorerie de cet exercice attendent encore leur validation`,
+        );
       const balances = await this.balances(tx, { fiscalYearId: id });
       const lines = carryForwardLines(balances);
       let next = await tx.fiscalYear.findFirst({
@@ -443,8 +453,16 @@ export class AccountingService {
     return entry;
   }
 
+  /**
+   * Écriture manuelle. Une écriture qui fait sortir de la trésorerie (caisse, banque, Mobile
+   * Money) au moins le seuil de validation des dépenses n'est pas passée : elle attend l'accord
+   * d'une autre personne, comme une dépense.
+   */
   async createManualEntry(input: z.infer<typeof manualEntrySchema>) {
     await this.ensureSetup();
+    const { expenseApprovalThreshold } = await this.getSettings();
+    if (manualEntryNeedsApproval(input.lines, expenseApprovalThreshold))
+      return this.requestManualEntry(input, expenseApprovalThreshold);
     const entry = await this.run(async (tx) => {
       const created = await this.post(tx, {
         journal: input.journal,
@@ -465,6 +483,176 @@ export class AccountingService {
       return created;
     });
     return this.getEntry(entry.id);
+  }
+
+  private async requestManualEntry(input: z.infer<typeof manualEntrySchema>, threshold: number) {
+    const actorId = currentActorId();
+    if (!actorId) throw new ForbiddenException();
+    let total: number;
+    try {
+      total = assertBalancedEntry(input.lines);
+    } catch (e) {
+      throw translateAccountingError(e);
+    }
+    const numbers = [...new Set(input.lines.map((l) => l.accountNumber))];
+    const known = await this.db.accountingAccount.count({ where: { number: { in: numbers } } });
+    if (known !== numbers.length) throw new BadRequestException('Compte inconnu du plan comptable');
+    const covering = await this.db.fiscalYear.findFirst({
+      where: { startDate: { lte: toDbDate(input.date) }, endDate: { gte: toDbDate(input.date) } },
+    });
+    if (covering && covering.status !== 'OPEN')
+      throw new ConflictException(
+        `Exercice clôturé : aucune nouvelle écriture n’est possible au ${frDate(input.date)}`,
+      );
+    const request = await this.run(async (tx) => {
+      const created = await tx.manualEntryRequest.create({
+        data: {
+          schoolId: currentSchoolId(),
+          journalCode: input.journal,
+          date: toDbDate(input.date),
+          label: input.label,
+          pieceRef: input.pieceRef ?? null,
+          lines: input.lines as unknown as Prisma.InputJsonValue,
+          total,
+          createdById: actorId,
+        },
+      });
+      await this.audit.log(
+        {
+          action: 'accounting.entry_requested',
+          entity: 'ManualEntryRequest',
+          entityId: created.id,
+          after: { ...input, treasuryOutflow: treasuryOutflow(input.lines), threshold },
+        },
+        tx,
+      );
+      return created;
+    });
+    return {
+      id: request.id,
+      status: 'PENDING_APPROVAL' as const,
+      needsApproval: true,
+      threshold,
+      reference: null,
+    };
+  }
+
+  async listEntryRequests(status?: 'PENDING' | 'APPROVED' | 'REJECTED') {
+    const rows = await this.db.manualEntryRequest.findMany({
+      where: { status },
+      orderBy: { createdAt: 'desc' },
+      take: 300,
+    });
+    const [users, entries] = await Promise.all([
+      this.db.user.findMany({
+        where: {
+          id: { in: [...new Set(rows.flatMap((r) => [r.createdById, r.decidedById ?? '']))] },
+        },
+        select: { id: true, firstName: true, lastName: true },
+      }),
+      this.db.accountingEntry.findMany({
+        where: { id: { in: rows.map((r) => r.entryId ?? '') } },
+        select: { id: true, reference: true },
+      }),
+    ]);
+    const name = (id: string | null) => {
+      const u = users.find((x) => x.id === id);
+      return u ? `${u.firstName} ${u.lastName}` : null;
+    };
+    return rows.map((r) => ({
+      id: r.id,
+      journal: r.journalCode,
+      date: fromDbDate(r.date),
+      label: r.label,
+      pieceRef: r.pieceRef,
+      lines: r.lines as unknown as EntryLine[],
+      total: r.total,
+      status: r.status,
+      createdById: r.createdById,
+      createdBy: name(r.createdById),
+      decidedBy: name(r.decidedById),
+      decidedAt: r.decidedAt,
+      decisionNote: r.decisionNote,
+      reference: entries.find((e) => e.id === r.entryId)?.reference ?? null,
+    }));
+  }
+
+  private async lockEntryRequest(tx: Tx, id: string) {
+    const locked = await tx.$queryRaw<
+      { id: string }[]
+    >`SELECT "id" FROM "ManualEntryRequest" WHERE "id" = ${id} AND "schoolId" = ${currentSchoolId()} FOR UPDATE`;
+    if (locked.length === 0) throw new NotFoundException('Demande d’écriture introuvable');
+    const request = await tx.manualEntryRequest.findUniqueOrThrow({ where: { id } });
+    if (request.status !== 'PENDING')
+      throw new ConflictException('Cette écriture n’est plus en attente de validation');
+    if (request.createdById === currentActorId())
+      throw new ForbiddenException(
+        'L’écriture doit être validée par une autre personne que celle qui l’a saisie',
+      );
+    return request;
+  }
+
+  /** Validation par une autre personne : l'écriture est passée telle qu'elle a été saisie. */
+  async approveEntryRequest(id: string) {
+    await this.ensureSetup();
+    const entry = await this.run(async (tx) => {
+      const request = await this.lockEntryRequest(tx, id);
+      const created = await this.post(tx, {
+        journal: request.journalCode as JournalCode,
+        date: fromDbDate(request.date),
+        label: request.label,
+        pieceRef: request.pieceRef,
+        lines: request.lines as unknown as EntryLine[],
+      });
+      await tx.manualEntryRequest.update({
+        where: { id },
+        data: {
+          status: 'APPROVED',
+          decidedById: currentActorId() ?? null,
+          decidedAt: new Date(),
+          entryId: created.id,
+        },
+      });
+      await this.audit.log(
+        {
+          action: 'accounting.entry_approved',
+          entity: 'ManualEntryRequest',
+          entityId: id,
+          before: { status: 'PENDING' },
+          after: { status: 'APPROVED', reference: created.reference },
+        },
+        tx,
+      );
+      return created;
+    });
+    return this.getEntry(entry.id);
+  }
+
+  async rejectEntryRequest(id: string, reason: string) {
+    return this.run(async (tx) => {
+      await this.lockEntryRequest(tx, id);
+      await tx.manualEntryRequest.update({
+        where: { id },
+        data: {
+          status: 'REJECTED',
+          decidedById: currentActorId() ?? null,
+          decidedAt: new Date(),
+          decisionNote: reason,
+        },
+      });
+      await this.audit.log(
+        {
+          action: 'accounting.entry_rejected',
+          entity: 'ManualEntryRequest',
+          entityId: id,
+          before: { status: 'PENDING' },
+          after: { status: 'REJECTED' },
+          reason,
+        },
+        tx,
+      );
+      return { id, status: 'REJECTED' as const };
+    });
   }
 
   /** Correction par contre-passation : une nouvelle écriture inverse, l'originale reste intacte. */
@@ -492,24 +680,14 @@ export class AccountingService {
         );
       if (original.sourceType === 'CARRY_FORWARD')
         throw new ConflictException('Le report à nouveau ne se contre-passe pas');
+      if (original.sourceType === 'EXPENSE' || original.sourceType === 'EXPENSE_PAYMENT')
+        throw new ConflictException(
+          'Écriture d’une dépense : annulez la dépense, ses écritures seront contre-passées',
+        );
       const already = await tx.accountingEntry.findFirst({ where: { reversesEntryId: id } });
       if (already)
         throw new ConflictException(`Écriture déjà contre-passée (${already.reference})`);
-      const created = await this.post(tx, {
-        journal: original.journalCode as JournalCode,
-        date: date ?? todayInCameroon(),
-        label: `Contre-passation de ${original.reference} : ${reason}`,
-        pieceRef: original.pieceRef,
-        lines: original.lines.map((l) => ({
-          accountNumber: l.accountNumber,
-          debit: l.credit,
-          credit: l.debit,
-          label: l.label ?? undefined,
-        })),
-        sourceType: 'REVERSAL',
-        sourceId: original.id,
-        reversesEntryId: original.id,
-      });
+      const created = await this.postReversal(tx, original, reason, date);
       await this.audit.log(
         {
           action: 'accounting.entry_reversed',
@@ -523,6 +701,32 @@ export class AccountingService {
       return created;
     });
     return this.getEntry(entry.id);
+  }
+
+  /** Écriture inverse d'une écriture (mêmes comptes, débit et crédit échangés). */
+  private postReversal(
+    tx: Tx,
+    original: Prisma.AccountingEntryGetPayload<{ include: { lines: true } }>,
+    reason: string,
+    date?: string,
+  ) {
+    return this.post(tx, {
+      journal: original.journalCode as JournalCode,
+      date: date ?? todayInCameroon(),
+      label: `Contre-passation de ${original.reference} : ${reason}`,
+      pieceRef: original.pieceRef,
+      lines: [...original.lines]
+        .sort((a, b) => a.order - b.order)
+        .map((l) => ({
+          accountNumber: l.accountNumber,
+          debit: l.credit,
+          credit: l.debit,
+          label: l.label ?? undefined,
+        })),
+      sourceType: 'REVERSAL',
+      sourceId: original.id,
+      reversesEntryId: original.id,
+    });
   }
 
   async getEntry(id: string) {
@@ -676,6 +880,8 @@ export class AccountingService {
                 ? tx.payment.findUnique({ where: { id: op.paymentId }, select: { method: true } })
                 : null,
             ]);
+            const revenueAccount =
+              op.type === 'CHARGE' ? await this.revenueAccountFor(tx, op.invoiceLineId) : null;
             const date = todayInCameroon(op.createdAt);
             const target = await this.fiscalYearForAutomatic(tx, date);
             if (!target) return 'waiting' as const;
@@ -687,6 +893,7 @@ export class AccountingService {
                 ? `${student.lastName} ${student.firstName} (${student.matricule})`
                 : 'Élève',
               method: payment?.method ?? null,
+              revenueAccount,
             });
             await this.post(tx, {
               journal: posting.journal,
@@ -719,6 +926,26 @@ export class AccountingService {
         after: { posted, failed, waiting },
       });
     return { posted, failed, pending: await this.pendingTuitionCount() };
+  }
+
+  /**
+   * Produit d'une facture émise pour un autre service que la scolarité : vente du stock,
+   * abonnement au transport ou pénalité de bibliothèque. Sinon null (scolarité, inscription).
+   */
+  private async revenueAccountFor(tx: Tx, invoiceLineId: string | null): Promise<string | null> {
+    if (!invoiceLineId) return null;
+    const [sale, transport, fine] = await Promise.all([
+      tx.stockMovement.findFirst({ where: { invoiceLineId }, select: { id: true } }),
+      tx.transportSubscription.findFirst({ where: { invoiceLineId }, select: { id: true } }),
+      tx.libraryLoan.findFirst({
+        where: { penaltyInvoiceLineId: invoiceLineId },
+        select: { id: true },
+      }),
+    ]);
+    if (sale) return REVENUE_ACCOUNTS.stockSale;
+    if (transport) return REVENUE_ACCOUNTS.transport;
+    if (fine) return REVENUE_ACCOUNTS.libraryFine;
+    return null;
   }
 
   /** Tâche de fond : alimentation de toutes les écoles ayant activé la comptabilité. */
@@ -1034,7 +1261,7 @@ export class AccountingService {
     return supplier;
   }
 
-  async listExpenses(status?: 'PENDING_APPROVAL' | 'POSTED' | 'REJECTED') {
+  async listExpenses(status?: 'PENDING_APPROVAL' | 'POSTED' | 'REJECTED' | 'CANCELLED') {
     const expenses = await this.db.expense.findMany({
       where: { status },
       orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
@@ -1047,7 +1274,17 @@ export class AccountingService {
       }),
       this.db.user.findMany({
         where: {
-          id: { in: [...new Set(expenses.flatMap((e) => [e.createdById, e.approvedById ?? '']))] },
+          id: {
+            in: [
+              ...new Set(
+                expenses.flatMap((e) => [
+                  e.createdById,
+                  e.approvedById ?? '',
+                  e.cancelledById ?? '',
+                ]),
+              ),
+            ],
+          },
         },
         select: { id: true, firstName: true, lastName: true },
       }),
@@ -1077,6 +1314,9 @@ export class AccountingService {
       createdBy: name(e.createdById),
       approvedBy: name(e.approvedById),
       rejectedReason: e.rejectedReason,
+      cancelledBy: name(e.cancelledById),
+      cancelledAt: e.cancelledAt,
+      cancelReason: e.cancelReason,
       entries: entries.filter((x) => x.sourceId === e.id).map((x) => x.reference),
     }));
   }
@@ -1238,6 +1478,66 @@ export class AccountingService {
     });
   }
 
+  /**
+   * Annulation d'une dépense comptabilisée (facture erronée, achat annulé) : motif obligatoire,
+   * contre-passation de ses écritures d'achat et de règlement à la date du jour, statut « annulée »
+   * et entrée au journal d'audit. La dépense et ses écritures d'origine restent intactes.
+   */
+  async cancelExpense(id: string, reason: string) {
+    await this.ensureSetup();
+    return this.run(async (tx) => {
+      const locked = await tx.$queryRaw<
+        { id: string }[]
+      >`SELECT "id" FROM "Expense" WHERE "id" = ${id} AND "schoolId" = ${currentSchoolId()} FOR UPDATE`;
+      if (locked.length === 0) throw new NotFoundException('Dépense introuvable');
+      const expense = await tx.expense.findUniqueOrThrow({ where: { id } });
+      if (expense.status === 'CANCELLED')
+        throw new ConflictException('Cette dépense est déjà annulée');
+      if (expense.status !== 'POSTED')
+        throw new ConflictException(
+          'Seule une dépense comptabilisée s’annule (une dépense en attente se rejette)',
+        );
+      const entries = await tx.accountingEntry.findMany({
+        where: { sourceType: { in: ['EXPENSE', 'EXPENSE_PAYMENT'] }, sourceId: id },
+        include: { lines: true },
+        orderBy: { createdAt: 'asc' },
+      });
+      const reversals: string[] = [];
+      for (const entry of entries) {
+        const already = await tx.accountingEntry.findFirst({
+          where: { reversesEntryId: entry.id },
+        });
+        if (already) {
+          reversals.push(already.reference);
+          continue;
+        }
+        const reversal = await this.postReversal(tx, entry, `annulation de la dépense, ${reason}`);
+        reversals.push(reversal.reference);
+      }
+      await tx.expense.update({
+        where: { id },
+        data: {
+          status: 'CANCELLED',
+          cancelledById: currentActorId() ?? null,
+          cancelledAt: new Date(),
+          cancelReason: reason,
+        },
+      });
+      await this.audit.log(
+        {
+          action: 'accounting.expense_cancelled',
+          entity: 'Expense',
+          entityId: id,
+          before: { status: 'POSTED', entries: entries.map((e) => e.reference) },
+          after: { status: 'CANCELLED', reversals },
+          reason,
+        },
+        tx,
+      );
+      return { id, status: 'CANCELLED' as const, reversals };
+    });
+  }
+
   // ---------------------------------------------------------------- Vue d'ensemble
 
   async overview() {
@@ -1266,6 +1566,7 @@ export class AccountingService {
       this.db.expense.count({ where: { status: 'PENDING_APPROVAL' } }),
       this.getSettings(),
     ]);
+    const pendingEntries = await this.db.manualEntryRequest.count({ where: { status: 'PENDING' } });
     const is = incomeStatement(balances);
     return {
       fiscalYear: current ? this.presentYear(current) : null,
@@ -1277,6 +1578,7 @@ export class AccountingService {
       pendingTuition,
       pendingOperations,
       pendingExpenses,
+      pendingEntries,
       ...settings,
     };
   }

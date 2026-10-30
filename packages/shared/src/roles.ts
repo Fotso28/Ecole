@@ -54,6 +54,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'hr.write': 'Modifier les dossiers, contrats et avances du personnel',
   'hr.payroll.prepare': 'Préparer la paie',
   'hr.payroll.validate': 'Valider la paie',
+  'hr.payroll.pay': 'Enregistrer le versement des salaires et des avances',
   'communication.write': 'Publier des annonces et envoyer des messages groupés',
   'messaging.use': 'Échanger avec les familles',
   'messaging.oversee': 'Superviser les échanges avec les familles',
@@ -147,7 +148,13 @@ export const PERMISSION_GROUPS: readonly PermissionGroup[] = [
   {
     key: 'rh',
     label: 'Ressources humaines et paie',
-    permissions: ['hr.read', 'hr.write', 'hr.payroll.prepare', 'hr.payroll.validate'],
+    permissions: [
+      'hr.read',
+      'hr.write',
+      'hr.payroll.prepare',
+      'hr.payroll.validate',
+      'hr.payroll.pay',
+    ],
   },
   {
     key: 'communication',

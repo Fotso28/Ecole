@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { AccountingRuleError, isPostable, SYSCOHADA_CHART, sumLines } from './accounting';
+import {
+  AccountingRuleError,
+  isPostable,
+  manualEntryNeedsApproval,
+  REVENUE_ACCOUNTS,
+  SYSCOHADA_CHART,
+  sumLines,
+  treasuryOutflow,
+  tuitionPosting,
+} from './accounting';
 import { computePayslip, DEFAULT_PAYROLL_SCALE, type PayslipResult } from './payroll';
 import {
   PAYROLL_ACCOUNTS,
@@ -228,5 +237,60 @@ describe('achats de stock', () => {
     expect(() =>
       stockPurchasePosting({ category: 'SUPPLY', quantity: 5, unitCost: 0, label: 'Don' }),
     ).toThrow(/sans montant/);
+  });
+});
+
+describe('produits des services facturés par la scolarité', () => {
+  it('ventes du stock en 701, transport en 7063, pénalités en 7071, scolarité inchangée', () => {
+    const numbers = new Set(SYSCOHADA_CHART.map((a) => a.number));
+    for (const n of Object.values(REVENUE_ACCOUNTS)) {
+      expect(numbers.has(n), n).toBe(true);
+      expect(isPostable(n)).toBe(true);
+      expect(n.startsWith('7')).toBe(true);
+    }
+    expect(new Set(Object.values(REVENUE_ACCOUNTS)).has('7061')).toBe(false);
+    const charge = (description: string, revenueAccount?: string) =>
+      tuitionPosting({
+        type: 'CHARGE',
+        amount: 9000,
+        description,
+        studentName: 'Bello Awa',
+        revenueAccount,
+      }).lines.map((l) => [l.accountNumber, l.debit, l.credit]);
+    expect(charge('Chemise uniforme (M) × 2', REVENUE_ACCOUNTS.stockSale)).toEqual([
+      ['4111', 9000, 0],
+      ['701', 0, 9000],
+    ]);
+    expect(charge('Transport scolaire – Ligne 1', REVENUE_ACCOUNTS.transport)[1]?.[0]).toBe('7063');
+    expect(charge('Pénalité de retard', REVENUE_ACCOUNTS.libraryFine)[1]?.[0]).toBe('7071');
+    expect(charge('Tranche 1')[1]?.[0]).toBe('7061');
+    expect(charge('Frais d’inscription')[1]?.[0]).toBe('7062');
+  });
+});
+
+describe('écritures manuelles de trésorerie', () => {
+  const l = (accountNumber: string, debit: number, credit: number) => ({
+    accountNumber,
+    debit,
+    credit,
+  });
+  it('mesure les sorties de caisse, banque et Mobile Money, quel que soit le journal', () => {
+    expect(treasuryOutflow([l('6052', 150_000, 0), l('521', 0, 150_000)])).toBe(150_000);
+    expect(treasuryOutflow([l('521', 80_000, 0), l('101', 0, 80_000)])).toBe(0);
+    expect(treasuryOutflow([l('585', 120_000, 0), l('571', 0, 70_000), l('5521', 0, 50_000)])).toBe(
+      120_000,
+    );
+  });
+  it('au seuil ou au-delà, une sortie de trésorerie attend la validation ; un apport non', () => {
+    expect(manualEntryNeedsApproval([l('658', 100_000, 0), l('571', 0, 100_000)], 100_000)).toBe(
+      true,
+    );
+    expect(manualEntryNeedsApproval([l('658', 99_999, 0), l('571', 0, 99_999)], 100_000)).toBe(
+      false,
+    );
+    expect(manualEntryNeedsApproval([l('521', 500_000, 0), l('101', 0, 500_000)], 100_000)).toBe(
+      false,
+    );
+    expect(manualEntryNeedsApproval([l('658', 1, 0), l('571', 0, 1)], 0)).toBe(true);
   });
 });

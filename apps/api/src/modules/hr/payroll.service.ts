@@ -14,7 +14,6 @@ import {
   DEFAULT_PAYROLL_SCALE,
   daysInMonth,
   formatPayrollMonth,
-  hasPermission,
   payForMinutes,
   payrollMonthBounds,
   prorateMonthly,
@@ -29,6 +28,7 @@ import {
 } from '@ecole/shared';
 import { Prisma, type EmploymentContract, type Payslip } from '@prisma/client';
 import { z } from 'zod';
+import { AccessService } from '../../common/access.service';
 import { AuditService } from '../../common/audit.service';
 import { currentSchoolId, staffContext } from '../../common/context';
 import { fromDbDate, toDbDate } from '../../common/dates';
@@ -85,6 +85,7 @@ export class PayrollService {
     private readonly hours: HoursService,
     private readonly notifications: NotificationsService,
     private readonly accounting: AccountingService,
+    private readonly access: AccessService,
   ) {}
 
   // -------------------------------------------------------------------------------------------
@@ -882,11 +883,19 @@ export class PayrollService {
   private async payerCheck(validatorId: string | null): Promise<boolean> {
     const actor = staffContext().userId;
     if (!validatorId || validatorId !== actor) return false;
-    const others = await this.db.membership.findMany({
-      where: { schoolId: currentSchoolId(), active: true, userId: { not: actor } },
-      select: { roles: true },
-    });
-    if (others.some((m) => hasPermission(m.roles, 'hr.payroll.pay')))
+    const [config, others] = await Promise.all([
+      this.access.load(this.db),
+      this.db.membership.findMany({
+        where: {
+          schoolId: currentSchoolId(),
+          active: true,
+          userId: { not: actor },
+          user: { status: 'ACTIVE' },
+        },
+        select: { roles: true, customRoleIds: true },
+      }),
+    ]);
+    if (others.some((m) => AccessService.resolve(config, m).permissions.has('hr.payroll.pay')))
       throw new ForbiddenException(
         'Le versement doit être enregistré par une autre personne que celle qui a validé',
       );

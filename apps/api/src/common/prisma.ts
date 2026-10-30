@@ -90,6 +90,8 @@ export const TENANT_MODELS: ReadonlySet<string> = new Set<Prisma.ModelName>([
   'StockItem',
   'StockMovement',
   'StaffPayout',
+  'PayoutDetailsChange',
+  'ManualEntryRequest',
   'StockInventory',
   'RoleOverride',
   'CustomRole',

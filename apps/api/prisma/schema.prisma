@@ -1392,6 +1392,7 @@ enum ExpenseStatus {
   PENDING_APPROVAL
   POSTED
   REJECTED
+  CANCELLED
 }
 
 model AccountingAccount {
@@ -1502,7 +1503,40 @@ model Expense {
   approvedById   String?
   approvedAt     DateTime?
   rejectedReason String?
+  /// Annulation d'une dépense comptabilisée : ses écritures sont contre-passées.
+  cancelledById  String?
+  cancelledAt    DateTime?
+  cancelReason   String?
   createdAt      DateTime      @default(now())
+
+  @@index([schoolId, status])
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+/// Écriture manuelle touchant la trésorerie (caisse, banque, Mobile Money) au-delà du seuil de
+/// validation des dépenses : passée seulement après l'accord d'une autre personne.
+model ManualEntryRequest {
+  id           String         @id @default(cuid())
+  schoolId     String
+  journalCode  String
+  date         DateTime       @db.Date
+  label        String
+  pieceRef     String?
+  /// Lignes demandées : [{ accountNumber, debit, credit, label? }].
+  lines        Json
+  total        Int
+  status       ApprovalStatus @default(PENDING)
+  createdById  String
+  decidedById  String?
+  decidedAt    DateTime?
+  decisionNote String?
+  entryId      String?        @unique
+  createdAt    DateTime       @default(now())
 
   @@index([schoolId, status])
 }
@@ -1613,6 +1647,27 @@ model TeachingSession {
   @@index([schoolId, teacherId, date])
 }
 
+/// Changement des coordonnées de paiement d'un dossier (mode, banque, Mobile Money) : il ne
+/// prend effet qu'après l'approbation d'une autre personne.
+model PayoutDetailsChange {
+  id                String         @id @default(cuid())
+  schoolId          String
+  employeeId        String
+  /// Nouvelles valeurs demandées, chiffrées.
+  encryptedChange   String
+  /// Empreintes (HMAC) des coordonnées avant et après, pour l'audit sans valeur en clair.
+  beforeFingerprint String
+  afterFingerprint  String
+  status            ApprovalStatus @default(PENDING)
+  requestedById     String
+  decidedById       String?
+  decidedAt         DateTime?
+  decisionNote      String?
+  createdAt         DateTime       @default(now())
+
+  @@index([schoolId, employeeId, status])
+}
+
 /// Avance sur salaire : demandée, accordée par la direction, retenue sur les paies suivantes.
 model SalaryAdvance {
   id            String              @id @default(cuid())
@@ -1718,23 +1773,26 @@ model PayrollRun {
 
 /// Bulletin de paie : éléments saisis, heures retenues, résultat du calcul et identité figés.
 model Payslip {
-  id           String       @id @default(cuid())
-  schoolId     String
-  runId        String
-  employeeId   String
-  number       String?
-  contractType ContractType
-  elements     Json         @default("[]")
-  absenceDays  Int          @default(0)
+  id              String       @id @default(cuid())
+  schoolId        String
+  runId           String
+  employeeId      String
+  number          String?
+  contractType    ContractType
+  elements        Json         @default("[]")
+  absenceDays     Int          @default(0)
   /// Entrées du calcul (heures, salaire, avances) et identité au moment du calcul.
-  inputs       Json
+  inputs          Json
   /// Résultat de `computePayslip`.
-  result       Json
-  gross        Int
-  net          Int
-  employerCost Int
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  result          Json
+  gross           Int
+  net             Int
+  employerCost    Int
+  /// Coordonnées de paiement figées à la validation (chiffrées) : l'état des virements et le
+  /// versement les lisent, jamais le dossier modifiable.
+  encryptedPayout String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
 
   run PayrollRun @relation(fields: [runId], references: [id], onDelete: Cascade)
 

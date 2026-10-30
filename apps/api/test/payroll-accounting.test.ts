@@ -6,6 +6,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { runAsSystem } from '../src/common/context';
 import { AccountingService } from '../src/modules/accounting/accounting.service';
 import { enrollStudent, seedSchool, sessions, type SchoolFixture } from './fixtures';
+import { toDbDate } from '../src/common/dates';
 import { createTestApp, prisma, resetDb, type Session } from './helpers';
 
 let app: INestApplication;
@@ -426,6 +427,338 @@ describe('achats de stock', () => {
       _sum: { debit: true, credit: true },
     });
     expect((accountTotals._sum.debit ?? 0) - (accountTotals._sum.credit ?? 0)).toBe(57_500);
+  });
+});
+
+describe('produits des autres services facturés par la scolarité', () => {
+  it('ventes du stock en 701, transport en 7063, pénalités de bibliothèque en 7071', async () => {
+    await enable(f.schoolId, ['accounting', 'library', 'transport']);
+    const student = await enrollStudent(app, s.secretariat, {
+      firstName: 'Awa',
+      lastName: 'Bello',
+      classId: f.class4AId,
+    });
+    // Vente du stock.
+    const item = await http()
+      .post('/stock/items')
+      .set(s.compta.auth)
+      .send({ name: 'Chemise uniforme', category: 'UNIFORM', sizes: [], unitPrice: 4500 })
+      .expect(201);
+    await http()
+      .post('/stock/purchases')
+      .set(s.compta.auth)
+      .send({ itemId: item.body.id, quantity: 5, unitCost: 3000, supplier: 'Tissus Mfoundi' })
+      .expect(201);
+    await http()
+      .post('/stock/sales')
+      .set(s.compta.auth)
+      .send({ itemId: item.body.id, quantity: 2, studentId: student.id, requestId: randomUUID() })
+      .expect(201);
+    // Abonnement au transport.
+    const bus = await http()
+      .post('/transport/vehicles')
+      .set(s.secretariat.auth)
+      .send({ plate: 'CE 482 AB', capacity: 30 })
+      .expect(201);
+    const line = await http()
+      .post('/transport/lines')
+      .set(s.secretariat.auth)
+      .send({ name: 'Ligne 1', vehicleId: bus.body.id, fee: 90_000, oneWayFee: 50_000 })
+      .expect(201);
+    const stop = await http()
+      .post(`/transport/lines/${line.body.id}/stops`)
+      .set(s.secretariat.auth)
+      .send({ name: 'Carrefour Bastos', order: 1, morningTime: '06:45' })
+      .expect(201);
+    await http()
+      .post('/transport/subscriptions')
+      .set(s.secretariat.auth)
+      .send({
+        studentId: student.id,
+        lineId: line.body.id,
+        stopId: stop.body.id,
+        direction: 'BOTH',
+      })
+      .expect(201);
+    // Pénalité de retard de la bibliothèque.
+    await http()
+      .put('/library/settings')
+      .set(s.secretariat.auth)
+      .send({
+        maxLoans: 3,
+        loanDays: 14,
+        maxRenewals: 1,
+        lateFeePerDay: 100,
+        lateFeeCap: 500,
+        reminderSms: false,
+      })
+      .expect(200);
+    const book = await http()
+      .post('/library/books')
+      .set(s.secretariat.auth)
+      .send({ title: 'Ville cruelle', authors: ['Eza Boto'], callNumber: 'R BOT', copies: 1 })
+      .expect(201);
+    const copy = await prisma.libraryCopy.findFirstOrThrow({ where: { bookId: book.body.id } });
+    const loan = await http()
+      .post('/library/loans')
+      .set(s.secretariat.auth)
+      .send({ copyId: copy.id, borrowerType: 'STUDENT', studentId: student.id })
+      .expect(201);
+    await prisma.libraryLoan.update({
+      where: { id: loan.body.id },
+      data: { dueDate: toDbDate(new Date(Date.now() - 4 * 86_400_000).toISOString().slice(0, 10)) },
+    });
+    await http()
+      .post(`/library/loans/${loan.body.id}/return`)
+      .set(s.secretariat.auth)
+      .send({})
+      .expect(201);
+
+    await http().post('/accounting/sync').set(s.compta.auth).expect(201);
+    const credited = async (labelStart: string) => {
+      const e = await prisma.accountingEntry.findFirstOrThrow({
+        where: { schoolId: f.schoolId, sourceType: 'LEDGER', label: { startsWith: labelStart } },
+        include: { lines: true },
+      });
+      return e.lines.filter((l) => l.credit > 0).map((l) => [l.accountNumber, l.credit]);
+    };
+    expect(await credited('Chemise uniforme')).toEqual([['701', 9000]]);
+    expect(await credited('Transport scolaire')).toEqual([['7063', 90_000]]);
+    expect(await credited('Pénalité de retard')).toEqual([['7071', 400]]);
+    // La scolarité reste en 7061 et 7062.
+    const tuition = await prisma.accountingLine.findMany({
+      where: { schoolId: f.schoolId, credit: { gt: 0 }, accountNumber: { in: ['7061', '7062'] } },
+    });
+    expect(tuition.length).toBeGreaterThan(0);
+    const is = (
+      await http()
+        .get(
+          `/accounting/reports/compte-de-resultat?from=${today().slice(0, 4)}-01-01&to=${today().slice(0, 4)}-12-31`,
+        )
+        .set(s.compta.auth)
+        .expect(200)
+    ).body.statement;
+    expect(is.products.map((g: { code: string }) => g.code)).toEqual(
+      expect.arrayContaining(['70']),
+    );
+    await expectIntegrity(f.schoolId);
+  });
+});
+
+describe('écritures manuelles de trésorerie', () => {
+  it('une sortie de trésorerie au-delà du seuil attend la validation d’une autre personne', async () => {
+    await enable(f.schoolId, ['accounting']);
+    const body = (journal: string, amount: number, label: string, charge = '658') => ({
+      journal,
+      date: today(),
+      label,
+      pieceRef: 'BC-9',
+      lines: [
+        { accountNumber: charge, debit: amount },
+        { accountNumber: '571', credit: amount },
+      ],
+    });
+    const post = (b: unknown, session = s.compta) =>
+      http().post('/accounting/entries').set(session.auth).send(b);
+
+    // Sous le seuil : passée aussitôt.
+    const small = await post(body('CA', 99_999, 'Petite caisse')).expect(201);
+    expect(small.body.reference).toMatch(/^CA-/);
+    // Au-delà du seuil, dans un journal de trésorerie ou en opérations diverses : en attente.
+    const big = await post(body('CA', 250_000, 'Sortie de caisse')).expect(201);
+    expect(big.body).toMatchObject({
+      status: 'PENDING_APPROVAL',
+      needsApproval: true,
+      reference: null,
+    });
+    const viaOd = await post(body('OD', 300_000, 'Contournement par OD')).expect(201);
+    expect(viaOd.body.status).toBe('PENDING_APPROVAL');
+    expect(
+      await prisma.accountingEntry.count({
+        where: { schoolId: f.schoolId, total: { gte: 250_000 } },
+      }),
+    ).toBe(0);
+    // Un apport en banque (aucune sortie de trésorerie) reste direct.
+    await post({
+      journal: 'BQ',
+      date: today(),
+      label: 'Apport du promoteur',
+      lines: [
+        { accountNumber: '521', debit: 500_000 },
+        { accountNumber: '101', credit: 500_000 },
+      ],
+    }).expect(201);
+
+    const pending = (
+      await http().get('/accounting/entry-requests?status=PENDING').set(s.compta.auth).expect(200)
+    ).body;
+    expect(pending).toHaveLength(2);
+    expect((await http().get('/accounting/overview').set(s.compta.auth)).body.pendingEntries).toBe(
+      2,
+    );
+    // La personne qui a saisi ne valide pas, le secrétariat non plus.
+    const self = await http()
+      .post(`/accounting/entry-requests/${big.body.id}/approve`)
+      .set(s.compta.auth)
+      .expect(403);
+    expect(self.body.message).toMatch(/autre personne/);
+    await http()
+      .post(`/accounting/entry-requests/${big.body.id}/approve`)
+      .set(s.secretariat.auth)
+      .expect(403);
+    const approved = await http()
+      .post(`/accounting/entry-requests/${big.body.id}/approve`)
+      .set(s.direction.auth)
+      .expect(201);
+    expect(approved.body).toMatchObject({ journal: 'CA', total: 250_000 });
+    await http()
+      .post(`/accounting/entry-requests/${big.body.id}/approve`)
+      .set(s.direction.auth)
+      .expect(409);
+    await http()
+      .post(`/accounting/entry-requests/${viaOd.body.id}/reject`)
+      .set(s.direction.auth)
+      .send({ reason: 'Pièce justificative absente' })
+      .expect(201);
+    const all = (await http().get('/accounting/entry-requests').set(s.compta.auth)).body;
+    expect(all.map((r: { status: string }) => r.status).sort()).toEqual(['APPROVED', 'REJECTED']);
+    expect(all.find((r: { status: string }) => r.status === 'APPROVED').reference).toBe(
+      approved.body.reference,
+    );
+    for (const action of [
+      'accounting.entry_requested',
+      'accounting.entry_approved',
+      'accounting.entry_rejected',
+    ])
+      expect(await prisma.auditLog.count({ where: { action } }), action).toBeGreaterThan(0);
+    await expect(
+      prisma.manualEntryRequest.update({ where: { id: viaOd.body.id }, data: { total: 1 } }),
+    ).rejects.toThrow(/tranchée/);
+    await expectIntegrity(f.schoolId);
+  });
+
+  it('la clôture attend la décision sur les écritures de trésorerie de l’exercice', async () => {
+    await enable(f.schoolId, ['accounting']);
+    const year = await http()
+      .post('/accounting/fiscal-years')
+      .set(s.compta.auth)
+      .send({ startDate: `${lastYear}-01-01`, endDate: `${lastYear}-12-31` })
+      .expect(201);
+    const req = await http()
+      .post('/accounting/entries')
+      .set(s.compta.auth)
+      .send({
+        journal: 'BQ',
+        date: `${lastYear}-11-30`,
+        label: 'Virement fournisseur',
+        lines: [
+          { accountNumber: '658', debit: 400_000 },
+          { accountNumber: '521', credit: 400_000 },
+        ],
+      })
+      .expect(201);
+    const blocked = await http()
+      .post(`/accounting/fiscal-years/${year.body.id}/close`)
+      .set(s.direction.auth)
+      .expect(409);
+    expect(blocked.body.message).toMatch(/écriture\(s\) de trésorerie/);
+    await http()
+      .post(`/accounting/entry-requests/${req.body.id}/reject`)
+      .set(s.direction.auth)
+      .send({ reason: 'Virement non effectué' })
+      .expect(201);
+    await http()
+      .post(`/accounting/fiscal-years/${year.body.id}/close`)
+      .set(s.direction.auth)
+      .expect(201);
+  });
+});
+
+describe('annulation d’une dépense', () => {
+  it('contre-passe achat et règlement, passe la dépense en « annulée », avec motif journalisé', async () => {
+    await enable(f.schoolId, ['accounting']);
+    const expense = await http()
+      .post('/accounting/expenses')
+      .set(s.compta.auth)
+      .send({
+        supplierName: 'CAMWATER',
+        date: today(),
+        label: 'Eau',
+        amount: 20_000,
+        accountNumber: '6051',
+        method: 'BANK',
+        pieceRef: 'CW-1',
+      })
+      .expect(201);
+    expect(expense.body.status).toBe('POSTED');
+    const invoice = await prisma.accountingEntry.findFirstOrThrow({
+      where: { sourceType: 'EXPENSE', sourceId: expense.body.id },
+    });
+    // Contre-passer une écriture de dépense à la main laisserait la dépense « comptabilisée ».
+    const direct = await http()
+      .post(`/accounting/entries/${invoice.id}/reverse`)
+      .set(s.compta.auth)
+      .send({ reason: 'Facture en double' })
+      .expect(409);
+    expect(direct.body.message).toMatch(/annulez la dépense/);
+
+    const cancel = (session: Session, reason: string) =>
+      http()
+        .post(`/accounting/expenses/${expense.body.id}/cancel`)
+        .set(session.auth)
+        .send({ reason });
+    await cancel(s.secretariat, 'Facture en double').expect(403);
+    await cancel(s.compta, 'Non').expect(400);
+    const done = await cancel(s.compta, 'Facture en double').expect(201);
+    expect(done.body).toMatchObject({ status: 'CANCELLED' });
+    expect(done.body.reversals).toHaveLength(2);
+    await cancel(s.direction, 'Encore une fois').expect(409);
+
+    const listed = (await http().get('/accounting/expenses').set(s.compta.auth).expect(200)).body;
+    expect(listed[0]).toMatchObject({ status: 'CANCELLED', cancelReason: 'Facture en double' });
+    expect(listed[0].cancelledBy).toBeTruthy();
+    const net = async (n: string) => {
+      const agg = await prisma.accountingLine.aggregate({
+        where: { schoolId: f.schoolId, accountNumber: n },
+        _sum: { debit: true, credit: true },
+      });
+      return (agg._sum.debit ?? 0) - (agg._sum.credit ?? 0);
+    };
+    expect(await net('6051')).toBe(0);
+    expect(await net('521')).toBe(0);
+    expect(await net('4011')).toBe(0);
+    const audit = await prisma.auditLog.findFirstOrThrow({
+      where: { action: 'accounting.expense_cancelled' },
+    });
+    expect(audit.reason).toBe('Facture en double');
+    // Une dépense annulée ne se modifie plus, même directement en base.
+    await expect(
+      prisma.expense.update({ where: { id: expense.body.id }, data: { status: 'POSTED' } }),
+    ).rejects.toThrow(/ne se modifie plus/);
+    await expect(
+      prisma.expense.update({ where: { id: expense.body.id }, data: { amount: 1 } }),
+    ).rejects.toThrow(/ne se modifient pas/);
+
+    // Une dépense en attente ne s'annule pas : elle se rejette.
+    const pending = await http()
+      .post('/accounting/expenses')
+      .set(s.compta.auth)
+      .send({
+        supplierName: 'ENEO',
+        date: today(),
+        label: 'Électricité',
+        amount: 500_000,
+        accountNumber: '6052',
+        method: 'BANK',
+        pieceRef: 'E-1',
+      })
+      .expect(201);
+    await http()
+      .post(`/accounting/expenses/${pending.body.id}/cancel`)
+      .set(s.compta.auth)
+      .send({ reason: 'Erreur de saisie' })
+      .expect(409);
+    await expectIntegrity(f.schoolId);
   });
 });
 

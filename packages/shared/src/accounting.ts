@@ -150,11 +150,14 @@ export const SYSCOHADA_CHART: readonly ChartAccount[] = [
   { number: '681', label: 'Dotations aux amortissements d’exploitation' },
 
   { number: '70', label: 'Ventes' },
+  { number: '701', label: 'Ventes de marchandises (tenues et fournitures vendues aux familles)' },
   { number: '706', label: 'Services vendus' },
   { number: '7061', label: 'Frais de scolarité' },
   { number: '7062', label: 'Frais d’inscription' },
+  { number: '7063', label: 'Transport scolaire' },
   { number: '7068', label: 'Autres frais scolaires (examens, tenues, cantine)' },
   { number: '707', label: 'Produits accessoires' },
+  { number: '7071', label: 'Pénalités de retard de la bibliothèque' },
   { number: '709', label: 'Rabais, remises et ristournes accordés' },
   { number: '7091', label: 'Remises, réductions et bourses accordées' },
   { number: '71', label: 'Subventions d’exploitation' },
@@ -329,6 +332,16 @@ export interface TuitionPosting {
   lines: EntryLine[];
 }
 
+/**
+ * Produits des recettes facturées par la scolarité pour d'autres services (comptes à faire
+ * valider par un comptable) : ventes du stock, transport scolaire, pénalités de bibliothèque.
+ */
+export const REVENUE_ACCOUNTS = {
+  stockSale: '701',
+  transport: '7063',
+  libraryFine: '7071',
+} as const;
+
 /** Frais d'inscription ou de scolarité, d'après le libellé de l'échéance. */
 export function tuitionRevenueAccount(label: string): string {
   return /inscription/i.test(label) ? ACCOUNTS.registrationRevenue : ACCOUNTS.tuitionRevenue;
@@ -349,6 +362,8 @@ export function tuitionPosting(op: {
   description: string;
   studentName: string;
   method?: PaymentMethod | null;
+  /** Compte de produit imposé d'une facture (stock, transport, bibliothèque). */
+  revenueAccount?: string | null;
 }): TuitionPosting {
   if (!Number.isSafeInteger(op.amount) || op.amount === 0)
     throw new AccountingRuleError('Montant d’opération invalide');
@@ -362,7 +377,7 @@ export function tuitionPosting(op: {
       return {
         journal: 'VT',
         label,
-        lines: [d(receivable), c(tuitionRevenueAccount(op.description))],
+        lines: [d(receivable), c(op.revenueAccount ?? tuitionRevenueAccount(op.description))],
       };
     case 'DISCOUNT':
       return { journal: 'VT', label, lines: [d(ACCOUNTS.discounts), c(receivable)] };
@@ -432,6 +447,22 @@ export function expenseNeedsApproval(amount: number, threshold: number): boolean
 }
 
 export const DEFAULT_EXPENSE_APPROVAL_THRESHOLD = 100_000;
+
+/**
+ * Sortie de trésorerie d'une écriture : total des crédits portés sur les comptes de trésorerie
+ * (classe 5 : caisse, banque, Mobile Money), quel que soit le journal choisi.
+ */
+export function treasuryOutflow(lines: readonly EntryLine[]): number {
+  return lines
+    .filter((l) => ACCOUNT_NUMBER_RE.test(l.accountNumber) && l.accountNumber.startsWith('5'))
+    .reduce((n, l) => n + l.credit, 0);
+}
+
+/** Une écriture manuelle qui fait sortir de la trésorerie passe par le seuil des dépenses. */
+export function manualEntryNeedsApproval(lines: readonly EntryLine[], threshold: number): boolean {
+  const out = treasuryOutflow(lines);
+  return out > 0 && expenseNeedsApproval(out, threshold);
+}
 
 // ---------------------------------------------------------------- Exercices
 

@@ -54,7 +54,7 @@ test('fenêtres du secrétariat et de la surveillance', async ({ page }) => {
   await page.goto('/documents');
   await page.getByRole('button', { name: 'Délivrer un document' }).click();
   const dialog = page.getByRole('dialog', { name: 'Délivrer un document' });
-  await dialog.getByLabel('Élève').fill('Ngono');
+  await dialog.getByLabel('Élève', { exact: true }).fill('Ngono');
   await expect(dialog.getByRole('button', { name: /Ngono Marie-Claire/ })).toBeVisible();
   await expectAccessible(page, '/documents (délivrance)');
   await page.goto('/connexion');

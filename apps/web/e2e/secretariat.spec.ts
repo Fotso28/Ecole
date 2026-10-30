@@ -19,7 +19,7 @@ test.describe('documents administratifs', () => {
 
     await page.getByRole('button', { name: 'Délivrer un document' }).click();
     const dialog = page.getByRole('dialog', { name: 'Délivrer un document' });
-    await dialog.getByLabel('Élève').fill('Ngono');
+    await dialog.getByLabel('Élève', { exact: true }).fill('Ngono');
     await dialog.getByRole('button', { name: /Ngono Marie-Claire/ }).click();
     await dialog.getByLabel(/Certificat de scolarité/).check();
     await expectNoHorizontalOverflow(page);
@@ -117,7 +117,7 @@ test('registre des incidents : saisie, filtres et statistiques', async ({ page }
   await expect(page.getByRole('heading', { name: 'Registre des incidents' })).toBeVisible();
   await page.getByRole('button', { name: 'Signaler un incident' }).click();
   const dialog = page.getByRole('dialog', { name: 'Signaler un incident' });
-  await dialog.getByLabel('Élève').fill('Ngono');
+  await dialog.getByLabel('Élève', { exact: true }).fill('Ngono');
   await dialog.getByRole('button', { name: /Ngono Marie-Claire/ }).click();
   await dialog.getByLabel('Type d’incident').selectOption({ label: 'Violence' });
   await dialog.getByLabel('Description').fill(description);
@@ -179,7 +179,7 @@ test('assistant de rentrée : nouvelle année, structure reprise, réinscription
   const card = page.locator('section').filter({
     has: page.getByRole('heading', { name: `${className} · 2026-2027` }),
   });
-  await expect(card.getByText('À décider')).toBeVisible();
+  await expect(card.getByText(/À décider$/)).toBeVisible();
   const groups = card.getByRole('radiogroup');
   const count = await groups.count();
   expect(count).toBeGreaterThan(2);

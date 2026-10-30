@@ -1,3 +1,4 @@
+import path from 'node:path';
 import type { NextConfig } from 'next';
 
 const securityHeaders = [
@@ -13,6 +14,8 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   devIndicators: false,
   transpilePackages: ['@ecole/shared'],
+  // Monorepo : inclure les paquets de l'espace de travail dans la sortie autonome.
+  outputFileTracingRoot: path.join(__dirname, '../../'),
   // En développement, /api est relayé vers l'API ; en production, Nginx s'en charge.
   async rewrites() {
     return [

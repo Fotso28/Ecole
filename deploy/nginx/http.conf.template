@@ -1,0 +1,9 @@
+limit_req_zone $binary_remote_addr zone=ecole_api:10m rate=20r/s;
+limit_req_zone $binary_remote_addr zone=ecole_auth:10m rate=10r/m;
+limit_req_status 429;
+
+server {
+  listen 80;
+  server_name ${DOMAIN};
+  include /etc/nginx/snippets/ecole-locations.conf;
+}

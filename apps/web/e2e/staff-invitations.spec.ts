@@ -13,27 +13,28 @@ async function switchUser(page: Page, email: string) {
  * Compte d'une autre école (un par projet de test et par exécution), avec le mot de passe des
  * comptes de démonstration.
  */
-function otherSchoolAccount(project: string): string {
+function otherSchoolAccount(project: string): { email: string; lastName: string } {
   const tag = `${project}-${Date.now()}`;
+  const lastName = `Essomba${Date.now() % 100000}`;
   const email = `invitee-${tag}@autre.cm`;
   execSync(`psql "${E2E_DATABASE_URL}" -At -v ON_ERROR_STOP=1`, {
     input: `
       INSERT INTO "School" ("id", "name", "slug", "city", "matriculePrefix", "updatedAt")
         VALUES ('school-${tag}', 'Lycée invité ${tag}', 'lycee-${tag}', 'Douala', 'LI', now());
       INSERT INTO "User" ("id", "email", "phone", "passwordHash", "firstName", "lastName", "updatedAt")
-        SELECT 'user-${tag}', '${email}', NULL, "passwordHash", 'Béatrice', 'Essomba', now()
+        SELECT 'user-${tag}', '${email}', NULL, "passwordHash", 'Béatrice', '${lastName}', now()
         FROM "User" WHERE "email" = 'direction@demo.cm';
       INSERT INTO "Membership" ("id", "userId", "schoolId", "roles")
         VALUES ('membership-${tag}', 'user-${tag}', 'school-${tag}', '{TEACHER}');`,
     stdio: ['pipe', 'pipe', 'pipe'],
   });
-  return email;
+  return { email, lastName };
 }
 
 test('la direction invite le compte d’une autre école, qui accepte à sa connexion', async ({
   page,
 }, info) => {
-  const email = otherSchoolAccount(info.project.name);
+  const { email, lastName } = otherSchoolAccount(info.project.name);
   await loginStaff(page, 'direction@demo.cm');
   await navigate(page, info, 'Personnel');
   await page.getByRole('button', { name: 'Ajouter' }).click();
@@ -48,7 +49,7 @@ test('la direction invite le compte d’une autre école, qui accepte à sa conn
   // Rien du compte existant n'apparaît : seule l'adresse saisie est rappelée.
   const pending = page.getByRole('list', { name: 'Invitations en attente' });
   await expect(pending).toContainText(email);
-  await expect(page.getByText('Essomba')).toHaveCount(0);
+  await expect(page.getByText(lastName)).toHaveCount(0);
   await expectNoHorizontalOverflow(page);
 
   await switchUser(page, email);

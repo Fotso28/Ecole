@@ -219,7 +219,7 @@ export default function StaffPage() {
           <h2 id="invitations-titre" className="text-base font-bold">
             Invitations en attente
           </h2>
-          <ul className="grid gap-2 md:grid-cols-2" aria-label="Invitations en attente">
+          <ul className="grid grid-cols-1 gap-2 md:grid-cols-2" aria-label="Invitations en attente">
             {invitations.data.map((i) => (
               <li key={i.id}>
                 <Card className="flex flex-col gap-2 p-3 lg:p-4">

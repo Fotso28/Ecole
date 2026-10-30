@@ -158,11 +158,13 @@ export class HttpMobileMoneyProvider implements MobileMoneyProvider {
       signal: AbortSignal.timeout(15000),
     });
     if (!res.ok) throw new Error(`Passerelle Mobile Money : HTTP ${res.status}`);
-    const body = (await res.json()) as { status?: string; amount?: number };
-    return {
-      status: body.status === 'SUCCESS' || body.status === 'FAILED' ? body.status : 'PENDING',
-      amount: typeof body.amount === 'number' ? body.amount : undefined,
-    };
+    const body = (await res.json()) as { status?: string; amount?: unknown };
+    const amount = typeof body.amount === 'number' ? body.amount : undefined;
+    // Un succès sans montant ne peut pas être rapproché du paiement demandé : il reste en attente
+    // (et expire au bout de 24 h) plutôt que d'être crédité au montant que nous avions demandé.
+    if (body.status === 'SUCCESS')
+      return amount === undefined ? { status: 'PENDING' } : { status: 'SUCCESS', amount };
+    return { status: body.status === 'FAILED' ? 'FAILED' : 'PENDING', amount };
   }
 }
 

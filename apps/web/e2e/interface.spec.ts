@@ -200,6 +200,10 @@ test.describe('hors connexion', () => {
     await expect(page).toHaveURL(/\/portail\/notes$/);
     await page.waitForLoadState('networkidle');
     await openPortalTab(page, 'Accueil');
+    // La navigation est faite côté client : « networkidle » peut être atteint avant qu'elle ne
+    // commence, et la page rechargée hors connexion serait encore celle des notes.
+    await expect(page).toHaveURL(/\/portail$/);
+    await expect(page.getByText('Reste à payer').first()).toBeVisible();
     await page.waitForLoadState('networkidle');
 
     await context.setOffline(true);

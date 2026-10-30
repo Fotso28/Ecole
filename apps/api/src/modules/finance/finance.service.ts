@@ -1042,8 +1042,8 @@ export class FinanceService {
           lt: filters.to ? toDbDate(addDays(filters.to, 1)) : undefined,
         },
       },
+      // Export comptable : toute la période, sans troncature silencieuse.
       orderBy: { createdAt: 'desc' },
-      take: 500,
       include: { receipt: true },
     });
     const students = await this.db.student.findMany({

@@ -3,7 +3,16 @@ import { computePayslip, DEFAULT_PAYROLL_SCALE } from '@ecole/shared';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { seedSchool, sessions, type SchoolFixture } from './fixtures';
-import { createStaff, createTestApp, login, prisma, resetDb, type Session } from './helpers';
+import {
+  createPlatformAdmin,
+  createStaff,
+  createTestApp,
+  login,
+  loginPlatformAdmin,
+  prisma,
+  resetDb,
+  type Session,
+} from './helpers';
 
 let app: INestApplication;
 let f: SchoolFixture;
@@ -610,6 +619,42 @@ describe('paie mensuelle', () => {
       .send({ reason: 'Moi-même' })
       .expect(403);
     await http().post('/hr/payroll/2026-10/validate').set(director2.auth).expect(201);
+  });
+
+  it('refuse la validation à qui a modifié un bulletin de la paie', async () => {
+    const computed = await http()
+      .post('/hr/payroll/2026-10/compute')
+      .set(s.compta.auth)
+      .expect(201);
+    // La direction s'ajoute une prime sur un bulletin, puis la comptabilité soumet sans la voir.
+    await http()
+      .put(`/hr/payroll/2026-10/payslips/${slipOf(computed.body, teacherFile).id}`)
+      .set(s.direction.auth)
+      .send({
+        elements: [{ kind: 'BONUS', label: 'Prime exceptionnelle', amount: 90_000, taxable: true }],
+        absenceDays: 0,
+      })
+      .expect(200);
+    await http().post('/hr/payroll/2026-10/submit').set(s.compta.auth).expect(201);
+    const res = await http().post('/hr/payroll/2026-10/validate').set(s.direction.auth).expect(403);
+    expect(res.body.message).toContain('autre personne');
+    await http().post('/hr/payroll/2026-10/validate').set(director2.auth).expect(201);
+  });
+
+  it('refuse les bulletins imprimés en accès exceptionnel (numéros CNPS en clair)', async () => {
+    await http().post('/hr/payroll/2026-10/compute').set(s.compta.auth).expect(201);
+    await http().post('/hr/payroll/2026-10/submit').set(s.compta.auth).expect(201);
+    await http().post('/hr/payroll/2026-10/validate').set(s.direction.auth).expect(201);
+    await createPlatformAdmin();
+    const admin = await loginPlatformAdmin(app);
+    const access = await http()
+      .post(`/platform/schools/${f.schoolId}/access`)
+      .set(admin.auth)
+      .send({ reason: 'Assistance demandée par la direction' })
+      .expect(201);
+    const bg = { Authorization: `Bearer ${access.body.accessToken}` };
+    await http().get('/hr/payroll/2026-10').set(bg).expect(200);
+    await http().get('/hr/payroll/2026-10/payslips.pdf').set(bg).expect(403);
   });
 
   it('applique le barème daté en vigueur pour le mois', async () => {

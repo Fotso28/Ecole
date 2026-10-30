@@ -28,6 +28,7 @@
     "zod": "3.25.76"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.11.0",
     "@playwright/test": "1.63.0",
     "@tailwindcss/postcss": "4.3.3",
     "@types/node": "22.20.5",

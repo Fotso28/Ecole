@@ -1646,6 +1646,32 @@ model AdvanceRepayment {
   @@unique([advanceId, payslipId])
 }
 
+enum StaffPayoutKind {
+  PAYROLL
+  ADVANCE
+}
+
+/// Versement au personnel (salaires d'une paie validée ou avance accordée), en ajout seul :
+/// un déclencheur interdit UPDATE et DELETE. Une seule fois par paie ou par avance.
+model StaffPayout {
+  id              String          @id @default(cuid())
+  schoolId        String
+  kind            StaffPayoutKind
+  /// Paie (`PayrollRun.id`) ou avance (`SalaryAdvance.id`) versée.
+  sourceId        String
+  date            DateTime        @db.Date
+  method          PaymentMethod
+  reference       String?
+  amount          Int
+  paidById        String
+  /// Vrai si la personne qui verse est aussi celle qui a validé (école sans autre personne habilitée).
+  sameAsValidator Boolean         @default(false)
+  createdAt       DateTime        @default(now())
+
+  @@unique([schoolId, kind, sourceId])
+  @@index([schoolId, date])
+}
+
 /// Barème de paie daté (cotisations et impôts), paramétrable par école ; jamais modifié.
 model PayrollScale {
   id            String   @id @default(cuid())

@@ -20,6 +20,7 @@ import {
   expenseCreateSchema,
   expenseNeedsApproval,
   expensePostings,
+  formatPayrollMonth,
   fiscalYearsOverlap,
   incomeStatement,
   isPostable,
@@ -27,12 +28,18 @@ import {
   JOURNAL_LABELS,
   manualEntrySchema,
   PAYMENT_METHOD_ACCOUNTS,
+  payrollMonthBounds,
+  payrollPosting,
+  staffPayoutPosting,
+  stockPurchasePosting,
   SYSCOHADA_CHART,
   tuitionPosting,
   validateSubAccount,
   type AccountBalance,
   type EntryLine,
   type JournalCode,
+  type PayElement,
+  type PayslipResult,
 } from '@ecole/shared';
 import { FiscalYear, Prisma } from '@prisma/client';
 import { z } from 'zod';
@@ -54,6 +61,8 @@ export interface PostingInput {
   /** Exercice imposé (à-nouveaux) ; sinon celui qui couvre la date. */
   fiscalYear?: FiscalYear;
 }
+
+export type OperationType = 'PAYROLL' | 'PAYROLL_PAYMENT' | 'ADVANCE_PAYMENT' | 'STOCK_PURCHASE';
 
 const DB_MESSAGES =
   /(Exercice clôturé[^"\n]*|Écriture déséquilibrée[^"\n]*|Numérotation du journal[^"\n]*|La date de l'écriture[^"\n]*|Compte inconnu[^"\n]*|Les écritures comptables[^"\n]*|Un exercice[^"\n]*|Une dépense[^"\n]*|Les données d'une dépense[^"\n]*)/;
@@ -302,8 +311,8 @@ export class AccountingService {
    */
   async closeFiscalYear(id: string) {
     await this.ensureSetup();
-    // Dernières opérations de scolarité passées avant la clôture.
-    await this.syncTuition();
+    // Dernières opérations (scolarité, paie, versements, achats) passées avant la clôture.
+    await this.syncAll();
     return this.run(async (tx) => {
       await this.lockSchool(tx, 'fiscal-years');
       const locked = await tx.$queryRaw<
@@ -472,6 +481,14 @@ export class AccountingService {
       if (original.sourceType === 'LEDGER')
         throw new ConflictException(
           'Écriture automatique de la scolarité : corrigez l’opération dans la scolarité (annulation ou remise)',
+        );
+      if (original.sourceType === 'PAYROLL')
+        throw new ConflictException(
+          'Écriture automatique de la paie : une paie validée est figée, corrigez par un rappel sur la paie suivante',
+        );
+      if (original.sourceType === 'STOCK_PURCHASE')
+        throw new ConflictException(
+          'Écriture automatique du stock : corrigez le mouvement d’achat dans le stock',
         );
       if (original.sourceType === 'CARRY_FORWARD')
         throw new ConflictException('Le report à nouveau ne se contre-passe pas');
@@ -713,11 +730,266 @@ export class AccountingService {
     let posted = 0;
     let failed = 0;
     for (const s of schools) {
-      const r = await runAsSystem('job:accounting', () => this.syncTuition(), s.id);
+      const r = await runAsSystem('job:accounting', () => this.syncAll(), s.id);
       posted += r.posted;
       failed += r.failed;
     }
     return { schools: schools.length, posted, failed };
+  }
+
+  // ---------------------------------------------------------------- Paie, versements, achats
+
+  /** Scolarité puis paie, versements au personnel et achats de stock. */
+  async syncAll(): Promise<{ posted: number; pending: number; failed: number }> {
+    const t = await this.syncTuition();
+    const o = await this.syncOperations();
+    return {
+      posted: t.posted + o.posted,
+      failed: t.failed + o.failed,
+      pending: t.pending + o.pending,
+    };
+  }
+
+  /** Paies validées, versements et achats de stock pas encore comptabilisés. */
+  private operationsQuery(limit: number | null) {
+    const schoolId = currentSchoolId();
+    const notPosted = (type: string, column: Prisma.Sql) => Prisma.sql`NOT EXISTS (
+      SELECT 1 FROM "AccountingEntry" a
+      WHERE a."schoolId" = ${schoolId} AND a."sourceType" = ${type} AND a."sourceId" = ${column})`;
+    return Prisma.sql`
+      SELECT 'PAYROLL' AS "type", r."id", r."validatedAt" AS "at" FROM "PayrollRun" r
+      WHERE r."schoolId" = ${schoolId} AND r."status" = 'VALIDATED'
+        AND ${notPosted('PAYROLL', Prisma.sql`r."id"`)}
+      UNION ALL
+      SELECT CASE WHEN p."kind" = 'PAYROLL' THEN 'PAYROLL_PAYMENT' ELSE 'ADVANCE_PAYMENT' END,
+        p."id", p."createdAt" FROM "StaffPayout" p
+      WHERE p."schoolId" = ${schoolId} AND p."amount" > 0
+        AND ${notPosted('PAYROLL_PAYMENT', Prisma.sql`p."id"`)}
+        AND ${notPosted('ADVANCE_PAYMENT', Prisma.sql`p."id"`)}
+      UNION ALL
+      SELECT 'STOCK_PURCHASE', m."id", m."createdAt" FROM "StockMovement" m
+      LEFT JOIN "StockMovement" o ON o."id" = m."reversesId"
+      WHERE m."schoolId" = ${schoolId}
+        AND (
+          (m."type" = 'PURCHASE' AND m."supplier" IS NOT NULL AND COALESCE(m."unitCost", 0) > 0)
+          OR (m."type" = 'REVERSAL' AND o."type" = 'PURCHASE' AND o."supplier" IS NOT NULL
+              AND COALESCE(o."unitCost", 0) > 0)
+        )
+        AND ${notPosted('STOCK_PURCHASE', Prisma.sql`m."id"`)}
+      ORDER BY "at", "id"
+      ${limit === null ? Prisma.empty : Prisma.sql`LIMIT ${limit}`}`;
+  }
+
+  async pendingOperationsCount(): Promise<number> {
+    const rows = await this.db.$queryRaw<
+      { n: number }[]
+    >`SELECT COUNT(*)::int AS n FROM (${this.operationsQuery(null)}) q`;
+    return Number(rows[0]?.n ?? 0);
+  }
+
+  /**
+   * Comptabilise les paies validées (charges, organismes, avances retenues, net dû), les versements
+   * de salaires et d'avances, et les achats de stock auprès d'un fournisseur, historique compris.
+   * Idempotent comme la scolarité : clé unique (type, identifiant) et verrou par école.
+   * Les ventes de stock ne sont pas reprises ici : elles sont facturées, donc comptabilisées, par
+   * la scolarité.
+   */
+  async syncOperations(limit = 500): Promise<{ posted: number; pending: number; failed: number }> {
+    await this.ensureSetup();
+    const ops = await this.db.$queryRaw<
+      { type: OperationType; id: string }[]
+    >`${this.operationsQuery(limit)}`;
+    let posted = 0;
+    let failed = 0;
+    let waiting = 0;
+    for (const op of ops) {
+      try {
+        const done = await this.db.$transaction((tx) => this.postOperation(tx, op.type, op.id), {
+          timeout: 30_000,
+        });
+        if (done === 'posted') posted++;
+        if (done === 'waiting') waiting++;
+      } catch (e) {
+        failed++;
+        this.logger.error(
+          `Écriture automatique impossible (${op.type} ${op.id}) : ${e instanceof Error ? e.message : e}`,
+        );
+      }
+    }
+    if (posted > 0)
+      await this.audit.log({
+        action: 'accounting.operations_synced',
+        entity: 'AccountingEntry',
+        after: { posted, failed, waiting },
+      });
+    return { posted, failed, pending: await this.pendingOperationsCount() };
+  }
+
+  /**
+   * Passe l'écriture d'une opération si elle ne l'est pas déjà, sous verrou.
+   * - mode automatique : période clôturée → premier exercice ouvert suivant ;
+   * - mode strict (action saisie à l'instant) : une période clôturée est refusée.
+   */
+  async postOperation(
+    tx: Tx,
+    type: OperationType,
+    id: string,
+    strict = false,
+  ): Promise<'posted' | 'skipped' | 'waiting'> {
+    await this.lockSchool(tx, 'operations-sync');
+    const exists = await tx.accountingEntry.findFirst({
+      where: { sourceType: type, sourceId: id },
+      select: { id: true },
+    });
+    if (exists) return 'skipped';
+    const built = await this.buildOperation(tx, type, id);
+    if (!built) return 'skipped';
+    let date = built.date;
+    let label = built.posting.label;
+    let year: FiscalYear;
+    if (strict) {
+      year = await this.fiscalYearForDate(tx, date);
+    } else {
+      const target = await this.fiscalYearForAutomatic(tx, date);
+      if (!target) return 'waiting';
+      if (target.late) label = `${label} (opération du ${frDate(date)}, exercice clos)`;
+      date = target.date;
+      year = target.year;
+    }
+    await this.post(tx, {
+      journal: built.posting.journal,
+      date,
+      label,
+      lines: built.posting.lines,
+      pieceRef: built.pieceRef,
+      sourceType: type,
+      sourceId: id,
+      fiscalYear: year,
+    });
+    return 'posted';
+  }
+
+  private async buildOperation(tx: Tx, type: OperationType, id: string) {
+    switch (type) {
+      case 'PAYROLL': {
+        const run = await tx.payrollRun.findUniqueOrThrow({
+          where: { id },
+          include: { payslips: true },
+        });
+        if (run.status !== 'VALIDATED') return null;
+        const slips = run.payslips.map((p) => {
+          const r = p.result as unknown as PayslipResult;
+          const elements = p.elements as unknown as PayElement[];
+          return {
+            gross: r.gross,
+            allowances: elements
+              .filter((e) => e.kind === 'ALLOWANCE')
+              .reduce((n, e) => n + e.amount, 0),
+            employee: {
+              cnps: r.employee.cnps,
+              housing: r.employee.housing,
+              irpp: r.employee.irpp,
+              cac: r.employee.cac,
+              audiovisual: r.employee.audiovisual,
+              communal: r.employee.communal,
+            },
+            employer: {
+              pension: r.employer.pension,
+              family: r.employer.family,
+              accident: r.employer.accident,
+              housing: r.employer.housing,
+              employment: r.employer.employment,
+            },
+            advanceDeduction: r.advanceDeduction,
+            net: r.net,
+          };
+        });
+        const posting = payrollPosting(run.month, slips);
+        return {
+          posting,
+          date: payrollMonthBounds(run.month).last,
+          pieceRef: `PAIE-${run.month}`,
+        };
+      }
+      case 'PAYROLL_PAYMENT':
+      case 'ADVANCE_PAYMENT': {
+        const payout = await tx.staffPayout.findUniqueOrThrow({ where: { id } });
+        if (payout.amount <= 0) return null;
+        let label: string;
+        if (payout.kind === 'PAYROLL') {
+          const run = await tx.payrollRun.findUnique({
+            where: { id: payout.sourceId },
+            select: { month: true },
+          });
+          label = `Versement des salaires de ${run ? formatPayrollMonth(run.month) : ''}`;
+        } else {
+          const advance = await tx.salaryAdvance.findUnique({
+            where: { id: payout.sourceId },
+            include: { employee: true },
+          });
+          const user = advance
+            ? await tx.user.findUnique({
+                where: { id: advance.employee.userId },
+                select: { firstName: true, lastName: true },
+              })
+            : null;
+          label = `Avance sur salaire · ${user ? `${user.lastName} ${user.firstName}` : 'Personnel'}`;
+        }
+        return {
+          posting: staffPayoutPosting({
+            kind: payout.kind,
+            amount: payout.amount,
+            method: payout.method,
+            label,
+          }),
+          date: fromDbDate(payout.date),
+          pieceRef: payout.reference,
+        };
+      }
+      case 'STOCK_PURCHASE': {
+        const m = await tx.stockMovement.findUniqueOrThrow({
+          where: { id },
+          include: { item: true },
+        });
+        const original = m.reversesId
+          ? await tx.stockMovement.findUniqueOrThrow({ where: { id: m.reversesId } })
+          : m;
+        const unitCost = original.unitCost ?? 0;
+        if (original.type !== 'PURCHASE' || !original.supplier || unitCost <= 0) return null;
+        const size = m.size ? ` (${m.size})` : '';
+        const what = `${m.item.name}${size} × ${Math.abs(m.quantity)} · ${original.supplier}`;
+        return {
+          posting: stockPurchasePosting({
+            category: m.item.category,
+            quantity: m.quantity,
+            unitCost,
+            label: m.reversesId ? `Correction d’achat : ${what}` : `Achat ${what}`,
+          }),
+          date: todayInCameroon(m.createdAt),
+          pieceRef: original.reference,
+        };
+      }
+    }
+  }
+
+  /** Refuse une opération datée dans un exercice clôturé (avant tout enregistrement). */
+  async assertPeriodOpen(date: string, tx?: Tx): Promise<void> {
+    const covering = await (tx ?? this.db).fiscalYear.findFirst({
+      where: { startDate: { lte: toDbDate(date) }, endDate: { gte: toDbDate(date) } },
+    });
+    if (covering && covering.status !== 'OPEN')
+      throw new ConflictException(
+        `Exercice clôturé : aucune opération n’est possible au ${frDate(date)}`,
+      );
+  }
+
+  /** Vrai si l'école a activé la comptabilité générale. */
+  async enabled(): Promise<boolean> {
+    const school = await this.db.school.findUnique({
+      where: { id: currentSchoolId() },
+      select: { modules: true },
+    });
+    return school?.modules.includes('accounting') ?? false;
   }
 
   // ---------------------------------------------------------------- Dépenses
@@ -988,8 +1260,9 @@ export class AccountingService {
       label: SYSCOHADA_CHART.find((a) => a.number === number)?.label ?? number,
       balance: balances.find((b) => b.accountNumber === number)?.balance ?? 0,
     }));
-    const [pendingTuition, pendingExpenses, settings] = await Promise.all([
+    const [pendingTuition, pendingOperations, pendingExpenses, settings] = await Promise.all([
       this.pendingTuitionCount(),
+      this.pendingOperationsCount(),
       this.db.expense.count({ where: { status: 'PENDING_APPROVAL' } }),
       this.getSettings(),
     ]);
@@ -1002,6 +1275,7 @@ export class AccountingService {
       charges: is.totalCharges,
       result: is.result,
       pendingTuition,
+      pendingOperations,
       pendingExpenses,
       ...settings,
     };

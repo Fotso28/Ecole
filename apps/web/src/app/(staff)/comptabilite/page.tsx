@@ -127,8 +127,8 @@ export default function AccountingPage() {
             />
             <Stat
               label="En attente"
-              value={o!.pendingTuition + o!.pendingExpenses}
-              hint={`${plural(o!.pendingTuition, 'opération', 'opérations')} de scolarité, ${plural(o!.pendingExpenses, 'dépense', 'dépenses')} à valider`}
+              value={o!.pendingTuition + o!.pendingOperations + o!.pendingExpenses}
+              hint={`${plural(o!.pendingTuition, 'opération', 'opérations')} de scolarité, ${plural(o!.pendingOperations, 'opération', 'opérations')} de paie ou de stock, ${plural(o!.pendingExpenses, 'dépense', 'dépenses')} à valider`}
             />
           </div>
           <div className="grid gap-4 lg:grid-cols-2">

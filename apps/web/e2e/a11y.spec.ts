@@ -108,6 +108,18 @@ test('dossier du personnel et fenêtres du module RH', async ({ page }) => {
   await page.getByRole('button', { name: 'Nouvelle version' }).click();
   await expect(page.getByRole('dialog', { name: 'Nouvelle version du barème' })).toBeVisible();
   await expectAccessible(page, '/rh/baremes (nouvelle version)');
+  // Paie validée du jeu de démonstration (deux mois plus tôt) : fenêtre de versement.
+  await page.goto('/rh/paie');
+  const now = new Date(Date.now() + 3_600_000);
+  const demoMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 2, 1))
+    .toISOString()
+    .slice(0, 7);
+  await page.getByLabel('Mois de paie').selectOption(demoMonth);
+  await expect(page.getByText('Validée', { exact: true })).toBeVisible();
+  await expectAccessible(page, '/rh/paie (paie validée)');
+  await page.getByRole('button', { name: 'Marquer comme versée' }).click();
+  await expect(page.getByRole('dialog', { name: 'Marquer la paie comme versée' })).toBeVisible();
+  await expectAccessible(page, '/rh/paie (versement)');
 });
 
 test('journal des paiements et déplacement d’un cours', async ({ page }) => {

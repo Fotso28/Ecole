@@ -41,11 +41,14 @@ export class AccountingController {
     return this.accounting.overview();
   }
 
-  /** Rattrapage immédiat des opérations de scolarité (le worker le fait aussi chaque minute). */
+  /**
+   * Rattrapage immédiat : scolarité, paie, versements au personnel et achats de stock (le worker
+   * le fait aussi chaque minute).
+   */
   @RequirePermissions('accounting.write')
   @Post('sync')
   sync() {
-    return this.accounting.syncTuition();
+    return this.accounting.syncAll();
   }
 
   @RequirePermissions('accounting.read')

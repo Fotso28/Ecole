@@ -105,6 +105,7 @@ async function main(): Promise<void> {
   const { TransportService } = await import('./modules/transport/transport.service');
   const { LibraryService } = await import('./modules/library/library.service');
   const { StockService } = await import('./modules/library/stock.service');
+  const { PayrollService } = await import('./modules/hr/payroll.service');
   const app = await NestFactory.createApplicationContext(AppModule, { logger: ['error', 'warn'] });
   const students = app.get(StudentsService);
   const finance = app.get(FinanceService);
@@ -672,6 +673,11 @@ async function main(): Promise<void> {
     ],
     ['prof.histoire@demo.cm', 'Vacataire d’histoire-géographie', 'HOURLY', 3000, 'CASH', {}],
   ];
+  // Paie validée de démonstration : deux mois avant le mois courant, contrats commencés avant.
+  const [ty, tm] = today.slice(0, 7).split('-').map(Number) as [number, number];
+  const demoPayrollMonth = new Date(Date.UTC(ty, tm - 3, 1)).toISOString().slice(0, 7);
+  const contractStart =
+    `${demoPayrollMonth}-01` < '2026-09-01' ? `${demoPayrollMonth}-01` : '2026-09-01';
   const hrFiles: Record<string, string> = {};
   for (const [email, position, type, amount, payoutMethod, sensitive] of hrDefs) {
     const file = await base.employeeFile.create({
@@ -679,7 +685,7 @@ async function main(): Promise<void> {
         schoolId,
         userId: staff[email] ?? '',
         position,
-        hireDate: toDbDate('2026-09-01'),
+        hireDate: toDbDate(contractStart),
         diplomas: email.startsWith('prof')
           ? [
               {
@@ -701,7 +707,7 @@ async function main(): Promise<void> {
         schoolId,
         employeeId: file.id,
         type,
-        startDate: toDbDate('2026-09-01'),
+        startDate: toDbDate(contractStart),
         endDate: type === 'CDD' ? toDbDate(addDays(today, 20)) : null,
         baseSalary: type === 'HOURLY' ? null : amount,
         hourlyRate: type === 'HOURLY' ? amount : null,
@@ -852,6 +858,16 @@ async function main(): Promise<void> {
       reason: 'Dotation de la salle des professeurs',
     });
   });
+
+  // Paie validée (préparée par la comptabilité, validée par la direction), pas encore versée,
+  // puis écritures comptables de la paie et des achats de stock.
+  const payroll = app.get(PayrollService);
+  await runInContext(accountantCtx, async () => {
+    await payroll.computeMonth(demoPayrollMonth);
+    await payroll.submit(demoPayrollMonth);
+  });
+  await runInContext(directionCtx, () => payroll.validate(demoPayrollMonth));
+  await runAsSystem('seed:accounting', () => app.get(AccountingService).syncOperations(), schoolId);
 
   // Les SMS générés par le jeu de démonstration ne doivent pas partir.
   await base.notificationOutbox.updateMany({

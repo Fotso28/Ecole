@@ -63,6 +63,8 @@ export interface AccountingOverview {
   charges: number;
   result: number;
   pendingTuition: number;
+  /** Paies validées, versements au personnel et achats de stock pas encore comptabilisés. */
+  pendingOperations: number;
   pendingExpenses: number;
   expenseApprovalThreshold: number;
 }

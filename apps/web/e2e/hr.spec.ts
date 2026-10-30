@@ -70,6 +70,22 @@ test('dossier du personnel, données sensibles, heures de cours et avance', asyn
     lessons.getByRole('listitem').first().getByText('Absence non justifiée'),
   ).toBeVisible();
   await expectNoHorizontalOverflow(page);
+
+  // Versement de l'avance accordée par la comptabilité (une seule fois : base partagée).
+  await navigate(page, info, 'Avances sur salaire');
+  const accorded = visibleItem(page, 'Eyenga Brigitte');
+  const pay = accorded.getByRole('button', { name: /Verser/ });
+  if (await pay.count()) {
+    await pay.click();
+    const sheet = page.getByRole('dialog', { name: 'Versement de l’avance' });
+    await sheet.getByLabel('Mode de versement').selectOption('CASH');
+    await sheet.getByLabel(/Référence/).fill('BC-0001');
+    await expectNoHorizontalOverflow(page);
+    await sheet.getByRole('button', { name: 'Enregistrer le versement' }).click();
+    await expect(page.getByText('Avance versée')).toBeVisible();
+  }
+  await expect(accorded.getByText(/Versée le .*Caisse \(espèces\)/)).toBeVisible();
+  await expectNoHorizontalOverflow(page);
 });
 
 test('paie : préparation par la comptabilité, validation par la direction, exports', async ({
@@ -132,5 +148,25 @@ test('paie : préparation par la comptabilité, validation par la direction, exp
   await page.getByRole('link', { name: 'Barèmes' }).click();
   await expect(page.getByRole('heading', { name: 'Barèmes de paie', level: 1 })).toBeVisible();
   await expect(page.getByText(/à vérifier par un comptable/).first()).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+  await logout(page);
+
+  // Versement des salaires : enregistré par la comptabilité, pas par la direction qui a validé.
+  await loginStaff(page, 'compta@demo.cm');
+  await navigate(page, info, 'Paie');
+  await page.getByLabel('Mois de paie').selectOption(month);
+  await expect(page.getByText('À verser', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Marquer comme versée' }).click();
+  const payout = page.getByRole('dialog', { name: 'Marquer la paie comme versée' });
+  await payout.getByLabel('Mode de versement').selectOption('BANK');
+  await payout.getByLabel(/Référence/).fill(`VIR-${month}`);
+  await expectNoHorizontalOverflow(page);
+  await payout.getByRole('button', { name: 'Enregistrer le versement' }).click();
+  await expect(page.getByText('Paie marquée comme versée')).toBeVisible();
+  await expect(page.getByText('Versée', { exact: true })).toBeVisible();
+  await expect(
+    page.getByText(new RegExp(`réf\\. VIR-${month}.*écriture BQ-\\d{4}-\\d{6}`)),
+  ).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Marquer comme versée' })).toHaveCount(0);
   await expectNoHorizontalOverflow(page);
 });

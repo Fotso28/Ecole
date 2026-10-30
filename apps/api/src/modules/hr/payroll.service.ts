@@ -14,6 +14,7 @@ import {
   DEFAULT_PAYROLL_SCALE,
   daysInMonth,
   formatPayrollMonth,
+  hasPermission,
   payForMinutes,
   payrollMonthBounds,
   prorateMonthly,
@@ -23,13 +24,16 @@ import {
   type PayrollScale,
   type payrollScaleSchema,
   type PayslipResult,
+  type StaffPayoutKind,
+  type staffPayoutSchema,
 } from '@ecole/shared';
-import type { EmploymentContract, Payslip, Prisma } from '@prisma/client';
+import { Prisma, type EmploymentContract, type Payslip } from '@prisma/client';
 import { z } from 'zod';
 import { AuditService } from '../../common/audit.service';
 import { currentSchoolId, staffContext } from '../../common/context';
 import { fromDbDate, toDbDate } from '../../common/dates';
 import { Db, InjectDb, Tx } from '../../common/prisma';
+import { AccountingService, translateAccountingError } from '../accounting/accounting.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { decryptSensitive } from './employees.service';
 import { HoursService, type MonthTotals } from './hours.service';
@@ -58,6 +62,19 @@ export interface PayslipInputs {
   advanceAllocations: { id: string; amount: number }[];
 }
 
+interface PayoutView {
+  id: string;
+  date: string;
+  method: string;
+  reference: string | null;
+  amount: number;
+  paidById: string;
+  paidBy: string | null;
+  paidAt: Date;
+  sameAsValidator: boolean;
+  entry: string | null;
+}
+
 const payrollUserSelect = { id: true, firstName: true, lastName: true } as const;
 
 @Injectable()
@@ -67,6 +84,7 @@ export class PayrollService {
     private readonly audit: AuditService,
     private readonly hours: HoursService,
     private readonly notifications: NotificationsService,
+    private readonly accounting: AccountingService,
   ) {}
 
   // -------------------------------------------------------------------------------------------
@@ -130,6 +148,10 @@ export class PayrollService {
       select: payrollUserSelect,
     });
     const byId = new Map(users.map((u) => [u.id, u]));
+    const payouts = await this.payoutsFor(
+      'ADVANCE',
+      rows.map((r) => r.id),
+    );
     return rows.map((a) => {
       const u = byId.get(a.employee.userId);
       const repaid = a.repayments.reduce((s, r) => s + r.amount, 0);
@@ -147,9 +169,11 @@ export class PayrollService {
         repaid,
         remaining: a.amount - repaid,
         requestedById: a.requestedById,
+        decidedById: a.decidedById,
         decidedAt: a.decidedAt,
         decisionNote: a.decisionNote,
         createdAt: a.createdAt,
+        payout: payouts.get(a.id) ?? null,
       };
     });
   }
@@ -311,6 +335,8 @@ export class PayrollService {
       rejectedAt: run.rejectedAt,
       rejectedBy: run.rejectedById ? (names.get(run.rejectedById) ?? null) : null,
       rejectReason: run.rejectReason,
+      validatedById: run.validatedById,
+      payout: (await this.payoutsFor('PAYROLL', [run.id])).get(run.id) ?? null,
       totals: {
         headcount: payslips.length,
         gross: payslips.reduce((s, p) => s + p.gross, 0),
@@ -694,7 +720,20 @@ export class PayrollService {
         tx,
       );
     });
+    await this.postToAccounting();
     return this.get(month);
+  }
+
+  /**
+   * Écritures de paie aussitôt après la validation si la comptabilité est activée. Un échec ne
+   * remet pas en cause la validation : le worker rattrape toute opération non comptabilisée.
+   */
+  private async postToAccounting() {
+    try {
+      if (await this.accounting.enabled()) await this.accounting.syncOperations();
+    } catch {
+      // Rattrapé par la tâche « accounting » du worker.
+    }
   }
 
   /** Renvoi à la comptabilité avec un motif. */
@@ -783,6 +822,172 @@ export class PayrollService {
       net: sum((r) => r.net),
       employerCost: sum((r) => r.employerCost),
     };
+  }
+
+  // -------------------------------------------------------------------------------------------
+  // Versements (salaires d'une paie validée, avances accordées)
+  // -------------------------------------------------------------------------------------------
+
+  private async payoutsFor(kind: StaffPayoutKind, sourceIds: string[]) {
+    if (sourceIds.length === 0) return new Map<string, PayoutView>();
+    const rows = await this.db.staffPayout.findMany({
+      where: { kind, sourceId: { in: sourceIds } },
+    });
+    const names = await this.names(rows.map((r) => r.paidById));
+    const entries = await this.db.accountingEntry.findMany({
+      where: {
+        sourceType: kind === 'PAYROLL' ? 'PAYROLL_PAYMENT' : 'ADVANCE_PAYMENT',
+        sourceId: { in: rows.map((r) => r.id) },
+      },
+      select: { sourceId: true, reference: true },
+    });
+    return new Map<string, PayoutView>(
+      rows.map((r) => [
+        r.sourceId,
+        {
+          id: r.id,
+          date: fromDbDate(r.date),
+          method: r.method,
+          reference: r.reference,
+          amount: r.amount,
+          paidById: r.paidById,
+          paidBy: names.get(r.paidById) ?? null,
+          paidAt: r.createdAt,
+          sameAsValidator: r.sameAsValidator,
+          entry: entries.find((e) => e.sourceId === r.id)?.reference ?? null,
+        },
+      ]),
+    );
+  }
+
+  /**
+   * Séparation des tâches : le versement est fait par une autre personne que celle qui a validé.
+   * Exception pour une petite école : si aucune autre personne active n'a le droit de verser, la
+   * personne qui a validé peut verser ; le versement est alors signalé et journalisé comme tel.
+   */
+  private async payerCheck(validatorId: string | null): Promise<boolean> {
+    const actor = staffContext().userId;
+    if (!validatorId || validatorId !== actor) return false;
+    const others = await this.db.membership.findMany({
+      where: { schoolId: currentSchoolId(), active: true, userId: { not: actor } },
+      select: { roles: true },
+    });
+    if (others.some((m) => hasPermission(m.roles, 'hr.payroll.pay')))
+      throw new ForbiddenException(
+        'Le versement doit être enregistré par une autre personne que celle qui a validé',
+      );
+    return true;
+  }
+
+  private async recordPayout(input: {
+    kind: StaffPayoutKind;
+    sourceId: string;
+    amount: number;
+    sameAsValidator: boolean;
+    payout: z.infer<typeof staffPayoutSchema>;
+    audit: { action: string; entity: string; after: Record<string, unknown> };
+  }) {
+    await this.accounting.assertPeriodOpen(input.payout.date);
+    const accounting = await this.accounting.enabled();
+    if (accounting) await this.accounting.ensureSetup();
+    try {
+      await this.db.$transaction(
+        async (tx) => {
+          const payout = await tx.staffPayout.create({
+            data: {
+              schoolId: currentSchoolId(),
+              kind: input.kind,
+              sourceId: input.sourceId,
+              date: toDbDate(input.payout.date),
+              method: input.payout.method,
+              reference: input.payout.reference ?? null,
+              amount: input.amount,
+              paidById: staffContext().userId,
+              sameAsValidator: input.sameAsValidator,
+            },
+          });
+          let entry: string | null = null;
+          if (accounting) {
+            // La paie elle-même d'abord (si le worker ne l'a pas encore passée), puis le versement.
+            if (input.kind === 'PAYROLL')
+              await this.accounting.postOperation(tx, 'PAYROLL', input.sourceId);
+            const type = input.kind === 'PAYROLL' ? 'PAYROLL_PAYMENT' : 'ADVANCE_PAYMENT';
+            if (input.amount > 0) {
+              await this.accounting.postOperation(tx, type, payout.id, true);
+              entry =
+                (
+                  await tx.accountingEntry.findFirst({
+                    where: { sourceType: type, sourceId: payout.id },
+                    select: { reference: true },
+                  })
+                )?.reference ?? null;
+            }
+          }
+          await this.audit.log(
+            {
+              action: input.audit.action,
+              entity: input.audit.entity,
+              entityId: input.sourceId,
+              after: {
+                ...input.audit.after,
+                ...input.payout,
+                amount: input.amount,
+                sameAsValidator: input.sameAsValidator,
+                entry,
+              },
+            },
+            tx,
+          );
+        },
+        { timeout: 30_000 },
+      );
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002')
+        throw new ConflictException('Ce versement est déjà enregistré');
+      throw translateAccountingError(e);
+    }
+  }
+
+  /** Marque une paie validée comme versée : écriture 422 au crédit de la trésorerie choisie. */
+  async markPaid(month: string, input: z.infer<typeof staffPayoutSchema>) {
+    const run = await this.requireValidated(month);
+    if (await this.db.staffPayout.findFirst({ where: { kind: 'PAYROLL', sourceId: run.id } }))
+      throw new ConflictException('Cette paie est déjà marquée comme versée');
+    const sameAsValidator = await this.payerCheck(run.validatedById);
+    const amount = run.payslips.reduce((s, p) => s + p.net, 0);
+    await this.recordPayout({
+      kind: 'PAYROLL',
+      sourceId: run.id,
+      amount,
+      sameAsValidator,
+      payout: input,
+      audit: { action: 'hr.payroll_paid', entity: 'PayrollRun', after: { month } },
+    });
+    return this.get(month);
+  }
+
+  /** Versement d'une avance accordée : écriture 421 au crédit de la trésorerie choisie. */
+  async payAdvance(id: string, input: z.infer<typeof staffPayoutSchema>) {
+    const advance = await this.db.salaryAdvance.findUnique({ where: { id } });
+    if (!advance) throw new NotFoundException('Avance introuvable');
+    if (advance.status !== 'APPROVED' && advance.status !== 'REPAID')
+      throw new ConflictException('Seule une avance accordée peut être versée');
+    if (await this.db.staffPayout.findFirst({ where: { kind: 'ADVANCE', sourceId: id } }))
+      throw new ConflictException('Cette avance est déjà versée');
+    const sameAsValidator = await this.payerCheck(advance.decidedById);
+    await this.recordPayout({
+      kind: 'ADVANCE',
+      sourceId: id,
+      amount: advance.amount,
+      sameAsValidator,
+      payout: input,
+      audit: {
+        action: 'hr.advance_paid',
+        entity: 'SalaryAdvance',
+        after: { employeeId: advance.employeeId },
+      },
+    });
+    return (await this.advances()).find((a) => a.id === id);
   }
 
   // -------------------------------------------------------------------------------------------

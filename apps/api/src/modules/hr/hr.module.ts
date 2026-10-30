@@ -27,12 +27,14 @@ import {
   payrollScaleSchema,
   payslipUpdateSchema,
   sensitiveReadSchema,
+  staffPayoutSchema,
 } from '@ecole/shared';
 import type { Response } from 'express';
 import { z } from 'zod';
 import { AuditService } from '../../common/audit.service';
 import { RequireModule, RequirePermissions } from '../../common/decorators';
 import { ZodPipe } from '../../common/zod.pipe';
+import { AccountingModule } from '../accounting/accounting.module';
 import { EmployeesService } from './employees.service';
 import { HoursService } from './hours.service';
 import { payslipsPdf, transfersCsv, transfersWorkbook } from './payroll.exports';
@@ -195,6 +197,16 @@ export class HrController {
     return this.payroll.decideAdvance(id, false, body.reason);
   }
 
+  /** Versement d'une avance accordée (comptabilité, journalisé, écriture 421 / trésorerie). */
+  @RequirePermissions('hr.payroll.pay')
+  @Post('advances/:id/pay')
+  payAdvance(
+    @Param('id') id: string,
+    @Body(new ZodPipe(staffPayoutSchema)) body: z.infer<typeof staffPayoutSchema>,
+  ) {
+    return this.payroll.payAdvance(id, body);
+  }
+
   // Barèmes
 
   @RequirePermissions('hr.read')
@@ -258,6 +270,16 @@ export class HrController {
     @Body(new ZodPipe(payrollRejectSchema)) body: z.infer<typeof payrollRejectSchema>,
   ) {
     return this.payroll.reject(month, body.reason);
+  }
+
+  /** Marque une paie validée comme versée (comptabilité, journalisé, écriture 422 / trésorerie). */
+  @RequirePermissions('hr.payroll.pay')
+  @Post('payroll/:month/pay')
+  markPaid(
+    @Param('month', monthPipe) month: string,
+    @Body(new ZodPipe(staffPayoutSchema)) body: z.infer<typeof staffPayoutSchema>,
+  ) {
+    return this.payroll.markPaid(month, body);
   }
 
   /** Récapitulatif d'une paie validée, lisible par la comptabilité générale. */
@@ -342,6 +364,7 @@ export class HrController {
 }
 
 @Module({
+  imports: [AccountingModule],
   controllers: [HrController],
   providers: [EmployeesService, HoursService, PayrollService],
   exports: [PayrollService],

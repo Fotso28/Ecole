@@ -1,6 +1,7 @@
 import type {
   ContractType,
   PayElement,
+  PaymentMethod,
   PayoutMethod,
   PayrollScale,
   PayrollStatus,
@@ -93,8 +94,24 @@ export interface AdvanceRow {
   repaid: number;
   remaining: number;
   requestedById: string;
+  decidedById: string | null;
   decidedAt: string | null;
   decisionNote: string | null;
+  payout: PayoutView | null;
+}
+
+/** Versement enregistré (salaires d'une paie validée ou avance accordée). */
+export interface PayoutView {
+  id: string;
+  date: string;
+  method: PaymentMethod;
+  reference: string | null;
+  amount: number;
+  paidById: string;
+  paidBy: string | null;
+  paidAt: string;
+  sameAsValidator: boolean;
+  entry: string | null;
 }
 
 export interface HoursMonth {
@@ -159,6 +176,8 @@ export interface PayrollRunView {
   preparedById?: string | null;
   validatedAt?: string | null;
   validatedBy?: string | null;
+  validatedById?: string | null;
+  payout?: PayoutView | null;
   rejectedAt?: string | null;
   rejectedBy?: string | null;
   rejectReason?: string | null;

@@ -462,5 +462,19 @@ describe('emploi du temps', () => {
         className: '4e A',
         attendanceTaken: false,
       });
+
+    // Modules désactivés : sans emploi du temps, pas de cours du jour ; sans notes, route fermée.
+    const school = await prisma.school.findUniqueOrThrow({ where: { id: f.schoolId } });
+    await prisma.school.update({
+      where: { id: f.schoolId },
+      data: { modules: school.modules.filter((m) => m !== 'timetable') },
+    });
+    const noTimetable = await http().get('/teacher/today').set(s.prof.auth).expect(200);
+    expect(noTimetable.body.lessons).toEqual([]);
+    await prisma.school.update({
+      where: { id: f.schoolId },
+      data: { modules: school.modules.filter((m) => m !== 'grades') },
+    });
+    await http().get('/teacher/today').set(s.prof.auth).expect(403);
   });
 });

@@ -71,7 +71,7 @@ test.describe('transport scolaire', () => {
     await loginStaff(page, 'chauffeur@demo.cm');
     await page.waitForURL('**/transport/appel');
     await expect(page.getByRole('heading', { name: 'Appel du car' })).toBeVisible();
-    await page.getByLabel('Trajet').selectOption('OUTBOUND');
+    await page.getByLabel('Trajet', { exact: true }).selectOption('OUTBOUND');
     const list = page.getByRole('list', { name: 'Élèves du trajet' });
     await expect(list.getByRole('listitem').first()).toBeVisible();
     await expectNoHorizontalOverflow(page);
@@ -96,7 +96,7 @@ test.describe('transport scolaire', () => {
     await second.getByRole('button', { name: /: monté$/ }).click();
     await expect(page.getByRole('status').filter({ hasText: 'Appel enregistré' })).toBeVisible();
     await page.reload();
-    await page.getByLabel('Trajet').selectOption('OUTBOUND');
+    await page.getByLabel('Trajet', { exact: true }).selectOption('OUTBOUND');
     await expect(
       list
         .getByRole('listitem')

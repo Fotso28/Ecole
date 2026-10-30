@@ -39,6 +39,7 @@ export function StaffShell({ children }: { children: ReactNode }) {
   const groups = useMemo(() => visibleNav(me), [me]);
   const primary = useMemo(() => primaryNav(me), [me]);
   const allItems = groups.flatMap((g) => g.items);
+  const menuBadge = unread > 0 && !primary.some((i) => i.href === '/messages');
   const active = activeHref(pathname, allItems);
 
   if (status !== 'authenticated' || !me || me.kind !== 'staff') return <Splash />;
@@ -91,7 +92,7 @@ export function StaffShell({ children }: { children: ReactNode }) {
                 {item.href === '/messages' && unread > 0 ? (
                   <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-saffron px-1.5 text-xs font-bold text-ink">
                     {unread}
-                    <span className="sr-only"> non lus</span>
+                    <span className="sr-only"> {unread > 1 ? 'non lus' : 'non lu'}</span>
                   </span>
                 ) : null}
               </Link>
@@ -265,13 +266,15 @@ export function StaffShell({ children }: { children: ReactNode }) {
         >
           <span className="relative">
             <Menu className="size-[22px]" aria-hidden />
-            {unread > 0 && !primary.some((i) => i.href === '/messages') ? (
-              <span className="absolute -top-1 -right-1.5 size-2.5 rounded-full bg-danger">
-                <span className="sr-only">Messages non lus</span>
-              </span>
+            {menuBadge ? (
+              <span
+                aria-hidden
+                className="absolute -top-1 -right-1.5 size-2.5 rounded-full bg-danger"
+              />
             ) : null}
           </span>
           Menu
+          {menuBadge ? <span className="sr-only">(messages non lus)</span> : null}
         </button>
       </nav>
 

@@ -69,13 +69,13 @@ Mot de passe commun : `Ecole2026!demo`
 
 ## Tests
 
-| Commande                                           | Contenu                                                                                                                                                                          |
-| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm --filter @ecole/shared test`                 | Calculs de notes (moyennes, rangs ex aequo, bulletins), finances, identité, permissions                                                                                          |
-| `pnpm --filter @ecole/api test`                    | Intégration sur une vraie base PostgreSQL (`TEST_DATABASE_URL`) : authentification, isolation des établissements, inscriptions, présences, notes, bulletins, paiements, webhooks |
-| `pnpm --filter @ecole/web test`                    | Navigation par rôle, formats                                                                                                                                                     |
-| `pnpm --filter @ecole/web test:e2e`                | Parcours Playwright sur téléphone (Pixel 7) et ordinateur, contrôle d'accessibilité axe-core (WCAG 2.1 AA), contre une base dédiée `ecole_e2e`                                   |
-| `pnpm lint`, `pnpm typecheck`, `pnpm format:check` | Qualité                                                                                                                                                                          |
+| Commande                                           | Contenu                                                                                                                                                                                                                    |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm --filter @ecole/shared test`                 | Calculs de notes (moyennes, rangs ex aequo, bulletins), finances, identité, permissions                                                                                                                                    |
+| `pnpm --filter @ecole/api test`                    | Intégration sur une vraie base PostgreSQL (`TEST_DATABASE_URL`) : authentification, isolation des établissements, inscriptions, présences, notes, bulletins, paiements, webhooks, annonces, messagerie, calendrier, e-mail |
+| `pnpm --filter @ecole/web test`                    | Navigation par rôle, formats                                                                                                                                                                                               |
+| `pnpm --filter @ecole/web test:e2e`                | Parcours Playwright sur téléphone (Pixel 7) et ordinateur, contrôle d'accessibilité axe-core (WCAG 2.1 AA), contre une base dédiée `ecole_e2e`                                                                             |
+| `pnpm lint`, `pnpm typecheck`, `pnpm format:check` | Qualité                                                                                                                                                                                                                    |
 
 Les tests d'intégration et de bout en bout appliquent les migrations puis vident leur base de test : ne jamais les pointer vers une base de production.
 

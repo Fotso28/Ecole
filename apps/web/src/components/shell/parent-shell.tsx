@@ -130,6 +130,7 @@ export function ParentShell({ children }: { children: ReactNode }) {
           {NAV.map((item) => {
             const active =
               item.href === '/portail' ? pathname === '/portail' : pathname.startsWith(item.href);
+            const badge = item.href === '/portail/messages' && unread > 0;
             return (
               <Link
                 key={item.href}
@@ -142,14 +143,19 @@ export function ParentShell({ children }: { children: ReactNode }) {
               >
                 <span className="relative">
                   <item.icon className="size-[22px]" aria-hidden />
-                  {item.href === '/portail/messages' && unread > 0 ? (
-                    <span className="absolute -top-1.5 -right-2.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-bold text-white">
+                  {badge ? (
+                    <span
+                      aria-hidden
+                      className="absolute -top-1.5 -right-2.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-bold text-white"
+                    >
                       {unread}
-                      <span className="sr-only"> non lus</span>
                     </span>
                   ) : null}
                 </span>
                 {item.label}
+                {badge ? (
+                  <span className="sr-only">{`(${unread} ${unread > 1 ? 'non lus' : 'non lu'})`}</span>
+                ) : null}
               </Link>
             );
           })}

@@ -37,6 +37,10 @@ test('écrans de la direction', async ({ page }) => {
     '/impayes',
     '/emploi-du-temps',
     '/parametres',
+    '/annonces',
+    '/calendrier',
+    '/messages',
+    '/messages/supervision',
   ]) {
     await page.goto(path);
     await expect(page.locator('main h1').first()).toBeVisible();
@@ -63,6 +67,14 @@ test('appel et notes de l’enseignant', async ({ page }) => {
       .first(),
   ).toBeVisible();
   await expectAccessible(page, '/notes (saisie)');
+  await page.goto('/messages');
+  await page.getByRole('list', { name: 'Conversations' }).getByRole('link').first().click();
+  await expect(page.getByRole('list', { name: 'Messages' })).toBeVisible();
+  await expectAccessible(page, '/messages/[id] (fil)');
+  await page.goto('/calendrier');
+  await page.getByRole('button', { name: 'Mois', exact: true }).click();
+  await expect(page.getByRole('table')).toBeVisible();
+  await expectAccessible(page, '/calendrier (mois)');
 });
 
 test('portail des parents', async ({ page, request }, info) => {
@@ -84,7 +96,13 @@ test('portail des parents', async ({ page, request }, info) => {
   await loginParent(page, phones[info.project.name === 'mobile' ? 0 : 1]!.replace('+237', ''));
   await expect(page.getByRole('heading', { name: /^Bonjour/ })).toBeVisible();
   await expectAccessible(page, '/portail');
-  for (const path of ['/portail/paiement', '/portail/notes', '/portail/absences']) {
+  for (const path of [
+    '/portail/paiement',
+    '/portail/notes',
+    '/portail/absences',
+    '/portail/messages',
+    '/portail/calendrier',
+  ]) {
     await page.goto(path);
     await expect(page.locator('main').first()).toBeVisible();
     await expectAccessible(page, path);

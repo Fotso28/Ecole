@@ -853,3 +853,140 @@ model TimetableEntry {
 
   @@index([schoolId, academicYearId])
 }
+
+// Examens : sessions, épreuves, salles, candidats anonymisés, surveillances et notes.
+
+enum ExamKind {
+  MOCK
+  SEQUENCE
+  PROMOTION
+}
+
+model ExamSession {
+  id                 String    @id @default(cuid())
+  schoolId           String
+  academicYearId     String
+  name               String
+  kind               ExamKind
+  /// Séquence de rattachement (obligatoire pour une composition de séquence) : report des notes.
+  sequenceId         String?
+  startDate          DateTime  @db.Date
+  endDate            DateTime  @db.Date
+  classIds           String[]
+  mixClasses         Boolean   @default(true)
+  supervisorsPerRoom Int       @default(1)
+  resultsPublishedAt DateTime?
+  publishedById      String?
+  createdById        String
+  createdAt          DateTime  @default(now())
+
+  papers     ExamPaper[]
+  rooms      ExamRoom[]
+  candidates ExamCandidate[]
+
+  @@index([schoolId, academicYearId])
+}
+
+/// Épreuve : une matière, à une date et une heure, pour une ou plusieurs classes de la session.
+model ExamPaper {
+  id              String   @id @default(cuid())
+  schoolId        String
+  sessionId       String
+  subjectId       String
+  date            DateTime @db.Date
+  startTime       String
+  durationMinutes Int
+  maxScore        Int      @default(20)
+  classIds        String[]
+  createdAt       DateTime @default(now())
+
+  session      ExamSession       @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  supervisions ExamSupervision[]
+  scores       ExamScore[]
+  transfers    ExamTransfer[]
+
+  @@index([schoolId, date])
+  @@index([sessionId])
+}
+
+/// Salle mobilisée pour une session, avec sa capacité en configuration d'examen.
+model ExamRoom {
+  id        String @id @default(cuid())
+  schoolId  String
+  sessionId String
+  roomId    String
+  capacity  Int
+  order     Int    @default(0)
+
+  session ExamSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, roomId])
+  @@index([schoolId])
+}
+
+/// Candidat : élève d'une classe de la session, avec sa place et son numéro d'anonymat.
+model ExamCandidate {
+  id            String  @id @default(cuid())
+  schoolId      String
+  sessionId     String
+  studentId     String
+  classId       String
+  /// Numéro d'anonymat aléatoire, unique dans la session ; correspondance réservée à la direction.
+  anonymityCode String
+  roomId        String?
+  seat          Int?
+
+  session ExamSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  scores  ExamScore[]
+
+  @@unique([sessionId, studentId])
+  @@unique([sessionId, anonymityCode])
+  @@unique([sessionId, roomId, seat])
+  @@index([schoolId, studentId])
+}
+
+model ExamSupervision {
+  id       String @id @default(cuid())
+  schoolId String
+  paperId  String
+  roomId   String
+  userId   String
+
+  paper ExamPaper @relation(fields: [paperId], references: [id], onDelete: Cascade)
+
+  @@unique([paperId, roomId, userId])
+  @@index([schoolId, userId])
+}
+
+/// Note d'épreuve, saisie par numéro d'anonymat (centièmes sur le barème de l'épreuve).
+model ExamScore {
+  id          String      @id @default(cuid())
+  schoolId    String
+  paperId     String
+  candidateId String
+  status      GradeStatus
+  valueCenti  Int?
+  updatedById String
+  updatedAt   DateTime    @updatedAt
+
+  paper     ExamPaper     @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  candidate ExamCandidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@unique([paperId, candidateId])
+  @@index([schoolId])
+}
+
+/// Report d'une épreuve dans l'évaluation de séquence d'une classe (une seule fois par classe).
+model ExamTransfer {
+  id           String   @id @default(cuid())
+  schoolId     String
+  paperId      String
+  classId      String
+  evaluationId String
+  createdAt    DateTime @default(now())
+
+  paper ExamPaper @relation(fields: [paperId], references: [id], onDelete: Cascade)
+
+  @@unique([paperId, classId])
+  @@index([schoolId])
+}

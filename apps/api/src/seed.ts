@@ -135,6 +135,7 @@ async function main(): Promise<void> {
         'portal',
         'timetable',
         'documents',
+        'exams',
       ],
       settings: { absenceAlertThreshold: 3, reminderOffsets: [5, 15, 30] },
     },

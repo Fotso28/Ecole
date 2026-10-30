@@ -14,6 +14,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { CommunicationModule } from './modules/communication/communication.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { DevModule } from './modules/dev/dev.module';
+import { ExamsModule } from './modules/exams/exams.module';
 import { FinanceModule } from './modules/finance/finance.module';
 import { GradesModule } from './modules/grades/grades.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
@@ -57,6 +58,7 @@ import { VerifyModule } from './modules/verify/verify.module';
     TimetableModule,
     VerifyModule,
     TranscriptsModule,
+    ExamsModule,
     DevModule,
   ],
   controllers: [HealthController],

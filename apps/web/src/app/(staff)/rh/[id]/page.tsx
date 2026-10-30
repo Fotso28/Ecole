@@ -11,7 +11,7 @@ import {
   type EmployeeSensitive,
 } from '@ecole/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronLeft, Eye, FilePlus2 } from 'lucide-react';
+import { Check, ChevronLeft, Eye, FilePlus2, X } from 'lucide-react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useState } from 'react';
@@ -25,7 +25,7 @@ import { useToast } from '@/components/ui/toast';
 import { api, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { formatShortDate, todayIso } from '@/lib/format';
-import { ADVANCE_STATUS, type EmployeeDetail } from '@/lib/hr';
+import { ADVANCE_STATUS, type EmployeeDetail, type MaskedPayout } from '@/lib/hr';
 
 const SENSITIVE_LABELS: Record<keyof EmployeeSensitive, string> = {
   idNumber: 'Pièce d’identité',
@@ -45,6 +45,92 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
     <div className="flex flex-col gap-0.5 sm:flex-row sm:gap-3">
       <dt className="text-[13px] font-semibold text-muted sm:w-44 sm:shrink-0">{label}</dt>
       <dd className="min-w-0 [overflow-wrap:anywhere]">{children}</dd>
+    </div>
+  );
+}
+
+function payoutText(p: MaskedPayout): string {
+  return [
+    PAYOUT_METHOD_LABELS[p.method],
+    p.bankName,
+    p.bankAccount,
+    p.mobileMoneyNumber,
+    p.mobileMoneyOperator,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+/** Changement des coordonnées de paiement en attente : approuvé ou refusé par une autre personne. */
+function PendingPayoutChangeCard({ employee }: { employee: EmployeeDetail }) {
+  const { can, me } = useAuth();
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const [rejecting, setRejecting] = useState(false);
+  const [reason, setReason] = useState('');
+  const change = employee.pendingPayoutChange;
+  const decide = useMutation({
+    mutationFn: (approve: boolean) =>
+      api(`/hr/employees/${employee.id}/payout-change/${approve ? 'approve' : 'reject'}`, {
+        method: 'POST',
+        body: approve ? undefined : { reason },
+      }),
+    onSuccess: (_, approve) => {
+      toast(approve ? 'Nouvelles coordonnées approuvées' : 'Changement de coordonnées refusé');
+      setRejecting(false);
+      setReason('');
+      void queryClient.invalidateQueries({ queryKey: ['hr'] });
+    },
+    onError: (e) => toast(e instanceof Error ? e.message : 'Erreur', 'error'),
+  });
+  if (!change) return null;
+  const canDecide =
+    can('hr.write') && change.requestedById !== me?.user.id && employee.userId !== me?.user.id;
+  return (
+    <div role="status" className="flex flex-col gap-2 rounded-[10px] bg-warn-soft p-3 text-sm">
+      <strong>Changement de coordonnées en attente d’approbation</strong>
+      <p>
+        Actuelles : {payoutText(change.before)}
+        <br />
+        Demandées : {payoutText(change.after)}
+      </p>
+      <p className="text-[13px]">
+        Demandé par {change.requestedBy ?? '—'} le {formatShortDate(change.requestedAt)}. Il ne
+        prend effet qu’après l’accord d’une autre personne ; les paies déjà validées gardent leurs
+        coordonnées.
+      </p>
+      {canDecide ? (
+        rejecting ? (
+          <div className="flex flex-col gap-2">
+            <InputField
+              label="Motif du refus"
+              value={reason}
+              onChange={(ev) => setReason(ev.target.value)}
+              maxLength={300}
+            />
+            <Button
+              size="sm"
+              variant="danger"
+              disabled={reason.trim().length < 1}
+              loading={decide.isPending}
+              onClick={() => decide.mutate(false)}
+            >
+              Refuser le changement
+            </Button>
+          </div>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" loading={decide.isPending} onClick={() => decide.mutate(true)}>
+              <Check className="size-4" aria-hidden />
+              Approuver
+            </Button>
+            <Button size="sm" variant="danger" onClick={() => setRejecting(true)}>
+              <X className="size-4" aria-hidden />
+              Refuser
+            </Button>
+          </div>
+        )
+      ) : null}
     </div>
   );
 }
@@ -317,7 +403,8 @@ export default function EmployeePage() {
               </Button>
             }
           />
-          <dl className="flex flex-col gap-2 text-sm">
+          <PendingPayoutChangeCard employee={e} />
+          <dl className="mt-3 flex flex-col gap-2 text-sm">
             <Row label="Mode de paiement">{PAYOUT_METHOD_LABELS[e.payoutMethod]}</Row>
             <Row label="Numéro CNPS">
               <span className="tabular">{e.sensitive.cnpsNumber ?? 'Non renseigné'}</span>

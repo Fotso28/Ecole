@@ -21,8 +21,11 @@ import { AccountingReportsService } from './accounting.reports';
 import { AccountingService } from './accounting.service';
 
 const reportKind = z.enum(ACCOUNTING_REPORTS);
+const requestStatus = z
+  .object({ status: z.enum(['PENDING', 'APPROVED', 'REJECTED']).optional() })
+  .strict();
 const expenseStatus = z
-  .object({ status: z.enum(['PENDING_APPROVAL', 'POSTED', 'REJECTED']).optional() })
+  .object({ status: z.enum(['PENDING_APPROVAL', 'POSTED', 'REJECTED', 'CANCELLED']).optional() })
   .strict();
 
 @ApiTags('accounting')
@@ -41,11 +44,14 @@ export class AccountingController {
     return this.accounting.overview();
   }
 
-  /** Rattrapage immédiat des opérations de scolarité (le worker le fait aussi chaque minute). */
+  /**
+   * Rattrapage immédiat : scolarité, paie, versements au personnel et achats de stock (le worker
+   * le fait aussi chaque minute).
+   */
   @RequirePermissions('accounting.write')
   @Post('sync')
   sync() {
-    return this.accounting.syncTuition();
+    return this.accounting.syncAll();
   }
 
   @RequirePermissions('accounting.read')
@@ -96,6 +102,28 @@ export class AccountingController {
   @Post('entries')
   createEntry(@Body(new ZodPipe(manualEntrySchema)) body: z.infer<typeof manualEntrySchema>) {
     return this.accounting.createManualEntry(body);
+  }
+
+  /** Écritures de trésorerie au-delà du seuil, en attente de validation par une autre personne. */
+  @RequirePermissions('accounting.read')
+  @Get('entry-requests')
+  entryRequests(@Query(new ZodPipe(requestStatus)) q: z.infer<typeof requestStatus>) {
+    return this.accounting.listEntryRequests(q.status);
+  }
+
+  @RequirePermissions('accounting.write')
+  @Post('entry-requests/:id/approve')
+  approveEntryRequest(@Param('id') id: string) {
+    return this.accounting.approveEntryRequest(id);
+  }
+
+  @RequirePermissions('accounting.write')
+  @Post('entry-requests/:id/reject')
+  rejectEntryRequest(
+    @Param('id') id: string,
+    @Body(new ZodPipe(expenseRejectSchema)) body: z.infer<typeof expenseRejectSchema>,
+  ) {
+    return this.accounting.rejectEntryRequest(id, body.reason);
   }
 
   @RequirePermissions('accounting.read')
@@ -152,6 +180,16 @@ export class AccountingController {
     @Body(new ZodPipe(expenseRejectSchema)) body: z.infer<typeof expenseRejectSchema>,
   ) {
     return this.accounting.rejectExpense(id, body.reason);
+  }
+
+  /** Annulation d'une dépense comptabilisée : motif, contre-passation de ses écritures. */
+  @RequirePermissions('accounting.write')
+  @Post('expenses/:id/cancel')
+  cancelExpense(
+    @Param('id') id: string,
+    @Body(new ZodPipe(expenseRejectSchema)) body: z.infer<typeof expenseRejectSchema>,
+  ) {
+    return this.accounting.cancelExpense(id, body.reason);
   }
 
   @RequirePermissions('accounting.read')

@@ -20,19 +20,29 @@ import {
   expenseCreateSchema,
   expenseNeedsApproval,
   expensePostings,
+  formatPayrollMonth,
   fiscalYearsOverlap,
   incomeStatement,
   isPostable,
   JOURNAL_CODES,
   JOURNAL_LABELS,
+  manualEntryNeedsApproval,
   manualEntrySchema,
   PAYMENT_METHOD_ACCOUNTS,
+  REVENUE_ACCOUNTS,
+  payrollMonthBounds,
+  payrollPosting,
+  staffPayoutPosting,
+  stockPurchasePosting,
   SYSCOHADA_CHART,
+  treasuryOutflow,
   tuitionPosting,
   validateSubAccount,
   type AccountBalance,
   type EntryLine,
   type JournalCode,
+  type PayElement,
+  type PayslipResult,
 } from '@ecole/shared';
 import { FiscalYear, Prisma } from '@prisma/client';
 import { z } from 'zod';
@@ -54,6 +64,8 @@ export interface PostingInput {
   /** Exercice imposé (à-nouveaux) ; sinon celui qui couvre la date. */
   fiscalYear?: FiscalYear;
 }
+
+export type OperationType = 'PAYROLL' | 'PAYROLL_PAYMENT' | 'ADVANCE_PAYMENT' | 'STOCK_PURCHASE';
 
 const DB_MESSAGES =
   /(Exercice clôturé[^"\n]*|Écriture déséquilibrée[^"\n]*|Numérotation du journal[^"\n]*|La date de l'écriture[^"\n]*|Compte inconnu[^"\n]*|Les écritures comptables[^"\n]*|Un exercice[^"\n]*|Une dépense[^"\n]*|Les données d'une dépense[^"\n]*)/;
@@ -302,8 +314,8 @@ export class AccountingService {
    */
   async closeFiscalYear(id: string) {
     await this.ensureSetup();
-    // Dernières opérations de scolarité passées avant la clôture.
-    await this.syncTuition();
+    // Dernières opérations (scolarité, paie, versements, achats) passées avant la clôture.
+    await this.syncAll();
     return this.run(async (tx) => {
       await this.lockSchool(tx, 'fiscal-years');
       const locked = await tx.$queryRaw<
@@ -326,6 +338,13 @@ export class AccountingService {
       if (pendingExpenses > 0)
         throw new ConflictException(
           `${pendingExpenses} dépense(s) de cet exercice attendent encore leur validation`,
+        );
+      const pendingEntries = await tx.manualEntryRequest.count({
+        where: { status: 'PENDING', date: { gte: year.startDate, lte: year.endDate } },
+      });
+      if (pendingEntries > 0)
+        throw new ConflictException(
+          `${pendingEntries} écriture(s) de trésorerie de cet exercice attendent encore leur validation`,
         );
       const balances = await this.balances(tx, { fiscalYearId: id });
       const lines = carryForwardLines(balances);
@@ -434,8 +453,16 @@ export class AccountingService {
     return entry;
   }
 
+  /**
+   * Écriture manuelle. Une écriture qui fait sortir de la trésorerie (caisse, banque, Mobile
+   * Money) au moins le seuil de validation des dépenses n'est pas passée : elle attend l'accord
+   * d'une autre personne, comme une dépense.
+   */
   async createManualEntry(input: z.infer<typeof manualEntrySchema>) {
     await this.ensureSetup();
+    const { expenseApprovalThreshold } = await this.getSettings();
+    if (manualEntryNeedsApproval(input.lines, expenseApprovalThreshold))
+      return this.requestManualEntry(input, expenseApprovalThreshold);
     const entry = await this.run(async (tx) => {
       const created = await this.post(tx, {
         journal: input.journal,
@@ -458,6 +485,176 @@ export class AccountingService {
     return this.getEntry(entry.id);
   }
 
+  private async requestManualEntry(input: z.infer<typeof manualEntrySchema>, threshold: number) {
+    const actorId = currentActorId();
+    if (!actorId) throw new ForbiddenException();
+    let total: number;
+    try {
+      total = assertBalancedEntry(input.lines);
+    } catch (e) {
+      throw translateAccountingError(e);
+    }
+    const numbers = [...new Set(input.lines.map((l) => l.accountNumber))];
+    const known = await this.db.accountingAccount.count({ where: { number: { in: numbers } } });
+    if (known !== numbers.length) throw new BadRequestException('Compte inconnu du plan comptable');
+    const covering = await this.db.fiscalYear.findFirst({
+      where: { startDate: { lte: toDbDate(input.date) }, endDate: { gte: toDbDate(input.date) } },
+    });
+    if (covering && covering.status !== 'OPEN')
+      throw new ConflictException(
+        `Exercice clôturé : aucune nouvelle écriture n’est possible au ${frDate(input.date)}`,
+      );
+    const request = await this.run(async (tx) => {
+      const created = await tx.manualEntryRequest.create({
+        data: {
+          schoolId: currentSchoolId(),
+          journalCode: input.journal,
+          date: toDbDate(input.date),
+          label: input.label,
+          pieceRef: input.pieceRef ?? null,
+          lines: input.lines as unknown as Prisma.InputJsonValue,
+          total,
+          createdById: actorId,
+        },
+      });
+      await this.audit.log(
+        {
+          action: 'accounting.entry_requested',
+          entity: 'ManualEntryRequest',
+          entityId: created.id,
+          after: { ...input, treasuryOutflow: treasuryOutflow(input.lines), threshold },
+        },
+        tx,
+      );
+      return created;
+    });
+    return {
+      id: request.id,
+      status: 'PENDING_APPROVAL' as const,
+      needsApproval: true,
+      threshold,
+      reference: null,
+    };
+  }
+
+  async listEntryRequests(status?: 'PENDING' | 'APPROVED' | 'REJECTED') {
+    const rows = await this.db.manualEntryRequest.findMany({
+      where: { status },
+      orderBy: { createdAt: 'desc' },
+      take: 300,
+    });
+    const [users, entries] = await Promise.all([
+      this.db.user.findMany({
+        where: {
+          id: { in: [...new Set(rows.flatMap((r) => [r.createdById, r.decidedById ?? '']))] },
+        },
+        select: { id: true, firstName: true, lastName: true },
+      }),
+      this.db.accountingEntry.findMany({
+        where: { id: { in: rows.map((r) => r.entryId ?? '') } },
+        select: { id: true, reference: true },
+      }),
+    ]);
+    const name = (id: string | null) => {
+      const u = users.find((x) => x.id === id);
+      return u ? `${u.firstName} ${u.lastName}` : null;
+    };
+    return rows.map((r) => ({
+      id: r.id,
+      journal: r.journalCode,
+      date: fromDbDate(r.date),
+      label: r.label,
+      pieceRef: r.pieceRef,
+      lines: r.lines as unknown as EntryLine[],
+      total: r.total,
+      status: r.status,
+      createdById: r.createdById,
+      createdBy: name(r.createdById),
+      decidedBy: name(r.decidedById),
+      decidedAt: r.decidedAt,
+      decisionNote: r.decisionNote,
+      reference: entries.find((e) => e.id === r.entryId)?.reference ?? null,
+    }));
+  }
+
+  private async lockEntryRequest(tx: Tx, id: string) {
+    const locked = await tx.$queryRaw<
+      { id: string }[]
+    >`SELECT "id" FROM "ManualEntryRequest" WHERE "id" = ${id} AND "schoolId" = ${currentSchoolId()} FOR UPDATE`;
+    if (locked.length === 0) throw new NotFoundException('Demande d’écriture introuvable');
+    const request = await tx.manualEntryRequest.findUniqueOrThrow({ where: { id } });
+    if (request.status !== 'PENDING')
+      throw new ConflictException('Cette écriture n’est plus en attente de validation');
+    if (request.createdById === currentActorId())
+      throw new ForbiddenException(
+        'L’écriture doit être validée par une autre personne que celle qui l’a saisie',
+      );
+    return request;
+  }
+
+  /** Validation par une autre personne : l'écriture est passée telle qu'elle a été saisie. */
+  async approveEntryRequest(id: string) {
+    await this.ensureSetup();
+    const entry = await this.run(async (tx) => {
+      const request = await this.lockEntryRequest(tx, id);
+      const created = await this.post(tx, {
+        journal: request.journalCode as JournalCode,
+        date: fromDbDate(request.date),
+        label: request.label,
+        pieceRef: request.pieceRef,
+        lines: request.lines as unknown as EntryLine[],
+      });
+      await tx.manualEntryRequest.update({
+        where: { id },
+        data: {
+          status: 'APPROVED',
+          decidedById: currentActorId() ?? null,
+          decidedAt: new Date(),
+          entryId: created.id,
+        },
+      });
+      await this.audit.log(
+        {
+          action: 'accounting.entry_approved',
+          entity: 'ManualEntryRequest',
+          entityId: id,
+          before: { status: 'PENDING' },
+          after: { status: 'APPROVED', reference: created.reference },
+        },
+        tx,
+      );
+      return created;
+    });
+    return this.getEntry(entry.id);
+  }
+
+  async rejectEntryRequest(id: string, reason: string) {
+    return this.run(async (tx) => {
+      await this.lockEntryRequest(tx, id);
+      await tx.manualEntryRequest.update({
+        where: { id },
+        data: {
+          status: 'REJECTED',
+          decidedById: currentActorId() ?? null,
+          decidedAt: new Date(),
+          decisionNote: reason,
+        },
+      });
+      await this.audit.log(
+        {
+          action: 'accounting.entry_rejected',
+          entity: 'ManualEntryRequest',
+          entityId: id,
+          before: { status: 'PENDING' },
+          after: { status: 'REJECTED' },
+          reason,
+        },
+        tx,
+      );
+      return { id, status: 'REJECTED' as const };
+    });
+  }
+
   /** Correction par contre-passation : une nouvelle écriture inverse, l'originale reste intacte. */
   async reverseEntry(id: string, reason: string, date?: string) {
     await this.ensureSetup();
@@ -473,26 +670,24 @@ export class AccountingService {
         throw new ConflictException(
           'Écriture automatique de la scolarité : corrigez l’opération dans la scolarité (annulation ou remise)',
         );
+      if (original.sourceType === 'PAYROLL')
+        throw new ConflictException(
+          'Écriture automatique de la paie : une paie validée est figée, corrigez par un rappel sur la paie suivante',
+        );
+      if (original.sourceType === 'STOCK_PURCHASE')
+        throw new ConflictException(
+          'Écriture automatique du stock : corrigez le mouvement d’achat dans le stock',
+        );
       if (original.sourceType === 'CARRY_FORWARD')
         throw new ConflictException('Le report à nouveau ne se contre-passe pas');
+      if (original.sourceType === 'EXPENSE' || original.sourceType === 'EXPENSE_PAYMENT')
+        throw new ConflictException(
+          'Écriture d’une dépense : annulez la dépense, ses écritures seront contre-passées',
+        );
       const already = await tx.accountingEntry.findFirst({ where: { reversesEntryId: id } });
       if (already)
         throw new ConflictException(`Écriture déjà contre-passée (${already.reference})`);
-      const created = await this.post(tx, {
-        journal: original.journalCode as JournalCode,
-        date: date ?? todayInCameroon(),
-        label: `Contre-passation de ${original.reference} : ${reason}`,
-        pieceRef: original.pieceRef,
-        lines: original.lines.map((l) => ({
-          accountNumber: l.accountNumber,
-          debit: l.credit,
-          credit: l.debit,
-          label: l.label ?? undefined,
-        })),
-        sourceType: 'REVERSAL',
-        sourceId: original.id,
-        reversesEntryId: original.id,
-      });
+      const created = await this.postReversal(tx, original, reason, date);
       await this.audit.log(
         {
           action: 'accounting.entry_reversed',
@@ -506,6 +701,32 @@ export class AccountingService {
       return created;
     });
     return this.getEntry(entry.id);
+  }
+
+  /** Écriture inverse d'une écriture (mêmes comptes, débit et crédit échangés). */
+  private postReversal(
+    tx: Tx,
+    original: Prisma.AccountingEntryGetPayload<{ include: { lines: true } }>,
+    reason: string,
+    date?: string,
+  ) {
+    return this.post(tx, {
+      journal: original.journalCode as JournalCode,
+      date: date ?? todayInCameroon(),
+      label: `Contre-passation de ${original.reference} : ${reason}`,
+      pieceRef: original.pieceRef,
+      lines: [...original.lines]
+        .sort((a, b) => a.order - b.order)
+        .map((l) => ({
+          accountNumber: l.accountNumber,
+          debit: l.credit,
+          credit: l.debit,
+          label: l.label ?? undefined,
+        })),
+      sourceType: 'REVERSAL',
+      sourceId: original.id,
+      reversesEntryId: original.id,
+    });
   }
 
   async getEntry(id: string) {
@@ -659,6 +880,8 @@ export class AccountingService {
                 ? tx.payment.findUnique({ where: { id: op.paymentId }, select: { method: true } })
                 : null,
             ]);
+            const revenueAccount =
+              op.type === 'CHARGE' ? await this.revenueAccountFor(tx, op.invoiceLineId) : null;
             const date = todayInCameroon(op.createdAt);
             const target = await this.fiscalYearForAutomatic(tx, date);
             if (!target) return 'waiting' as const;
@@ -670,6 +893,7 @@ export class AccountingService {
                 ? `${student.lastName} ${student.firstName} (${student.matricule})`
                 : 'Élève',
               method: payment?.method ?? null,
+              revenueAccount,
             });
             await this.post(tx, {
               journal: posting.journal,
@@ -704,6 +928,26 @@ export class AccountingService {
     return { posted, failed, pending: await this.pendingTuitionCount() };
   }
 
+  /**
+   * Produit d'une facture émise pour un autre service que la scolarité : vente du stock,
+   * abonnement au transport ou pénalité de bibliothèque. Sinon null (scolarité, inscription).
+   */
+  private async revenueAccountFor(tx: Tx, invoiceLineId: string | null): Promise<string | null> {
+    if (!invoiceLineId) return null;
+    const [sale, transport, fine] = await Promise.all([
+      tx.stockMovement.findFirst({ where: { invoiceLineId }, select: { id: true } }),
+      tx.transportSubscription.findFirst({ where: { invoiceLineId }, select: { id: true } }),
+      tx.libraryLoan.findFirst({
+        where: { penaltyInvoiceLineId: invoiceLineId },
+        select: { id: true },
+      }),
+    ]);
+    if (sale) return REVENUE_ACCOUNTS.stockSale;
+    if (transport) return REVENUE_ACCOUNTS.transport;
+    if (fine) return REVENUE_ACCOUNTS.libraryFine;
+    return null;
+  }
+
   /** Tâche de fond : alimentation de toutes les écoles ayant activé la comptabilité. */
   async syncAllSchools(): Promise<{ schools: number; posted: number; failed: number }> {
     const schools = await this.db.school.findMany({
@@ -713,11 +957,266 @@ export class AccountingService {
     let posted = 0;
     let failed = 0;
     for (const s of schools) {
-      const r = await runAsSystem('job:accounting', () => this.syncTuition(), s.id);
+      const r = await runAsSystem('job:accounting', () => this.syncAll(), s.id);
       posted += r.posted;
       failed += r.failed;
     }
     return { schools: schools.length, posted, failed };
+  }
+
+  // ---------------------------------------------------------------- Paie, versements, achats
+
+  /** Scolarité puis paie, versements au personnel et achats de stock. */
+  async syncAll(): Promise<{ posted: number; pending: number; failed: number }> {
+    const t = await this.syncTuition();
+    const o = await this.syncOperations();
+    return {
+      posted: t.posted + o.posted,
+      failed: t.failed + o.failed,
+      pending: t.pending + o.pending,
+    };
+  }
+
+  /** Paies validées, versements et achats de stock pas encore comptabilisés. */
+  private operationsQuery(limit: number | null) {
+    const schoolId = currentSchoolId();
+    const notPosted = (type: string, column: Prisma.Sql) => Prisma.sql`NOT EXISTS (
+      SELECT 1 FROM "AccountingEntry" a
+      WHERE a."schoolId" = ${schoolId} AND a."sourceType" = ${type} AND a."sourceId" = ${column})`;
+    return Prisma.sql`
+      SELECT 'PAYROLL' AS "type", r."id", r."validatedAt" AS "at" FROM "PayrollRun" r
+      WHERE r."schoolId" = ${schoolId} AND r."status" = 'VALIDATED'
+        AND ${notPosted('PAYROLL', Prisma.sql`r."id"`)}
+      UNION ALL
+      SELECT CASE WHEN p."kind" = 'PAYROLL' THEN 'PAYROLL_PAYMENT' ELSE 'ADVANCE_PAYMENT' END,
+        p."id", p."createdAt" FROM "StaffPayout" p
+      WHERE p."schoolId" = ${schoolId} AND p."amount" > 0
+        AND ${notPosted('PAYROLL_PAYMENT', Prisma.sql`p."id"`)}
+        AND ${notPosted('ADVANCE_PAYMENT', Prisma.sql`p."id"`)}
+      UNION ALL
+      SELECT 'STOCK_PURCHASE', m."id", m."createdAt" FROM "StockMovement" m
+      LEFT JOIN "StockMovement" o ON o."id" = m."reversesId"
+      WHERE m."schoolId" = ${schoolId}
+        AND (
+          (m."type" = 'PURCHASE' AND m."supplier" IS NOT NULL AND COALESCE(m."unitCost", 0) > 0)
+          OR (m."type" = 'REVERSAL' AND o."type" = 'PURCHASE' AND o."supplier" IS NOT NULL
+              AND COALESCE(o."unitCost", 0) > 0)
+        )
+        AND ${notPosted('STOCK_PURCHASE', Prisma.sql`m."id"`)}
+      ORDER BY "at", "id"
+      ${limit === null ? Prisma.empty : Prisma.sql`LIMIT ${limit}`}`;
+  }
+
+  async pendingOperationsCount(): Promise<number> {
+    const rows = await this.db.$queryRaw<
+      { n: number }[]
+    >`SELECT COUNT(*)::int AS n FROM (${this.operationsQuery(null)}) q`;
+    return Number(rows[0]?.n ?? 0);
+  }
+
+  /**
+   * Comptabilise les paies validées (charges, organismes, avances retenues, net dû), les versements
+   * de salaires et d'avances, et les achats de stock auprès d'un fournisseur, historique compris.
+   * Idempotent comme la scolarité : clé unique (type, identifiant) et verrou par école.
+   * Les ventes de stock ne sont pas reprises ici : elles sont facturées, donc comptabilisées, par
+   * la scolarité.
+   */
+  async syncOperations(limit = 500): Promise<{ posted: number; pending: number; failed: number }> {
+    await this.ensureSetup();
+    const ops = await this.db.$queryRaw<
+      { type: OperationType; id: string }[]
+    >`${this.operationsQuery(limit)}`;
+    let posted = 0;
+    let failed = 0;
+    let waiting = 0;
+    for (const op of ops) {
+      try {
+        const done = await this.db.$transaction((tx) => this.postOperation(tx, op.type, op.id), {
+          timeout: 30_000,
+        });
+        if (done === 'posted') posted++;
+        if (done === 'waiting') waiting++;
+      } catch (e) {
+        failed++;
+        this.logger.error(
+          `Écriture automatique impossible (${op.type} ${op.id}) : ${e instanceof Error ? e.message : e}`,
+        );
+      }
+    }
+    if (posted > 0)
+      await this.audit.log({
+        action: 'accounting.operations_synced',
+        entity: 'AccountingEntry',
+        after: { posted, failed, waiting },
+      });
+    return { posted, failed, pending: await this.pendingOperationsCount() };
+  }
+
+  /**
+   * Passe l'écriture d'une opération si elle ne l'est pas déjà, sous verrou.
+   * - mode automatique : période clôturée → premier exercice ouvert suivant ;
+   * - mode strict (action saisie à l'instant) : une période clôturée est refusée.
+   */
+  async postOperation(
+    tx: Tx,
+    type: OperationType,
+    id: string,
+    strict = false,
+  ): Promise<'posted' | 'skipped' | 'waiting'> {
+    await this.lockSchool(tx, 'operations-sync');
+    const exists = await tx.accountingEntry.findFirst({
+      where: { sourceType: type, sourceId: id },
+      select: { id: true },
+    });
+    if (exists) return 'skipped';
+    const built = await this.buildOperation(tx, type, id);
+    if (!built) return 'skipped';
+    let date = built.date;
+    let label = built.posting.label;
+    let year: FiscalYear;
+    if (strict) {
+      year = await this.fiscalYearForDate(tx, date);
+    } else {
+      const target = await this.fiscalYearForAutomatic(tx, date);
+      if (!target) return 'waiting';
+      if (target.late) label = `${label} (opération du ${frDate(date)}, exercice clos)`;
+      date = target.date;
+      year = target.year;
+    }
+    await this.post(tx, {
+      journal: built.posting.journal,
+      date,
+      label,
+      lines: built.posting.lines,
+      pieceRef: built.pieceRef,
+      sourceType: type,
+      sourceId: id,
+      fiscalYear: year,
+    });
+    return 'posted';
+  }
+
+  private async buildOperation(tx: Tx, type: OperationType, id: string) {
+    switch (type) {
+      case 'PAYROLL': {
+        const run = await tx.payrollRun.findUniqueOrThrow({
+          where: { id },
+          include: { payslips: true },
+        });
+        if (run.status !== 'VALIDATED') return null;
+        const slips = run.payslips.map((p) => {
+          const r = p.result as unknown as PayslipResult;
+          const elements = p.elements as unknown as PayElement[];
+          return {
+            gross: r.gross,
+            allowances: elements
+              .filter((e) => e.kind === 'ALLOWANCE')
+              .reduce((n, e) => n + e.amount, 0),
+            employee: {
+              cnps: r.employee.cnps,
+              housing: r.employee.housing,
+              irpp: r.employee.irpp,
+              cac: r.employee.cac,
+              audiovisual: r.employee.audiovisual,
+              communal: r.employee.communal,
+            },
+            employer: {
+              pension: r.employer.pension,
+              family: r.employer.family,
+              accident: r.employer.accident,
+              housing: r.employer.housing,
+              employment: r.employer.employment,
+            },
+            advanceDeduction: r.advanceDeduction,
+            net: r.net,
+          };
+        });
+        const posting = payrollPosting(run.month, slips);
+        return {
+          posting,
+          date: payrollMonthBounds(run.month).last,
+          pieceRef: `PAIE-${run.month}`,
+        };
+      }
+      case 'PAYROLL_PAYMENT':
+      case 'ADVANCE_PAYMENT': {
+        const payout = await tx.staffPayout.findUniqueOrThrow({ where: { id } });
+        if (payout.amount <= 0) return null;
+        let label: string;
+        if (payout.kind === 'PAYROLL') {
+          const run = await tx.payrollRun.findUnique({
+            where: { id: payout.sourceId },
+            select: { month: true },
+          });
+          label = `Versement des salaires de ${run ? formatPayrollMonth(run.month) : ''}`;
+        } else {
+          const advance = await tx.salaryAdvance.findUnique({
+            where: { id: payout.sourceId },
+            include: { employee: true },
+          });
+          const user = advance
+            ? await tx.user.findUnique({
+                where: { id: advance.employee.userId },
+                select: { firstName: true, lastName: true },
+              })
+            : null;
+          label = `Avance sur salaire · ${user ? `${user.lastName} ${user.firstName}` : 'Personnel'}`;
+        }
+        return {
+          posting: staffPayoutPosting({
+            kind: payout.kind,
+            amount: payout.amount,
+            method: payout.method,
+            label,
+          }),
+          date: fromDbDate(payout.date),
+          pieceRef: payout.reference,
+        };
+      }
+      case 'STOCK_PURCHASE': {
+        const m = await tx.stockMovement.findUniqueOrThrow({
+          where: { id },
+          include: { item: true },
+        });
+        const original = m.reversesId
+          ? await tx.stockMovement.findUniqueOrThrow({ where: { id: m.reversesId } })
+          : m;
+        const unitCost = original.unitCost ?? 0;
+        if (original.type !== 'PURCHASE' || !original.supplier || unitCost <= 0) return null;
+        const size = m.size ? ` (${m.size})` : '';
+        const what = `${m.item.name}${size} × ${Math.abs(m.quantity)} · ${original.supplier}`;
+        return {
+          posting: stockPurchasePosting({
+            category: m.item.category,
+            quantity: m.quantity,
+            unitCost,
+            label: m.reversesId ? `Correction d’achat : ${what}` : `Achat ${what}`,
+          }),
+          date: todayInCameroon(m.createdAt),
+          pieceRef: original.reference,
+        };
+      }
+    }
+  }
+
+  /** Refuse une opération datée dans un exercice clôturé (avant tout enregistrement). */
+  async assertPeriodOpen(date: string, tx?: Tx): Promise<void> {
+    const covering = await (tx ?? this.db).fiscalYear.findFirst({
+      where: { startDate: { lte: toDbDate(date) }, endDate: { gte: toDbDate(date) } },
+    });
+    if (covering && covering.status !== 'OPEN')
+      throw new ConflictException(
+        `Exercice clôturé : aucune opération n’est possible au ${frDate(date)}`,
+      );
+  }
+
+  /** Vrai si l'école a activé la comptabilité générale. */
+  async enabled(): Promise<boolean> {
+    const school = await this.db.school.findUnique({
+      where: { id: currentSchoolId() },
+      select: { modules: true },
+    });
+    return school?.modules.includes('accounting') ?? false;
   }
 
   // ---------------------------------------------------------------- Dépenses
@@ -762,7 +1261,7 @@ export class AccountingService {
     return supplier;
   }
 
-  async listExpenses(status?: 'PENDING_APPROVAL' | 'POSTED' | 'REJECTED') {
+  async listExpenses(status?: 'PENDING_APPROVAL' | 'POSTED' | 'REJECTED' | 'CANCELLED') {
     const expenses = await this.db.expense.findMany({
       where: { status },
       orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
@@ -775,7 +1274,17 @@ export class AccountingService {
       }),
       this.db.user.findMany({
         where: {
-          id: { in: [...new Set(expenses.flatMap((e) => [e.createdById, e.approvedById ?? '']))] },
+          id: {
+            in: [
+              ...new Set(
+                expenses.flatMap((e) => [
+                  e.createdById,
+                  e.approvedById ?? '',
+                  e.cancelledById ?? '',
+                ]),
+              ),
+            ],
+          },
         },
         select: { id: true, firstName: true, lastName: true },
       }),
@@ -805,6 +1314,9 @@ export class AccountingService {
       createdBy: name(e.createdById),
       approvedBy: name(e.approvedById),
       rejectedReason: e.rejectedReason,
+      cancelledBy: name(e.cancelledById),
+      cancelledAt: e.cancelledAt,
+      cancelReason: e.cancelReason,
       entries: entries.filter((x) => x.sourceId === e.id).map((x) => x.reference),
     }));
   }
@@ -966,6 +1478,66 @@ export class AccountingService {
     });
   }
 
+  /**
+   * Annulation d'une dépense comptabilisée (facture erronée, achat annulé) : motif obligatoire,
+   * contre-passation de ses écritures d'achat et de règlement à la date du jour, statut « annulée »
+   * et entrée au journal d'audit. La dépense et ses écritures d'origine restent intactes.
+   */
+  async cancelExpense(id: string, reason: string) {
+    await this.ensureSetup();
+    return this.run(async (tx) => {
+      const locked = await tx.$queryRaw<
+        { id: string }[]
+      >`SELECT "id" FROM "Expense" WHERE "id" = ${id} AND "schoolId" = ${currentSchoolId()} FOR UPDATE`;
+      if (locked.length === 0) throw new NotFoundException('Dépense introuvable');
+      const expense = await tx.expense.findUniqueOrThrow({ where: { id } });
+      if (expense.status === 'CANCELLED')
+        throw new ConflictException('Cette dépense est déjà annulée');
+      if (expense.status !== 'POSTED')
+        throw new ConflictException(
+          'Seule une dépense comptabilisée s’annule (une dépense en attente se rejette)',
+        );
+      const entries = await tx.accountingEntry.findMany({
+        where: { sourceType: { in: ['EXPENSE', 'EXPENSE_PAYMENT'] }, sourceId: id },
+        include: { lines: true },
+        orderBy: { createdAt: 'asc' },
+      });
+      const reversals: string[] = [];
+      for (const entry of entries) {
+        const already = await tx.accountingEntry.findFirst({
+          where: { reversesEntryId: entry.id },
+        });
+        if (already) {
+          reversals.push(already.reference);
+          continue;
+        }
+        const reversal = await this.postReversal(tx, entry, `annulation de la dépense, ${reason}`);
+        reversals.push(reversal.reference);
+      }
+      await tx.expense.update({
+        where: { id },
+        data: {
+          status: 'CANCELLED',
+          cancelledById: currentActorId() ?? null,
+          cancelledAt: new Date(),
+          cancelReason: reason,
+        },
+      });
+      await this.audit.log(
+        {
+          action: 'accounting.expense_cancelled',
+          entity: 'Expense',
+          entityId: id,
+          before: { status: 'POSTED', entries: entries.map((e) => e.reference) },
+          after: { status: 'CANCELLED', reversals },
+          reason,
+        },
+        tx,
+      );
+      return { id, status: 'CANCELLED' as const, reversals };
+    });
+  }
+
   // ---------------------------------------------------------------- Vue d'ensemble
 
   async overview() {
@@ -988,11 +1560,13 @@ export class AccountingService {
       label: SYSCOHADA_CHART.find((a) => a.number === number)?.label ?? number,
       balance: balances.find((b) => b.accountNumber === number)?.balance ?? 0,
     }));
-    const [pendingTuition, pendingExpenses, settings] = await Promise.all([
+    const [pendingTuition, pendingOperations, pendingExpenses, settings] = await Promise.all([
       this.pendingTuitionCount(),
+      this.pendingOperationsCount(),
       this.db.expense.count({ where: { status: 'PENDING_APPROVAL' } }),
       this.getSettings(),
     ]);
+    const pendingEntries = await this.db.manualEntryRequest.count({ where: { status: 'PENDING' } });
     const is = incomeStatement(balances);
     return {
       fiscalYear: current ? this.presentYear(current) : null,
@@ -1002,7 +1576,9 @@ export class AccountingService {
       charges: is.totalCharges,
       result: is.result,
       pendingTuition,
+      pendingOperations,
       pendingExpenses,
+      pendingEntries,
       ...settings,
     };
   }

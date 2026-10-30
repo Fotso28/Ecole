@@ -41,6 +41,23 @@ test('dossier du personnel, données sensibles, heures de cours et avance', asyn
   await expectNoHorizontalOverflow(page);
   await dialog.getByRole('button', { name: 'Masquer et fermer' }).click();
 
+  // Nouveau RIB saisi par la comptabilité : la direction l'approuve (une seule fois : base partagée).
+  await navigate(page, info, 'Dossiers du personnel');
+  await visibleItem(page, 'Mbarga Paul').getByRole('link').first().click();
+  await expect(page.getByRole('heading', { name: 'Mbarga Paul', level: 1 })).toBeVisible();
+  const pendingRib = page.getByText('Changement de coordonnées en attente d’approbation');
+  await expect(page.getByText('Mode de paiement')).toBeVisible();
+  if (await pendingRib.count()) {
+    await expect(
+      page.getByText(/Demandées : Virement bancaire · Ecobank · •••• 1077/),
+    ).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+    await page.getByRole('button', { name: 'Approuver' }).click();
+    await expect(page.getByText('Nouvelles coordonnées approuvées')).toBeVisible();
+  }
+  await expect(pendingRib).toHaveCount(0);
+  await expect(page.getByText('•••• 1077')).toBeVisible();
+
   // Avance demandée par la comptabilité : la direction l'accorde.
   await navigate(page, info, 'Avances sur salaire');
   const advance = visibleItem(page, 'Eyenga Brigitte');
@@ -69,6 +86,23 @@ test('dossier du personnel, données sensibles, heures de cours et avance', asyn
   await expect(
     lessons.getByRole('listitem').first().getByText('Absence non justifiée'),
   ).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+
+  // Versement de l'avance accordée par la comptabilité (une seule fois : base partagée).
+  await navigate(page, info, 'Avances sur salaire');
+  const accorded = visibleItem(page, 'Eyenga Brigitte');
+  await expect(accorded.getByText(/À verser|Versée le/).first()).toBeVisible();
+  const pay = accorded.getByRole('button', { name: /Verser/ });
+  if (await pay.count()) {
+    await pay.click();
+    const sheet = page.getByRole('dialog', { name: 'Versement de l’avance' });
+    await sheet.getByLabel('Mode de versement').selectOption('CASH');
+    await sheet.getByLabel(/Référence/).fill('BC-0001');
+    await expectNoHorizontalOverflow(page);
+    await sheet.getByRole('button', { name: 'Enregistrer le versement' }).click();
+    await expect(page.getByText('Avance versée')).toBeVisible();
+  }
+  await expect(accorded.getByText(/Versée le .*Caisse \(espèces\)/)).toBeVisible();
   await expectNoHorizontalOverflow(page);
 });
 
@@ -132,5 +166,25 @@ test('paie : préparation par la comptabilité, validation par la direction, exp
   await page.getByRole('link', { name: 'Barèmes' }).click();
   await expect(page.getByRole('heading', { name: 'Barèmes de paie', level: 1 })).toBeVisible();
   await expect(page.getByText(/à vérifier par un comptable/).first()).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+  await logout(page);
+
+  // Versement des salaires : enregistré par la comptabilité, pas par la direction qui a validé.
+  await loginStaff(page, 'compta@demo.cm');
+  await navigate(page, info, 'Paie');
+  await page.getByLabel('Mois de paie').selectOption(month);
+  await expect(page.getByText('À verser', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Marquer comme versée' }).click();
+  const payout = page.getByRole('dialog', { name: 'Marquer la paie comme versée' });
+  await payout.getByLabel('Mode de versement').selectOption('BANK');
+  await payout.getByLabel(/Référence/).fill(`VIR-${month}`);
+  await expectNoHorizontalOverflow(page);
+  await payout.getByRole('button', { name: 'Enregistrer le versement' }).click();
+  await expect(page.getByText('Paie marquée comme versée')).toBeVisible();
+  await expect(page.getByText('Versée', { exact: true })).toBeVisible();
+  await expect(
+    page.getByText(new RegExp(`réf\\. VIR-${month}.*écriture BQ-\\d{4}-\\d{6}`)),
+  ).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Marquer comme versée' })).toHaveCount(0);
   await expectNoHorizontalOverflow(page);
 });

@@ -1,6 +1,7 @@
 import type {
   ContractType,
   PayElement,
+  PaymentMethod,
   PayoutMethod,
   PayrollScale,
   PayrollStatus,
@@ -47,6 +48,8 @@ export interface EmployeeDetail extends EmployeeRow {
     bankAccount: string | null;
     mobileMoneyNumber: string | null;
   };
+  /** Changement de coordonnées de paiement en attente d'approbation (valeurs masquées). */
+  pendingPayoutChange: PendingPayoutChange | null;
   contracts: ContractView[];
   advances: {
     id: string;
@@ -93,8 +96,24 @@ export interface AdvanceRow {
   repaid: number;
   remaining: number;
   requestedById: string;
+  decidedById: string | null;
   decidedAt: string | null;
   decisionNote: string | null;
+  payout: PayoutView | null;
+}
+
+/** Versement enregistré (salaires d'une paie validée ou avance accordée). */
+export interface PayoutView {
+  id: string;
+  date: string;
+  method: PaymentMethod;
+  reference: string | null;
+  amount: number;
+  paidById: string;
+  paidBy: string | null;
+  paidAt: string;
+  sameAsValidator: boolean;
+  entry: string | null;
 }
 
 export interface HoursMonth {
@@ -159,6 +178,8 @@ export interface PayrollRunView {
   preparedById?: string | null;
   validatedAt?: string | null;
   validatedBy?: string | null;
+  validatedById?: string | null;
+  payout?: PayoutView | null;
   rejectedAt?: string | null;
   rejectedBy?: string | null;
   rejectReason?: string | null;
@@ -180,4 +201,21 @@ export function monthOptions(now = new Date()): string[] {
     out.push(d.toISOString().slice(0, 7));
   }
   return out;
+}
+
+export interface MaskedPayout {
+  method: PayoutMethod;
+  bankName: string | null;
+  bankAccount: string | null;
+  mobileMoneyNumber: string | null;
+  mobileMoneyOperator: 'MTN' | 'ORANGE' | null;
+}
+
+export interface PendingPayoutChange {
+  id: string;
+  requestedById: string;
+  requestedBy: string | null;
+  requestedAt: string;
+  before: MaskedPayout;
+  after: MaskedPayout;
 }

@@ -2,6 +2,7 @@ import {
   HttpException,
   HttpStatus,
   Injectable,
+  Logger,
   UnauthorizedException,
   ForbiddenException,
   BadRequestException,
@@ -26,7 +27,7 @@ import {
   sha256,
   totpStep,
 } from '../../common/crypto';
-import { Db, InjectDb } from '../../common/prisma';
+import { Db, InjectDb, Tx } from '../../common/prisma';
 import { NotificationsService } from '../notifications/notifications.service';
 import { templates } from '../notifications/templates';
 
@@ -41,10 +42,22 @@ export interface SessionResult {
 
 export type LoginResult = SessionResult | { mfaRequired: true; mfaToken: string };
 
-const OTP_TTL_MS = 5 * 60 * 1000;
-const OTP_MAX_ATTEMPTS = 5;
-const OTP_MAX_PER_WINDOW = 3;
+/**
+ * Codes SMS des parents (voir docs/exploitation.md, « Codes SMS de connexion ») :
+ * - deux quotas par numéro, l'un pour les appareils de confiance (déjà connectés avec ce numéro),
+ *   l'autre pour les demandes anonymes : un tiers qui épuise le second ne bloque pas le premier ;
+ * - un code reste valable toute la fenêtre et une nouvelle demande n'annule pas les précédents :
+ *   quand le quota anonyme est atteint, le dernier SMS reçu par le parent est encore utilisable ;
+ * - plafonds journaliers par numéro et budget SMS global pour les demandes anonymes.
+ */
+const OTP_TTL_MS = 15 * 60 * 1000;
 const OTP_WINDOW_MS = 15 * 60 * 1000;
+const OTP_MAX_PER_WINDOW = 3;
+const OTP_MAX_PER_DAY = 6;
+const OTP_MAX_FAILURES_PER_WINDOW = 5;
+const OTP_MAX_FAILURES_PER_DAY = 20;
+const DAY_MS = 24 * 3600 * 1000;
+export const DEVICE_TOKEN_TTL_DAYS = 180;
 const MFA_MAX_FAILURES = 5;
 const MFA_LOCK_MS = 15 * 60 * 1000;
 // Empreinte factice pour garder un temps de réponse constant si l'utilisateur n'existe pas.
@@ -52,6 +65,8 @@ let dummyHash: string | undefined;
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger('Auth');
+
   constructor(
     @InjectDb() private readonly db: Db,
     private readonly jwt: JwtService,
@@ -365,31 +380,75 @@ export class AuthService {
     await this.audit.log({ action: 'auth.mfa_enabled', entity: 'User', entityId: userId });
   }
 
+  /** Jeton d'appareil de confiance pour un numéro, remis après une connexion réussie. */
+  static deviceToken(phone: string, now = Date.now()): string {
+    const exp = Math.floor(now / 1000) + DEVICE_TOKEN_TTL_DAYS * 86_400;
+    return `v1.${exp}.${hmacSha256(env().OTP_SECRET, `device:${phone}:${exp}`).slice(0, 32)}`;
+  }
+
+  static isTrustedDevice(phone: string, token: string | undefined, now = Date.now()): boolean {
+    const m = /^v1\.(\d{1,12})\.([0-9a-f]{32})$/.exec(token ?? '');
+    if (!m?.[1] || !m[2] || Number(m[1]) * 1000 < now) return false;
+    return safeEqual(m[2], hmacSha256(env().OTP_SECRET, `device:${phone}:${m[1]}`).slice(0, 32));
+  }
+
+  /** Sérialise les opérations sur les codes d'un numéro (quotas exacts malgré les requêtes simultanées). */
+  private lockPhone(tx: Tx, phone: string) {
+    return tx.$queryRaw`SELECT 1 AS locked FROM (SELECT pg_advisory_xact_lock(hashtext(${`otp:${phone}`}))) AS l`;
+  }
+
   /**
    * Demande de code de connexion parent. La réponse est identique que le numéro soit
-   * connu ou non, pour ne pas révéler quels numéros sont enregistrés.
+   * connu ou non, et que le quota soit atteint ou non, pour ne rien révéler.
    */
-  async requestOtp(phone: string): Promise<void> {
-    const since = new Date(Date.now() - OTP_WINDOW_MS);
-    const recent = await this.db.otpCode.count({ where: { phone, createdAt: { gte: since } } });
-    if (recent >= OTP_MAX_PER_WINDOW) {
-      throw new HttpException(
-        'Trop de demandes de code. Réessayez dans quelques minutes.',
-        HttpStatus.TOO_MANY_REQUESTS,
-      );
-    }
+  async requestOtp(phone: string, deviceToken?: string): Promise<{ sent: boolean }> {
+    const trusted = AuthService.isTrustedDevice(phone, deviceToken);
     const known = await runAsSystem('otp-lookup', () =>
       this.db.guardian.count({ where: { phone } }),
     );
     const code = randomDigits(6);
-    await this.db.otpCode.create({
-      data: {
-        phone,
-        codeHash: hmacSha256(env().OTP_SECRET, `${phone}:${code}`),
-        expiresAt: new Date(Date.now() + OTP_TTL_MS),
-      },
+    const outcome = await this.db.$transaction(async (tx) => {
+      await this.lockPhone(tx, phone);
+      const now = Date.now();
+      const [inWindow, inDay] = await Promise.all([
+        tx.otpCode.count({
+          where: { phone, trusted, createdAt: { gte: new Date(now - OTP_WINDOW_MS) } },
+        }),
+        tx.otpCode.count({ where: { phone, trusted, createdAt: { gte: new Date(now - DAY_MS) } } }),
+      ]);
+      if (inWindow >= OTP_MAX_PER_WINDOW || inDay >= OTP_MAX_PER_DAY) return 'throttled' as const;
+      // Budget SMS global des demandes anonymes : plafonne le coût d'une attaque sur de nombreux
+      // numéros. Les appareils de confiance n'y sont pas soumis.
+      const overBudget =
+        !trusted &&
+        known > 0 &&
+        (await tx.otpCode.count({
+          where: { sent: true, trusted: false, createdAt: { gte: new Date(now - DAY_MS) } },
+        })) >= env().OTP_DAILY_SMS_BUDGET;
+      const send = known > 0 && !overBudget;
+      await tx.otpCode.create({
+        data: {
+          phone,
+          codeHash: hmacSha256(env().OTP_SECRET, `${phone}:${code}`),
+          expiresAt: new Date(now + OTP_TTL_MS),
+          trusted,
+          sent: send,
+        },
+      });
+      if (overBudget) return 'over-budget' as const;
+      return send ? ('send' as const) : ('unknown' as const);
     });
-    if (known === 0) return;
+    if (outcome === 'throttled') {
+      this.logger.warn(`Quota de codes atteint (${trusted ? 'appareil de confiance' : 'anonyme'})`);
+      return { sent: false };
+    }
+    if (outcome === 'over-budget') {
+      this.logger.error(
+        'Budget journalier de SMS de connexion atteint : demandes anonymes suspendues',
+      );
+      return { sent: false };
+    }
+    if (outcome !== 'send') return { sent: false };
     const n = await this.notifications.enqueue({
       recipient: phone,
       template: 'otp',
@@ -398,27 +457,62 @@ export class AuthService {
     // Envoi sans attendre la passerelle SMS : le temps de réponse ne révèle pas si le numéro
     // est connu. En cas d'échec, le worker reprend le message de la table d'envoi.
     void this.notifications.dispatchNow(n.id);
+    return { sent: true };
   }
 
-  async verifyOtp(phone: string, code: string, userAgent?: string): Promise<SessionResult> {
-    const otp = await this.db.otpCode.findFirst({
-      where: { phone, consumedAt: null, expiresAt: { gt: new Date() } },
-      orderBy: { createdAt: 'desc' },
-    });
+  async verifyOtp(
+    phone: string,
+    code: string,
+    userAgent?: string,
+    deviceToken?: string,
+  ): Promise<SessionResult> {
+    const trusted = AuthService.isTrustedDevice(phone, deviceToken);
     const invalid = new UnauthorizedException('Code incorrect ou expiré');
-    if (!otp) throw invalid;
-    // Comptage atomique : des essais simultanés ne dépassent pas la limite.
-    const counted = await this.db.otpCode.updateMany({
-      where: { id: otp.id, consumedAt: null, attempts: { lt: OTP_MAX_ATTEMPTS } },
-      data: { attempts: { increment: 1 } },
+    const result = await this.db.$transaction(async (tx) => {
+      await this.lockPhone(tx, phone);
+      const now = Date.now();
+      // Essais erronés comptés par numéro et séparément pour les appareils de confiance :
+      // un tiers qui multiplie les faux codes ne bloque pas le parent sur son téléphone habituel.
+      const [failuresInWindow, failuresInDay] = await Promise.all([
+        tx.otpFailure.count({
+          where: { phone, trusted, createdAt: { gte: new Date(now - OTP_WINDOW_MS) } },
+        }),
+        tx.otpFailure.count({
+          where: { phone, trusted, createdAt: { gte: new Date(now - DAY_MS) } },
+        }),
+      ]);
+      if (
+        failuresInWindow >= OTP_MAX_FAILURES_PER_WINDOW ||
+        failuresInDay >= OTP_MAX_FAILURES_PER_DAY
+      )
+        return 'locked' as const;
+      // Tous les codes encore valables sont acceptés : une demande d'un tiers n'annule pas le
+      // code que le parent vient de recevoir.
+      const active = await tx.otpCode.findMany({
+        where: { phone, consumedAt: null, expiresAt: { gt: new Date(now) } },
+        orderBy: { createdAt: 'desc' },
+        take: 2 * OTP_MAX_PER_WINDOW,
+      });
+      const hash = hmacSha256(env().OTP_SECRET, `${phone}:${code}`);
+      const match = active.find((o) => safeEqual(o.codeHash, hash));
+      if (!match) {
+        await tx.otpFailure.create({ data: { phone, trusted } });
+        if (active[0])
+          await tx.otpCode.update({
+            where: { id: active[0].id },
+            data: { attempts: { increment: 1 } },
+          });
+        return 'invalid' as const;
+      }
+      await tx.otpCode.update({ where: { id: match.id }, data: { consumedAt: new Date(now) } });
+      return 'ok' as const;
     });
-    if (counted.count === 0) throw invalid;
-    if (!safeEqual(otp.codeHash, hmacSha256(env().OTP_SECRET, `${phone}:${code}`))) throw invalid;
-    const consumed = await this.db.otpCode.updateMany({
-      where: { id: otp.id, consumedAt: null },
-      data: { consumedAt: new Date() },
-    });
-    if (consumed.count === 0) throw invalid;
+    if (result === 'locked')
+      throw new HttpException(
+        'Trop de codes erronés. Réessayez dans quelques minutes.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    if (result === 'invalid') throw invalid;
 
     const guardians = await runAsSystem('otp-login', () =>
       this.db.guardian.findMany({ where: { phone }, orderBy: { createdAt: 'asc' } }),

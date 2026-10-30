@@ -50,6 +50,7 @@ export const PERMISSIONS = [
   'health.read',
   'audit.read',
   'settings.write',
+  'subscription.read',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 

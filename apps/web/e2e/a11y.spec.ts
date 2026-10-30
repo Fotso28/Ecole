@@ -1,7 +1,13 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 import { API_URL } from '../playwright.config';
-import { loginParent, loginStaff, PASSWORD } from './helpers';
+import {
+  loginParent,
+  loginPlatformAdmin,
+  loginStaff,
+  PASSWORD,
+  preparePlatformAdmin,
+} from './helpers';
 
 /** Accessibilité automatisée (WCAG 2.1 A et AA) : aucune violation grave ou critique. */
 async function expectAccessible(page: Page, label: string): Promise<void> {
@@ -90,4 +96,22 @@ test('portail des parents', async ({ page, request }, info) => {
     await expect(page.locator('main').first()).toBeVisible();
     await expectAccessible(page, path);
   }
+});
+
+test('facturation de la plateforme', async ({ page, request }) => {
+  const { secret } = await preparePlatformAdmin(request);
+  await loginPlatformAdmin(page, secret);
+  await expect(page.locator('main h1').first()).toBeVisible();
+  await expectAccessible(page, '/plateforme/facturation');
+  await page.getByRole('button', { name: 'Nouvelle offre' }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await expectAccessible(page, '/plateforme/facturation (nouvelle offre)');
+  await page.keyboard.press('Escape');
+  await page
+    .getByRole('link', { name: /Collège Démo/ })
+    .filter({ visible: true })
+    .first()
+    .click();
+  await expect(page.getByRole('heading', { name: 'Collège Démo' })).toBeVisible();
+  await expectAccessible(page, '/plateforme/facturation/[id]');
 });

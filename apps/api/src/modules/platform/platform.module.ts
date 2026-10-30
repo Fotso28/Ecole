@@ -1,15 +1,23 @@
-import { Body, Controller, Get, Injectable, Module, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Injectable, Module, Param, Post, Put } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ApiTags } from '@nestjs/swagger';
-import { schoolCreateSchema } from '@ecole/shared';
+import {
+  schoolCreateSchema,
+  subscriptionAssignSchema,
+  subscriptionInvoiceIssueSchema,
+  subscriptionPaymentSchema,
+  subscriptionPlanSchema,
+  subscriptionReasonSchema,
+} from '@ecole/shared';
 import { z } from 'zod';
 import { AuditService } from '../../common/audit.service';
 import type { AccessTokenPayload } from '../../common/auth.guard';
 import { currentActorId } from '../../common/context';
-import { PlatformAdminRoute } from '../../common/decorators';
+import { PlatformAdminRoute, RequirePermissions } from '../../common/decorators';
 import { Db, InjectDb } from '../../common/prisma';
 import { ZodPipe } from '../../common/zod.pipe';
 import { AuthService } from '../auth/auth.service';
+import { BillingService } from './billing.service';
 
 const breakGlassSchema = z.object({
   reason: z.string().trim().min(10, 'Motif de 10 caractères minimum').max(300),
@@ -121,5 +129,112 @@ export class PlatformController {
   }
 }
 
-@Module({ controllers: [PlatformController], providers: [PlatformService] })
+/** Facturation des abonnements : réservée au super-administrateur, chiffres agrégés seulement. */
+@ApiTags('platform')
+@Controller('platform/billing')
+export class PlatformBillingController {
+  constructor(private readonly billing: BillingService) {}
+
+  @PlatformAdminRoute()
+  @Get('plans')
+  plans() {
+    return this.billing.listPlans();
+  }
+
+  @PlatformAdminRoute()
+  @Post('plans')
+  createPlan(
+    @Body(new ZodPipe(subscriptionPlanSchema)) body: z.infer<typeof subscriptionPlanSchema>,
+  ) {
+    return this.billing.createPlan(body);
+  }
+
+  @PlatformAdminRoute()
+  @Post('plans/:id/archive')
+  archivePlan(@Param('id') id: string) {
+    return this.billing.archivePlan(id);
+  }
+
+  @PlatformAdminRoute()
+  @Get('schools')
+  overview() {
+    return this.billing.overview();
+  }
+
+  @PlatformAdminRoute()
+  @Get('schools/:id')
+  school(@Param('id') id: string) {
+    return this.billing.schoolDetail(id);
+  }
+
+  @PlatformAdminRoute()
+  @Put('schools/:id/subscription')
+  assign(
+    @Param('id') id: string,
+    @Body(new ZodPipe(subscriptionAssignSchema)) body: z.infer<typeof subscriptionAssignSchema>,
+  ) {
+    return this.billing.assignPlan(id, body.planId);
+  }
+
+  @PlatformAdminRoute()
+  @Post('schools/:id/invoices')
+  issue(
+    @Param('id') id: string,
+    @Body(new ZodPipe(subscriptionInvoiceIssueSchema))
+    body: z.infer<typeof subscriptionInvoiceIssueSchema>,
+  ) {
+    return this.billing.issueInvoice(id, body);
+  }
+
+  @PlatformAdminRoute()
+  @Post('invoices/:id/payments')
+  pay(
+    @Param('id') id: string,
+    @Body(new ZodPipe(subscriptionPaymentSchema)) body: z.infer<typeof subscriptionPaymentSchema>,
+  ) {
+    return this.billing.recordPayment(id, body);
+  }
+
+  @PlatformAdminRoute()
+  @Post('payments/:id/correct')
+  correct(
+    @Param('id') id: string,
+    @Body(new ZodPipe(subscriptionReasonSchema)) body: z.infer<typeof subscriptionReasonSchema>,
+  ) {
+    return this.billing.correctPayment(id, body.reason);
+  }
+
+  @PlatformAdminRoute()
+  @Post('invoices/:id/cancel')
+  cancel(
+    @Param('id') id: string,
+    @Body(new ZodPipe(subscriptionReasonSchema)) body: z.infer<typeof subscriptionReasonSchema>,
+  ) {
+    return this.billing.cancelInvoice(id, body.reason);
+  }
+
+  @PlatformAdminRoute()
+  @Post('invoices/:id/reminders')
+  remind(@Param('id') id: string) {
+    return this.billing.remind(id);
+  }
+}
+
+/** Abonnement vu par la direction de l'établissement (Paramètres). */
+@ApiTags('settings')
+@Controller('subscription')
+export class SubscriptionController {
+  constructor(private readonly billing: BillingService) {}
+
+  @RequirePermissions('subscription.read')
+  @Get()
+  mine() {
+    return this.billing.forCurrentSchool();
+  }
+}
+
+@Module({
+  controllers: [PlatformController, PlatformBillingController, SubscriptionController],
+  providers: [PlatformService, BillingService],
+})
 export class PlatformModule {}

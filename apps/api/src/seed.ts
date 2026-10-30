@@ -489,6 +489,18 @@ async function main(): Promise<void> {
       authorId: staff['direction@demo.cm'] ?? '',
     },
   });
+  // Offres d'abonnement de la plateforme (facturation des écoles).
+  await base.subscriptionPlan.createMany({
+    data: [
+      { name: 'Essentiel', pricing: 'PER_STUDENT', pricePerStudent: 1500 },
+      {
+        name: 'À la carte',
+        pricing: 'PER_MODULE',
+        modulePrices: { students: 60000, grades: 150000, finance: 150000, portal: 90000 },
+      },
+    ],
+    skipDuplicates: true,
+  });
   // Les SMS générés par le jeu de démonstration ne doivent pas partir.
   await base.notificationOutbox.updateMany({
     where: { status: 'PENDING' },

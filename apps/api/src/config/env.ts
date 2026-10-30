@@ -18,11 +18,33 @@ const envSchema = z.object({
   SMS_HTTP_URL: z.string().optional(),
   SMS_HTTP_TOKEN: z.string().optional(),
   SMS_SENDER: z.string().default('ECOLE'),
-  MOBILE_MONEY_PROVIDER: z.enum(['simulator', 'http']).default('simulator'),
+  MOBILE_MONEY_PROVIDER: z.enum(['simulator', 'http', 'operators']).default('simulator'),
   MOBILE_MONEY_HTTP_URL: z.string().optional(),
   MOBILE_MONEY_HTTP_TOKEN: z.string().optional(),
   MOBILE_MONEY_WEBHOOK_SECRET: z.string().min(16),
   MOBILE_MONEY_ALLOWED_IPS: z.string().default(''),
+  // Raccordement direct MTN MoMo (API Collection) et Orange Money Cameroun (paiement marchand).
+  MTN_MOMO_BASE_URL: z.string().default('https://sandbox.momodeveloper.mtn.com'),
+  MTN_MOMO_TARGET_ENVIRONMENT: z.string().default('sandbox'),
+  MTN_MOMO_SUBSCRIPTION_KEY: z.string().optional(),
+  MTN_MOMO_API_USER: z.string().optional(),
+  MTN_MOMO_API_KEY: z.string().optional(),
+  MTN_MOMO_CURRENCY: z.string().default('XAF'),
+  MTN_MOMO_CALLBACK_URL: z.string().optional(),
+  ORANGE_MONEY_BASE_URL: z.string().default('https://api-s1.orange.cm'),
+  ORANGE_MONEY_API_PATH: z.string().default('/omcoreapis/1.0.2'),
+  ORANGE_MONEY_CLIENT_ID: z.string().optional(),
+  ORANGE_MONEY_CLIENT_SECRET: z.string().optional(),
+  ORANGE_MONEY_AUTH_TOKEN: z.string().optional(),
+  ORANGE_MONEY_CHANNEL_MSISDN: z.string().optional(),
+  ORANGE_MONEY_CHANNEL_PIN: z.string().optional(),
+  ORANGE_MONEY_CALLBACK_URL: z.string().optional(),
+  // Limites dédiées aux paiements (par utilisateur ou par adresse pour les opérateurs).
+  PAYMENT_RATE_PORTAL: z.string().default('5/600,20/86400'),
+  PAYMENT_RATE_CASHIER: z.string().default('30/60,600/3600'),
+  PAYMENT_RATE_CALLBACK: z.string().default('120/60'),
+  // Codes SMS de connexion des parents.
+  OTP_DAILY_SMS_BUDGET: z.coerce.number().int().positive().default(2000),
   QUEUES_ENABLED: z
     .enum(['true', 'false'])
     .default('true')

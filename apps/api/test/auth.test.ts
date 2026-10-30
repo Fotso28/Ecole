@@ -316,13 +316,13 @@ describe('connexion des parents par code SMS', () => {
     await http().post('/auth/otp/request').send({ phone: '+33612345678' }).expect(400);
   });
 
-  it('limite le nombre de demandes de code', async () => {
-    for (let i = 0; i < 3; i++)
+  it('limite le nombre de SMS envoyés, avec une réponse identique', async () => {
+    for (let i = 0; i < 4; i++)
       await http().post('/auth/otp/request').send({ phone: '677123456' }).expect(202);
-    await http().post('/auth/otp/request').send({ phone: '677123456' }).expect(429);
+    expect(await prisma.notificationOutbox.count({ where: { template: 'otp' } })).toBe(3);
   });
 
-  it('bloque le code après cinq essais erronés', async () => {
+  it('bloque la vérification après cinq essais erronés', async () => {
     const code = await requestOtp(app, '677123456');
     for (let i = 0; i < 5; i++) {
       await http()
@@ -330,7 +330,7 @@ describe('connexion des parents par code SMS', () => {
         .send({ phone: '677123456', code: code === '000000' ? '111111' : '000000' })
         .expect(401);
     }
-    await http().post('/auth/otp/verify').send({ phone: '677123456', code }).expect(401);
+    await http().post('/auth/otp/verify').send({ phone: '677123456', code }).expect(429);
   });
 
   it('compte les essais simultanés sans dépasser la limite', async () => {
@@ -341,13 +341,13 @@ describe('connexion des parents par code SMS', () => {
         http().post('/auth/otp/verify').send({ phone: '677123456', code: wrong }),
       ),
     );
-    expect(results.every((r) => r.status === 401)).toBe(true);
-    const otp = await prisma.otpCode.findFirstOrThrow();
-    expect(otp.attempts).toBe(5);
-    await http().post('/auth/otp/verify').send({ phone: '677123456', code }).expect(401);
+    expect(results.every((r) => r.status === 401 || r.status === 429)).toBe(true);
+    expect(results.filter((r) => r.status === 401)).toHaveLength(5);
+    expect(await prisma.otpFailure.count()).toBe(5);
+    await http().post('/auth/otp/verify').send({ phone: '677123456', code }).expect(429);
   });
 
-  it('expire le code après cinq minutes', async () => {
+  it('expire le code', async () => {
     const code = await requestOtp(app, '677123456');
     await prisma.otpCode.updateMany({ data: { expiresAt: new Date(Date.now() - 1000) } });
     await http().post('/auth/otp/verify').send({ phone: '677123456', code }).expect(401);

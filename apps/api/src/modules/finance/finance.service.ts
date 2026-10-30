@@ -34,6 +34,7 @@ import { templates } from '../notifications/templates';
 import {
   MOBILE_MONEY_PROVIDER,
   MobileMoneyProvider,
+  OperatorPendingError,
   OperatorRejectedError,
   OperatorStatus,
   StatusResult,
@@ -459,7 +460,7 @@ export class FinanceService {
     receivedById: string | null,
     initiatedByUserId?: string,
   ) {
-    const payment = await this.db.payment.create({
+    let payment = await this.db.payment.create({
       data: {
         schoolId,
         studentId: input.studentId,
@@ -504,10 +505,16 @@ export class FinanceService {
         );
       }
       // Issue inconnue (délai dépassé, coupure réseau) : l'opérateur a peut-être débité le payeur.
-      // Le paiement reste en attente ; la réconciliation interroge l'opérateur avec notre identifiant.
+      // Le paiement reste en attente ; la réconciliation interroge l'opérateur avec la référence
+      // connue ou, à défaut, avec notre identifiant.
       this.logger.warn(
         `Demande Mobile Money sans réponse (${payment.id}) : ${e instanceof Error ? e.message : e}`,
       );
+      if (e instanceof OperatorPendingError && e.reference)
+        payment = await this.db.payment.update({
+          where: { id: payment.id },
+          data: { operatorReference: e.reference },
+        });
       await this.audit.log({
         action: 'finance.mobile_money_unconfirmed',
         entity: 'Payment',
@@ -808,6 +815,53 @@ export class FinanceService {
       }
     }
     return { checked: pending.length, settled, expired };
+  }
+
+  /**
+   * Rappel non signé d'un opérateur (MTN MoMo, Orange Money) : son contenu n'est jamais cru.
+   * Le paiement est retrouvé puis son statut est re-vérifié auprès de l'opérateur avant tout
+   * encaissement. Seuls les paiements encore ouverts déclenchent une vérification, pour qu'un
+   * rappel rejoué ou forgé ne multiplie pas les appels à l'opérateur.
+   */
+  async verifyOperatorCallback(
+    method: 'MTN_MOMO' | 'ORANGE_MONEY',
+    hint: { reference?: string; externalId?: string; claimedStatus?: string },
+  ): Promise<{ verified: boolean; status?: string }> {
+    if (!hint.reference && !hint.externalId) return { verified: false };
+    const payment = await runAsSystem('mobile-money-callback', () =>
+      this.db.payment.findFirst({
+        where: {
+          method,
+          OR: [
+            ...(hint.reference ? [{ operatorReference: hint.reference }] : []),
+            ...(hint.externalId ? [{ id: hint.externalId }] : []),
+          ],
+        },
+      }),
+    );
+    if (!payment) return { verified: false };
+    if (payment.status !== 'PENDING' && payment.status !== 'CANCELLED')
+      return { verified: false, status: payment.status };
+    const check = await this.mobileMoney.checkStatus(
+      payment.operatorReference ?? payment.id,
+      payment.method,
+    );
+    if (hint.claimedStatus && /SUCCESS/i.test(hint.claimedStatus) && check.status !== 'SUCCESS')
+      this.logger.warn(
+        `Rappel ${method} annonçant un succès non confirmé par l'opérateur (paiement ${payment.id})`,
+      );
+    if (check.status === 'PENDING') return { verified: true, status: 'PENDING' };
+    // Un paiement expiré n'est rouvert que par un succès confirmé (confirmation tardive).
+    if (payment.status === 'CANCELLED' && check.status !== 'SUCCESS')
+      return { verified: true, status: payment.status };
+    const r = await this.confirmMobileMoney(
+      payment.operatorReference
+        ? { reference: payment.operatorReference, operator: method }
+        : { externalId: payment.id, operator: method },
+      check.status,
+      check.amount,
+    );
+    return { verified: true, status: r.status };
   }
 
   /**

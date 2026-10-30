@@ -92,7 +92,12 @@ export function runAsSystem<T>(
         kind: 'system',
         reason,
         schoolId,
-        actorId: parent && 'userId' in parent ? parent.userId : undefined,
+        actorId:
+          parent && 'userId' in parent
+            ? parent.userId
+            : parent?.kind === 'system'
+              ? parent.actorId
+              : undefined,
         ip: parent?.ip,
       },
     },

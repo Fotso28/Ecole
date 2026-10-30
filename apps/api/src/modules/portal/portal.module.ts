@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
+import { RateLimit } from '../../common/rate-limit';
 import {
   formatGrade,
   justificationCreateSchema,
@@ -405,6 +406,7 @@ export class PortalController {
 
   @ParentRoute()
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @RateLimit('portal-payment')
   @Post('payments')
   pay(@Body(new ZodPipe(portalPaymentSchema)) body: z.infer<typeof portalPaymentSchema>) {
     return this.portal.pay(body);

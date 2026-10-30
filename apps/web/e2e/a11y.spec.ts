@@ -79,8 +79,12 @@ test('journal des paiements et déplacement d’un cours', async ({ page }) => {
   // Emploi du temps : choix d'un créneau au clavier (alternative au glisser-déposer).
   await page.goto('/emploi-du-temps');
   await page.getByLabel('Classe').selectOption({ label: '4e A' });
+  // Sur téléphone, un jour à la fois : le lundi a des cours dans le jeu de démonstration.
+  const monday = page.getByRole('tab', { name: 'Lundi' });
+  if (await monday.isVisible()) await monday.click();
   await page
     .getByRole('button', { name: /^Déplacer / })
+    .filter({ visible: true })
     .first()
     .click();
   await expect(page.getByRole('dialog', { name: /^Déplacer / })).toBeVisible();

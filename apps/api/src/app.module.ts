@@ -8,6 +8,7 @@ import { ErrorsFilter } from './common/errors.filter';
 import { PrismaModule } from './common/prisma';
 import { HealthController } from './health.controller';
 import { AcademicModule } from './modules/academic/academic.module';
+import { AlertsModule } from './modules/alerts/alerts.module';
 import { AttendanceModule } from './modules/attendance/attendance.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -56,6 +57,7 @@ import { VerifyModule } from './modules/verify/verify.module';
     TimetableModule,
     VerifyModule,
     DevModule,
+    AlertsModule,
   ],
   controllers: [HealthController],
   providers: [

@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { NotificationChannel, NotificationOutbox, Prisma } from '@prisma/client';
 import { Db, InjectDb, Tx } from '../../common/prisma';
+import { HttpEmailProvider } from './email.provider';
 import { SMS_PROVIDER, SmsProvider } from './sms.provider';
 
 export interface NotificationInput {
@@ -96,8 +97,14 @@ export class NotificationsService {
       case 'WHATSAPP':
         // Canal soumis à l'approbation Meta : repli sur SMS tant qu'il n'est pas configuré.
         return this.sms.send(n.recipient, n.body);
-      case 'EMAIL':
-        throw new Error('Canal e-mail non configuré');
+      case 'EMAIL': {
+        const subject = (n.payload as { subject?: unknown } | null)?.subject;
+        return new HttpEmailProvider().send(
+          n.recipient,
+          typeof subject === 'string' ? subject : 'Ecole',
+          n.body,
+        );
+      }
     }
   }
 }

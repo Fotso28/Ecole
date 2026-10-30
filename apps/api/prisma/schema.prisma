@@ -412,6 +412,7 @@ model Guardian {
 
   @@unique([schoolId, phone])
   @@index([phone])
+  @@index([userId])
 }
 
 model StudentGuardian {
@@ -446,6 +447,7 @@ model Enrollment {
 
   @@unique([studentId, academicYearId])
   @@index([schoolId, classId])
+  @@index([schoolId, academicYearId])
 }
 
 model StudentDocument {
@@ -651,6 +653,7 @@ model InvoiceLine {
   allocations PaymentAllocation[]
 
   @@index([schoolId, dueDate])
+  @@index([invoiceId])
 }
 
 model Payment {
@@ -697,6 +700,8 @@ model PaymentAllocation {
   invoiceLine InvoiceLine @relation(fields: [invoiceLineId], references: [id], onDelete: Restrict)
 
   @@index([schoolId, invoiceLineId])
+  @@index([invoiceLineId])
+  @@index([paymentId])
 }
 
 model Receipt {
@@ -806,6 +811,7 @@ model AuditLog {
 
   @@index([schoolId, createdAt])
   @@index([entity, entityId])
+  @@index([action, createdAt])
 }
 
 model Counter {
@@ -838,4 +844,16 @@ model TimetableEntry {
   endTime        String
 
   @@index([schoolId, academicYearId])
+}
+
+/// État des alertes techniques (table globale, hors établissement) : anti-répétition et compteurs.
+model OpsAlertState {
+  key        String    @id
+  /// Dernière valeur d'un compteur surveillé (échecs, conflits, notifications abandonnées).
+  baseline   Int?
+  /// Échecs consécutifs (sonde de santé de l'API).
+  failures   Int       @default(0)
+  active     Boolean   @default(false)
+  lastSentAt DateTime?
+  updatedAt  DateTime  @updatedAt
 }

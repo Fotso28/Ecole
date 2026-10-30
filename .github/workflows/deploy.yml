@@ -1,0 +1,122 @@
+name: Déploiement
+
+# Après une CI verte sur main (images publiées avec le SHA du commit), déploie sur le
+# serveur par SSH : deploy/deploy.sh fait docker compose pull && docker compose up -d,
+# contrôle /api/health et revient seul à la version précédente en cas d'échec.
+# Inactif tant que les secrets DEPLOY_HOST, DEPLOY_USER et DEPLOY_SSH_KEY ne sont pas définis.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Version à déployer (SHA complet d’un commit de main déjà construit)'
+        required: false
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Configuration du déploiement
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.secrets.outputs.enabled }}
+    steps:
+      - id: secrets
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          if [ -n "$DEPLOY_HOST" ] && [ -n "$DEPLOY_USER" ] && [ -n "$DEPLOY_SSH_KEY" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Déploiement automatique inactif : définir les secrets DEPLOY_HOST, DEPLOY_USER et DEPLOY_SSH_KEY."
+          fi
+
+  deploy:
+    name: Déploiement en production
+    needs: check
+    if: >-
+      needs.check.outputs.enabled == 'true' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'))
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 20
+    env:
+      SHA: ${{ inputs.tag || github.event.workflow_run.head_sha || github.sha }}
+      DEPLOY_DIR: ${{ vars.DEPLOY_DIR || '/opt/ecole/deploy' }}
+      IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SHA }}
+
+      - name: Connexion SSH
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          if [ -n "$DEPLOY_KNOWN_HOSTS" ]; then
+            printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            echo "::warning::Secret DEPLOY_KNOWN_HOSTS absent : empreinte du serveur acceptée sans vérification."
+            ssh-keyscan -p "$DEPLOY_PORT" "$DEPLOY_HOST" > ~/.ssh/known_hosts
+          fi
+          {
+            echo "Host ecole"
+            echo "  HostName $DEPLOY_HOST"
+            echo "  User $DEPLOY_USER"
+            echo "  Port $DEPLOY_PORT"
+            echo "  IdentityFile ~/.ssh/id_deploy"
+            echo "  IdentitiesOnly yes"
+            echo "  ServerAliveInterval 30"
+          } > ~/.ssh/config
+
+      - name: Envoi des fichiers de déploiement
+        run: |
+          git archive --format=tar.gz -o "/tmp/ecole-deploy-$SHA.tgz" HEAD:deploy
+          scp "/tmp/ecole-deploy-$SHA.tgz" "ecole:/tmp/ecole-deploy-$SHA.tgz"
+
+      - name: Déploiement, contrôle de santé et retour arrière automatique
+        run: |
+          ssh ecole bash -s -- "$SHA" "$IMAGE_PREFIX" "$DEPLOY_DIR" <<'EOF'
+          set -u
+          sha=$1 prefix=$2 dir=$3 bundle=/tmp/ecole-deploy-$1.tgz
+          tmp=$(mktemp -d)
+          tar -xzf "$bundle" -C "$tmp"
+          rc=0
+          # </dev/null : deploy.sh ne doit pas lire la suite de ce script sur l'entrée standard.
+          DEPLOY_DIR="$dir" bash "$tmp/deploy.sh" --bundle "$bundle" --tag "$sha" --prefix "$prefix" </dev/null || rc=$?
+          rm -rf "$tmp" "$bundle"
+          exit "$rc"
+          EOF
+
+      - name: Contrôle public de /api/health
+        id: public
+        if: vars.DEPLOY_HEALTH_URL != ''
+        env:
+          URL: ${{ vars.DEPLOY_HEALTH_URL }}
+        run: curl -fsS --retry 6 --retry-delay 5 --retry-all-errors --max-time 10 "$URL"
+
+      - name: Retour arrière (contrôle public en échec)
+        if: failure() && steps.public.outcome == 'failure'
+        run: |
+          ssh ecole bash -s -- "$DEPLOY_DIR" <<'EOF'
+          DEPLOY_DIR=$1 bash "$1/deploy.sh" --rollback </dev/null
+          EOF

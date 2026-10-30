@@ -1,0 +1,44 @@
+# Lit les journaux des conteneurs du projet Compose « ecole » et les envoie à Loki.
+# Étiquettes : service (api, worker, nginx…) et niveau ; la ligne JSON est gardée telle quelle.
+data_dir: /var/lib/vector
+
+sources:
+  docker:
+    type: docker_logs
+    include_labels:
+      - com.docker.compose.project=ecole
+    exclude_containers:
+      - ecole-vector
+      - ecole-loki
+      - ecole-grafana
+
+transforms:
+  labels:
+    type: remap
+    inputs: [docker]
+    source: |
+      service = string(.label."com.docker.compose.service") ?? "inconnu"
+      level = "info"
+      parsed, err = parse_json(.message)
+      if err == null && is_object(parsed) {
+        level = string(parsed.level) ?? "info"
+      }
+      . = { "timestamp": .timestamp, "message": .message, "service": service, "level": level }
+
+sinks:
+  loki:
+    type: loki
+    inputs: [labels]
+    endpoint: http://loki:3100
+    encoding:
+      codec: text
+    labels:
+      service: '{{ service }}'
+      level: '{{ level }}'
+    out_of_order_action: accept
+    buffer:
+      type: disk
+      max_size: 268435488
+    batch:
+      max_bytes: 1048576
+      timeout_secs: 2

@@ -50,12 +50,14 @@ export type RequestContext =
 
 interface Holder {
   current: RequestContext;
+  /** Identifiant de corrélation des journaux (requête HTTP ou exécution de tâche). */
+  requestId?: string;
 }
 
 const storage = new AsyncLocalStorage<Holder>();
 
-export function runWithContext<T>(ctx: RequestContext, fn: () => T): T {
-  return storage.run({ current: ctx }, fn);
+export function runWithContext<T>(ctx: RequestContext, fn: () => T, requestId?: string): T {
+  return storage.run({ current: ctx, requestId }, fn);
 }
 
 /** Variante asynchrone : attend `fn` dans le contexte (nécessaire pour les requêtes Prisma, paresseuses). */
@@ -74,6 +76,10 @@ export function currentContext(): RequestContext | undefined {
   return storage.getStore()?.current;
 }
 
+export function currentRequestId(): string | undefined {
+  return storage.getStore()?.requestId;
+}
+
 /**
  * Exécute du code avec les droits du système (tâches de fond, webhooks, portail parent
  * après vérification du lien parent-enfant). Préciser `schoolId` dès que possible.
@@ -88,6 +94,7 @@ export function runAsSystem<T>(
   const parent = currentContext();
   return storage.run(
     {
+      requestId: currentRequestId(),
       current: {
         kind: 'system',
         reason,

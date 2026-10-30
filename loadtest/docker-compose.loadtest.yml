@@ -1,0 +1,54 @@
+# Surcouche des tests de charge, à ajouter à la pile de deploy/ (jamais en production) :
+#   COMPOSE_FILE=docker-compose.yml:../loadtest/docker-compose.loadtest.yml
+# Expose l'API et PostgreSQL en local et remplace la passerelle SMS par une fausse
+# passerelle qui garde les codes de connexion. Chemins relatifs au dossier deploy/.
+# Tous les services de l'application partagent les deux mêmes cœurs (cpuset) : on reproduit
+# le serveur cible de 2 vCPU, k6 tournant sur les autres cœurs de la machine de test.
+x-cible: &cible
+  cpuset: ${CIBLE_CPUS:-0,1}
+
+services:
+  postgres:
+    <<: *cible
+    # Statistiques des requêtes (pg_stat_statements) et journal des requêtes lentes.
+    command:
+      [
+        'postgres',
+        '-c',
+        'shared_preload_libraries=pg_stat_statements',
+        '-c',
+        'log_min_duration_statement=250',
+      ]
+    ports:
+      - '127.0.0.1:55432:5432'
+
+  api:
+    <<: *cible
+    environment:
+      SMS_PROVIDER: http
+      SMS_HTTP_URL: http://sms-sink:8025/send
+    ports:
+      - '127.0.0.1:4000:4000'
+
+  worker:
+    <<: *cible
+    environment:
+      SMS_PROVIDER: http
+      SMS_HTTP_URL: http://sms-sink:8025/send
+
+  redis:
+    <<: *cible
+
+  web:
+    <<: *cible
+
+  nginx:
+    <<: *cible
+
+  sms-sink:
+    image: node:22-bookworm-slim
+    command: ['node', '/sink/sms-sink.mjs']
+    volumes:
+      - ../loadtest/sms-sink.mjs:/sink/sms-sink.mjs:ro
+    ports:
+      - '127.0.0.1:8025:8025'

@@ -524,6 +524,28 @@ describe('module Examens', () => {
       .send({})
       .expect(201);
 
+    // Sans la permission de lever l'anonymat, croiser la liste nominative des salles et les
+    // résultats provisoires ne doit pas rattacher un numéro d'anonymat à un nom.
+    const seating = await http()
+      .get(`/exams/sessions/${p.sessionId}/seating`)
+      .set(s.surveillant.auth)
+      .expect(200);
+    const seated = new Set<string>(
+      seating.body.rooms.flatMap((r: { candidates: { id: string }[] }) =>
+        r.candidates.map((c) => c.id),
+      ),
+    );
+    expect(seated.size).toBe(5);
+    const provisional = await http()
+      .get(`/exams/sessions/${p.sessionId}/results`)
+      .set(s.surveillant.auth)
+      .expect(200);
+    expect(provisional.body.published).toBe(false);
+    for (const row of provisional.body.rows as { candidateId: string | null; code: string }[]) {
+      expect(row.code).toBeTruthy();
+      expect(row.candidateId === null || !seated.has(row.candidateId)).toBe(true);
+    }
+
     for (const who of [s.prof, s.secretariat, s.surveillant, s.compta] as const) {
       await http()
         .post(`/exams/sessions/${p.sessionId}/anonymity/reveal`)

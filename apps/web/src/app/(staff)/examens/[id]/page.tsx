@@ -1046,7 +1046,7 @@ function ResultsList({ data }: { data: ExamResults }) {
       <ul className="flex flex-col gap-2 lg:hidden">
         {data.rows.map((r) => (
           <li
-            key={r.candidateId}
+            key={r.candidateId ?? r.code}
             className="flex flex-col gap-2 rounded-[14px] border border-line bg-white p-3"
           >
             <div className="flex items-center gap-3">
@@ -1083,7 +1083,7 @@ function ResultsList({ data }: { data: ExamResults }) {
           </thead>
           <tbody>
             {data.rows.map((r) => (
-              <tr key={r.candidateId} className="border-b border-line last:border-0">
+              <tr key={r.candidateId ?? r.code} className="border-b border-line last:border-0">
                 <td className="py-1.5 pr-3 tabular">{r.rank ?? '—'}</td>
                 <td className="py-1.5 pr-3 font-semibold">{label(r)}</td>
                 <td className="py-1.5 pr-3">{r.className}</td>

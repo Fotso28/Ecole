@@ -100,6 +100,7 @@ export class AttendanceService {
     if (input.date > todayInCameroon())
       throw new BadRequestException('Impossible de faire l’appel d’une date future');
     const cls = await this.scope.classForTeacher(input.classId, 'attendance.write');
+    await this.scope.assertYearOpen(cls.academicYearId);
     if (input.classSubjectId) {
       const cs = await this.db.classSubject.findUnique({ where: { id: input.classSubjectId } });
       if (!cs || cs.classId !== input.classId)

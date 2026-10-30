@@ -92,6 +92,7 @@ export class GradesService {
     if (!sequence || sequence.term.academicYearId !== cs.class.academicYearId) {
       throw new BadRequestException('Séquence hors de l’année scolaire de la classe');
     }
+    await this.scope.assertYearOpen(cs.class.academicYearId);
     await this.assertNotPublished(cs.classId, input.sequenceId);
     await this.assertSheetEditable(input.classSubjectId, input.sequenceId);
     const evaluation = await this.db.evaluation.create({
@@ -122,6 +123,7 @@ export class GradesService {
     const cs = await this.scope.classSubject(evaluation.classSubjectId, 'grades.write');
     if (evaluation.status !== 'DRAFT')
       throw new ConflictException('Seule une évaluation en brouillon peut être supprimée');
+    await this.scope.assertYearOpen(cs.class.academicYearId);
     await this.assertNotPublished(cs.classId, evaluation.sequenceId);
     await this.db.$transaction(async (tx) => {
       await tx.evaluation.delete({ where: { id } });
@@ -199,6 +201,7 @@ export class GradesService {
     if (evaluation.status === 'SUBMITTED' && !ctx.permissions.has('grades.validate')) {
       throw new ConflictException('Notes soumises : seule la vie pédagogique peut les corriger');
     }
+    await this.scope.assertYearOpen(cs.class.academicYearId);
     await this.assertNotPublished(cs.classId, evaluation.sequenceId);
     const enrolled = new Set((await this.scope.classStudents(cs.classId)).map((s) => s.id));
     const errors: { studentId: string; message: string }[] = [];
@@ -296,6 +299,7 @@ export class GradesService {
   /** Soumission au censeur : refusée tant qu'une note manque. */
   async submit(classSubjectId: string, sequenceId: string) {
     const cs = await this.scope.classSubject(classSubjectId, 'grades.write');
+    await this.scope.assertYearOpen(cs.class.academicYearId);
     await this.assertNotPublished(cs.classId, sequenceId);
     const sheet = await this.sheet(classSubjectId, sequenceId);
     if (sheet.evaluations.length === 0)
@@ -324,6 +328,8 @@ export class GradesService {
   }
 
   async validate(classSubjectId: string, sequenceId: string) {
+    const cs = await this.scope.classSubject(classSubjectId, 'grades.validate');
+    await this.scope.assertYearOpen(cs.class.academicYearId);
     const draft = await this.db.evaluation.count({
       where: { classSubjectId, sequenceId, status: 'DRAFT' },
     });
@@ -348,6 +354,7 @@ export class GradesService {
    */
   async reopen(classSubjectId: string, sequenceId: string, reason: string) {
     const cs = await this.scope.classSubject(classSubjectId, 'grades.validate');
+    await this.scope.assertYearOpen(cs.class.academicYearId);
     const termIds = await this.publicationTerms(sequenceId);
     return this.db.$transaction(async (tx) => {
       const updated = await tx.evaluation.updateMany({

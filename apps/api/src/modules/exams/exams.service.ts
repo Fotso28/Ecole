@@ -96,6 +96,7 @@ export class ExamsService {
 
   async createSession(input: SessionInput) {
     const year = await this.scope.currentYear();
+    await this.scope.assertYearOpen(year.id);
     const classes = await this.db.class.findMany({
       where: { id: { in: input.classIds }, academicYearId: year.id },
     });
@@ -868,6 +869,7 @@ export class ExamsService {
     const paper = await this.gradablePaper(paperId);
     if (paper.session.resultsPublishedAt)
       throw new ConflictException('Résultats publiés : les notes ne peuvent plus être modifiées');
+    await this.scope.assertYearOpen(paper.session.academicYearId);
     const candidates = await this.db.examCandidate.findMany({
       where: { sessionId: paper.sessionId, classId: { in: paper.classIds } },
       select: { id: true, anonymityCode: true },

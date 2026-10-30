@@ -29,7 +29,10 @@ async function main(): Promise<void> {
     QUEUE,
     async (job) => {
       const result = await runJob(app, job.name);
-      if (job.name !== 'outbox' || (typeof result === 'number' && result > 0))
+      if (
+        !['outbox', 'accounting'].includes(job.name) ||
+        (typeof result === 'number' && result > 0)
+      )
         logger.log(`${job.name} : ${JSON.stringify(result)}`);
       return result;
     },

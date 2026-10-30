@@ -121,6 +121,7 @@ const MODULE_LABELS: Record<string, string> = {
   timetable: 'Emploi du temps',
   exams: 'Examens',
   documents: 'Documents',
+  accounting: 'Comptabilité',
 };
 
 export default function SettingsPage() {

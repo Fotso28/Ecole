@@ -965,3 +965,134 @@ model SubscriptionReminder {
 
   @@index([schoolId, invoiceId])
 }
+
+// ---------------------------------------------------------------- Comptabilité (SYSCOHADA révisé)
+
+enum FiscalYearStatus {
+  OPEN
+  CLOSED
+}
+
+enum ExpenseStatus {
+  PENDING_APPROVAL
+  POSTED
+  REJECTED
+}
+
+model AccountingAccount {
+  id        String   @id @default(cuid())
+  schoolId  String
+  number    String
+  label     String
+  /// Compte du plan SYSCOHADA préchargé (non modifiable) ou sous-compte créé par l'école.
+  isSystem  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@unique([schoolId, number])
+}
+
+model AccountingJournal {
+  id       String @id @default(cuid())
+  schoolId String
+  code     String
+  label    String
+
+  @@unique([schoolId, code])
+}
+
+model FiscalYear {
+  id         String           @id @default(cuid())
+  schoolId   String
+  name       String
+  startDate  DateTime         @db.Date
+  endDate    DateTime         @db.Date
+  status     FiscalYearStatus @default(OPEN)
+  openedById String?
+  closedAt   DateTime?
+  closedById String?
+  createdAt  DateTime         @default(now())
+
+  entries AccountingEntry[]
+
+  @@unique([schoolId, startDate])
+}
+
+/// Écriture en partie double : ajout seul, numérotée sans trou par journal et par exercice.
+model AccountingEntry {
+  id              String   @id @default(cuid())
+  schoolId        String
+  fiscalYearId    String
+  journalCode     String
+  number          Int
+  reference       String
+  date            DateTime @db.Date
+  label           String
+  pieceRef        String?
+  /// Origine d'une écriture automatique (LEDGER, EXPENSE, EXPENSE_PAYMENT, CARRY_FORWARD) : jamais passée deux fois.
+  sourceType      String?
+  sourceId        String?
+  reversesEntryId String?  @unique
+  total           Int
+  createdById     String?
+  createdAt       DateTime @default(now())
+
+  fiscalYear FiscalYear       @relation(fields: [fiscalYearId], references: [id], onDelete: Restrict)
+  lines      AccountingLine[]
+
+  @@unique([schoolId, fiscalYearId, journalCode, number])
+  @@unique([schoolId, sourceType, sourceId])
+  @@index([schoolId, date])
+}
+
+model AccountingLine {
+  id            String  @id @default(cuid())
+  schoolId      String
+  entryId       String
+  accountNumber String
+  label         String?
+  debit         Int     @default(0)
+  credit        Int     @default(0)
+  order         Int
+
+  entry AccountingEntry @relation(fields: [entryId], references: [id], onDelete: Restrict)
+
+  @@index([schoolId, accountNumber])
+  @@index([entryId])
+}
+
+model Supplier {
+  id        String   @id @default(cuid())
+  schoolId  String
+  name      String
+  phone     String?
+  taxId     String?
+  createdAt DateTime @default(now())
+
+  @@unique([schoolId, name])
+}
+
+model Expense {
+  id             String        @id @default(cuid())
+  schoolId       String
+  supplierId     String
+  date           DateTime      @db.Date
+  label          String
+  amount         Int
+  accountNumber  String
+  method         PaymentMethod
+  pieceRef       String
+  status         ExpenseStatus
+  createdById    String
+  approvedById   String?
+  approvedAt     DateTime?
+  rejectedReason String?
+  createdAt      DateTime      @default(now())
+
+  @@index([schoolId, status])
+}
+
+model AccountingSettings {
+  id                       String @id @default(cuid())
+  schoolId                 String @unique
+  expenseApprovalThreshold Int    @default(100000)
+}

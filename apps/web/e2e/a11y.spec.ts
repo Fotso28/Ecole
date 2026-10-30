@@ -44,10 +44,33 @@ test('écrans de la direction', async ({ page }) => {
     '/impayes',
     '/emploi-du-temps',
     '/parametres',
+    '/comptabilite',
+    '/comptabilite/ecritures',
+    '/comptabilite/depenses',
+    '/comptabilite/etats',
+    '/comptabilite/plan',
   ]) {
     await page.goto(path);
     await expect(page.locator('main h1').first()).toBeVisible();
     await expectAccessible(page, path);
+  }
+});
+
+test('formulaires de la comptabilité', async ({ page }) => {
+  await loginStaff(page, 'compta@demo.cm');
+  await page.goto('/comptabilite/ecritures');
+  await page.getByRole('button', { name: 'Nouvelle écriture' }).click();
+  await expect(page.getByRole('dialog', { name: 'Nouvelle écriture' })).toBeVisible();
+  await expectAccessible(page, '/comptabilite/ecritures (nouvelle écriture)');
+  await page.goto('/comptabilite/depenses');
+  await page.getByRole('button', { name: 'Nouvelle dépense' }).click();
+  await expect(page.getByRole('dialog', { name: 'Nouvelle dépense' })).toBeVisible();
+  await expectAccessible(page, '/comptabilite/depenses (nouvelle dépense)');
+  for (const kind of ['grand-livre', 'bilan']) {
+    await page.goto('/comptabilite/etats');
+    await page.getByLabel('État').selectOption(kind);
+    await expect(page.locator('main h2').first()).toBeVisible();
+    await expectAccessible(page, `/comptabilite/etats (${kind})`);
   }
 });
 

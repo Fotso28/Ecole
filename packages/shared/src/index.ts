@@ -1,3 +1,4 @@
+export * from './accounting';
 export * from './billing';
 export * from './finance';
 export * from './grades';

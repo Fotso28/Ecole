@@ -135,6 +135,7 @@ async function main(): Promise<void> {
         'portal',
         'timetable',
         'documents',
+        'accounting',
       ],
       settings: { absenceAlertThreshold: 3, reminderOffsets: [5, 15, 30] },
     },
@@ -489,6 +490,9 @@ async function main(): Promise<void> {
       authorId: staff['direction@demo.cm'] ?? '',
     },
   });
+  // Comptabilité : écritures des opérations de scolarité du jeu de démonstration.
+  const { AccountingService } = await import('./modules/accounting/accounting.service');
+  await runAsSystem('seed:accounting', () => app.get(AccountingService).syncTuition(), schoolId);
   // Offres d'abonnement de la plateforme (facturation des écoles).
   await base.subscriptionPlan.createMany({
     data: [

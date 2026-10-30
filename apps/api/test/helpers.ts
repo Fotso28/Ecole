@@ -9,6 +9,7 @@ import { encrypt, totp } from '../src/common/crypto';
 import { env } from '../src/config/env';
 import { AuthService } from '../src/modules/auth/auth.service';
 import { normalizeCameroonPhone } from '@ecole/shared';
+import { MemoryEmailProvider } from '../src/modules/notifications/email.provider';
 import { MemorySmsProvider } from '../src/modules/notifications/sms.provider';
 
 export const prisma = new PrismaClient();
@@ -29,6 +30,8 @@ export async function resetDb(): Promise<void> {
   await prisma.$executeRawUnsafe(`TRUNCATE TABLE ${list} RESTART IDENTITY CASCADE`);
   MemorySmsProvider.sent.length = 0;
   MemorySmsProvider.failNext = 0;
+  MemoryEmailProvider.sent.length = 0;
+  MemoryEmailProvider.failNext = 0;
 }
 
 export const PLATFORM_ADMIN_TOTP_SECRET = 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP';

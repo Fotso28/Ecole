@@ -50,6 +50,10 @@ test('écrans de la direction', async ({ page }) => {
     '/documents/modeles',
     '/incidents',
     '/rentree',
+    '/annonces',
+    '/calendrier',
+    '/messages',
+    '/messages/supervision',
   ]) {
     await page.goto(path);
     await expect(page.locator('main h1').first()).toBeVisible();
@@ -109,6 +113,14 @@ test('appel et notes de l’enseignant', async ({ page }) => {
   await page.getByRole('button', { name: 'Nouvelle séance' }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
   await expectAccessible(page, '/cahier-de-texte (nouvelle séance)');
+  await page.goto('/messages');
+  await page.getByRole('list', { name: 'Conversations' }).getByRole('link').first().click();
+  await expect(page.getByRole('list', { name: 'Messages' })).toBeVisible();
+  await expectAccessible(page, '/messages/[id] (fil)');
+  await page.goto('/calendrier');
+  await page.getByRole('button', { name: 'Mois', exact: true }).click();
+  await expect(page.getByRole('table')).toBeVisible();
+  await expectAccessible(page, '/calendrier (mois)');
 });
 
 test('portail des parents', async ({ page, request }, info) => {
@@ -135,6 +147,8 @@ test('portail des parents', async ({ page, request }, info) => {
     '/portail/notes',
     '/portail/absences',
     '/portail/devoirs',
+    '/portail/messages',
+    '/portail/calendrier',
   ]) {
     await page.goto(path);
     await expect(page.locator('main').first()).toBeVisible();

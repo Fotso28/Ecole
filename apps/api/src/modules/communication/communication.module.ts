@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Injectable, Module, Post } from '@nestjs/common';
+import { Body, Controller, Get, Injectable, Module, NotFoundException, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { announcementCreateSchema } from '@ecole/shared';
 import { Prisma } from '@prisma/client';
@@ -10,7 +10,38 @@ import { Db, InjectDb } from '../../common/prisma';
 import { ScopeService } from '../../common/scope.service';
 import { ZodPipe } from '../../common/zod.pipe';
 import { NotificationsService } from '../notifications/notifications.service';
-import { templates } from '../notifications/templates';
+import { subjects, templates } from '../notifications/templates';
+
+/** Inscriptions actives de l'année en cours dans les classes visées. */
+export function activeEnrollmentFilter(
+  yearId: string,
+  classFilter: Prisma.ClassWhereInput,
+): Prisma.StudentWhereInput {
+  return {
+    deletedAt: null,
+    enrollments: {
+      some: {
+        academicYearId: yearId,
+        status: { in: ['ENROLLED', 'REPEATING'] },
+        class: classFilter,
+      },
+    },
+  };
+}
+
+/** Filtre de classes d'une portée école, cycle, niveau ou classe. */
+export function classFilterFor(scope: string, targetId?: string | null): Prisma.ClassWhereInput {
+  switch (scope) {
+    case 'CLASS':
+      return { id: targetId ?? '' };
+    case 'LEVEL':
+      return { levelId: targetId ?? '' };
+    case 'CYCLE':
+      return { level: { cycleId: targetId ?? '' } };
+    default:
+      return {};
+  }
+}
 
 @Injectable()
 export class CommunicationService {
@@ -25,69 +56,82 @@ export class CommunicationService {
     return this.db.announcement.findMany({ orderBy: { publishedAt: 'desc' }, take: 50 });
   }
 
-  /** Annonce ciblée ; envoi SMS facultatif au parent principal de chaque élève concerné. */
+  /**
+   * Annonce ciblée (école, cycle, niveau, classe ou élèves choisis) ; notification facultative au
+   * parent principal de chaque élève concerné, par SMS ou par e-mail selon ses coordonnées.
+   */
   async create(input: z.infer<typeof announcementCreateSchema>) {
-    if (input.scope !== 'SCHOOL' && !input.targetId) throw new Error('Cible obligatoire');
     const year = await this.scope.currentYear();
-    const announcement = await this.db.announcement.create({
-      data: {
-        schoolId: currentSchoolId(),
-        title: input.title,
-        body: input.body,
-        scope: input.scope,
-        targetId: input.targetId,
-        authorId: staffContext().userId,
-      },
-    });
-    let sms = 0;
-    if (input.sendSms) {
-      const classFilter: Prisma.ClassWhereInput =
-        input.scope === 'CLASS'
-          ? { id: input.targetId }
-          : input.scope === 'LEVEL'
-            ? { levelId: input.targetId }
-            : input.scope === 'CYCLE'
-              ? { level: { cycleId: input.targetId } }
-              : {};
-      const links = await this.db.studentGuardian.findMany({
-        where: {
-          isPrimary: true,
-          student: {
-            deletedAt: null,
-            enrollments: {
-              some: {
-                academicYearId: year.id,
-                status: { in: ['ENROLLED', 'REPEATING'] },
-                class: classFilter,
-              },
-            },
-          },
-        },
-        include: { guardian: { select: { phone: true } } },
+    const studentIds = input.scope === 'STUDENTS' ? [...new Set(input.studentIds)] : [];
+    if (studentIds.length) {
+      const found = await this.db.student.count({
+        where: { id: { in: studentIds }, deletedAt: null },
       });
-      const school = await this.db.school.findUniqueOrThrow({
-        where: { id: currentSchoolId() },
-        select: { name: true },
-      });
-      const phones = [...new Set(links.map((l) => l.guardian.phone))];
-      for (const phone of phones) {
-        await this.notifications.enqueue({
-          schoolId: currentSchoolId(),
-          recipient: phone,
-          template: 'announcement',
-          body: templates.announcement({ school: school.name, title: input.title }),
-          payload: { announcementId: announcement.id },
-        });
-      }
-      sms = phones.length;
+      if (found !== studentIds.length) throw new NotFoundException('Élève introuvable');
     }
-    await this.audit.log({
-      action: 'communication.announcement',
-      entity: 'Announcement',
-      entityId: announcement.id,
-      after: { ...input, sms },
+    const schoolId = currentSchoolId();
+    const school = await this.db.school.findUniqueOrThrow({
+      where: { id: schoolId },
+      select: { name: true },
     });
-    return { ...announcement, sms };
+    const preferred = await this.notifications.preferredChannel(schoolId);
+    return this.db.$transaction(async (tx) => {
+      const announcement = await tx.announcement.create({
+        data: {
+          schoolId,
+          title: input.title,
+          body: input.body,
+          scope: input.scope,
+          targetId: input.scope === 'SCHOOL' || input.scope === 'STUDENTS' ? null : input.targetId,
+          studentIds,
+          authorId: staffContext().userId,
+        },
+      });
+      const sent = { SMS: 0, EMAIL: 0 };
+      if (input.sendSms) {
+        const links = await tx.studentGuardian.findMany({
+          where: {
+            isPrimary: true,
+            student:
+              input.scope === 'STUDENTS'
+                ? { id: { in: studentIds }, deletedAt: null }
+                : activeEnrollmentFilter(year.id, classFilterFor(input.scope, input.targetId)),
+          },
+          include: { guardian: { select: { id: true, phone: true, email: true } } },
+        });
+        const guardians = new Map(links.map((l) => [l.guardian.id, l.guardian]));
+        for (const g of guardians.values()) {
+          const n = await this.notifications.notifyContact(
+            {
+              schoolId,
+              contact: g,
+              template: 'announcement',
+              body: templates.announcement({ school: school.name, title: input.title }),
+              emailBody: templates.announcementEmail({
+                school: school.name,
+                title: input.title,
+                body: input.body,
+              }),
+              subject: subjects.announcement({ school: school.name, title: input.title }),
+              payload: { announcementId: announcement.id },
+            },
+            tx,
+            preferred,
+          );
+          if (n) sent[n.channel === 'EMAIL' ? 'EMAIL' : 'SMS']++;
+        }
+      }
+      await this.audit.log(
+        {
+          action: 'communication.announcement',
+          entity: 'Announcement',
+          entityId: announcement.id,
+          after: { ...input, sms: sent.SMS, emails: sent.EMAIL },
+        },
+        tx,
+      );
+      return { ...announcement, sms: sent.SMS, emails: sent.EMAIL };
+    });
   }
 }
 

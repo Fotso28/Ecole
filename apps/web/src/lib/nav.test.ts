@@ -56,6 +56,14 @@ describe('navigation par rôle', () => {
     expect(teacher).not.toContain('/parametres');
   });
 
+  it('ouvre la messagerie aux enseignants et à la vie scolaire, pas au secrétariat', () => {
+    expect(hrefs(me(['TEACHER']))).toEqual(expect.arrayContaining(['/messages', '/calendrier']));
+    expect(hrefs(me(['SUPERVISOR']))).toContain('/messages');
+    expect(hrefs(me(['SECRETARY']))).not.toContain('/messages');
+    expect(hrefs(me(['SECRETARY']))).toEqual(expect.arrayContaining(['/annonces', '/calendrier']));
+    expect(hrefs(me(['TEACHER'], ['students', 'attendance', 'grades']))).not.toContain('/messages');
+  });
+
   it('donne à la comptabilité la caisse mais pas les notes', () => {
     const accountant = hrefs(me(['ACCOUNTANT']));
     expect(accountant).toEqual(expect.arrayContaining(['/caisse', '/impayes', '/caisse/journal']));

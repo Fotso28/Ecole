@@ -516,6 +516,97 @@ async function main(): Promise<void> {
     ],
     skipDuplicates: true,
   });
+  // Calendrier : réunion de parents, sortie de la 4e A, congés.
+  const director = staff['direction@demo.cm'] ?? '';
+  const eventDefs: [
+    string,
+    'PARENT_MEETING' | 'OUTING' | 'HOLIDAY' | 'CELEBRATION',
+    number,
+    number,
+    string | null,
+    'SCHOOL' | 'CLASS',
+  ][] = [
+    ['Réunion des parents (séquence 1)', 'PARENT_MEETING', 8, 8, '09:00', 'SCHOOL'],
+    ['Sortie pédagogique au musée national', 'OUTING', 12, 12, '08:00', 'CLASS'],
+    ['Fête de fin de trimestre', 'CELEBRATION', 45, 45, '14:00', 'SCHOOL'],
+    ['Congés de Noël', 'HOLIDAY', 50, 65, null, 'SCHOOL'],
+  ];
+  for (const [title, category, from, to, time, scope] of eventDefs) {
+    await base.schoolEvent.create({
+      data: {
+        schoolId,
+        title,
+        category,
+        startDate: toDbDate(addDays(today, from)),
+        endDate: toDbDate(addDays(today, to)),
+        startTime: time,
+        location:
+          category === 'OUTING' ? 'Yaoundé' : category === 'HOLIDAY' ? null : 'Salle polyvalente',
+        scope,
+        targetId: scope === 'CLASS' ? (classes['4e A'] ?? null) : null,
+        remindBySms: category !== 'HOLIDAY',
+        authorId: director,
+      },
+    });
+  }
+
+  // Messagerie : un échange entre le professeur principal de 4e A et le parent de Marie-Claire.
+  const ngonoLink = await base.studentGuardian.findFirstOrThrow({ where: { studentId: ngono } });
+  const profMaths = staff['prof.maths@demo.cm'] ?? '';
+  const ngonoGuardian = await base.guardian.findUniqueOrThrow({
+    where: { id: ngonoLink.guardianId },
+  });
+  // Compte parent déjà ouvert (comme après une première connexion par SMS).
+  const parentUser = await base.user.create({
+    data: {
+      phone: ngonoGuardian.phone,
+      firstName: ngonoGuardian.firstName,
+      lastName: ngonoGuardian.lastName,
+    },
+  });
+  await base.guardian.updateMany({
+    where: { phone: ngonoGuardian.phone, userId: null },
+    data: { userId: parentUser.id },
+  });
+  const thread = await base.messageThread.create({
+    data: {
+      schoolId,
+      studentId: ngono,
+      guardianId: ngonoLink.guardianId,
+      staffUserId: profMaths,
+      createdById: profMaths,
+      staffLastReadAt: new Date(),
+    },
+  });
+  const exchange: ['STAFF' | 'PARENT', string, number][] = [
+    [
+      'STAFF',
+      'Bonjour, Marie-Claire a très bien réussi le devoir de mathématiques. Bravo à elle !',
+      180,
+    ],
+    ['PARENT', 'Merci beaucoup, nous l’encourageons à continuer.', 120],
+    ['STAFF', 'Pensez à lui faire réviser les fractions avant la composition de jeudi.', 30],
+  ];
+  for (const [kind, body, minutesAgo] of exchange) {
+    await base.message.create({
+      data: {
+        schoolId,
+        threadId: thread.id,
+        authorKind: kind,
+        authorUserId: kind === 'STAFF' ? profMaths : parentUser.id,
+        body,
+        createdAt: new Date(Date.now() - minutesAgo * 60_000),
+      },
+    });
+  }
+  await base.messageThread.update({
+    where: { id: thread.id },
+    data: {
+      lastMessageAt: new Date(Date.now() - 30 * 60_000),
+      parentLastReadAt: new Date(Date.now() - 100 * 60_000),
+    },
+  });
+
   // Les SMS générés par le jeu de démonstration ne doivent pas partir.
   await base.notificationOutbox.updateMany({
     where: { status: 'PENDING' },

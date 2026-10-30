@@ -13,6 +13,7 @@ export const apiEnv = {
   OTP_SECRET: 'e2e-otp-secret-with-enough-length-0123456789',
   DATA_ENCRYPTION_KEY: 'b'.repeat(64),
   SMS_PROVIDER: 'memory',
+  EMAIL_PROVIDER: 'memory',
   MOBILE_MONEY_PROVIDER: 'simulator',
   MOBILE_MONEY_WEBHOOK_SECRET: 'e2e-webhook-secret-0123456789',
   QUEUES_ENABLED: 'false',

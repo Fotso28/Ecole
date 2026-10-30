@@ -11,6 +11,7 @@ import { AcademicModule } from './modules/academic/academic.module';
 import { AttendanceModule } from './modules/attendance/attendance.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { CalendarModule } from './modules/calendar/calendar.module';
 import { CommunicationModule } from './modules/communication/communication.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { DevModule } from './modules/dev/dev.module';
@@ -18,6 +19,7 @@ import { FilesModule } from './modules/files/files.module';
 import { FinanceModule } from './modules/finance/finance.module';
 import { GradesModule } from './modules/grades/grades.module';
 import { LessonsModule } from './modules/lessons/lessons.module';
+import { MessagingModule } from './modules/messaging/messaging.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { PlatformModule } from './modules/platform/platform.module';
 import { PortalModule } from './modules/portal/portal.module';
@@ -57,6 +59,8 @@ import { ReenrollmentModule } from './modules/reenrollment/reenrollment.module';
     PortalModule,
     TeacherModule,
     CommunicationModule,
+    MessagingModule,
+    CalendarModule,
     AuditModule,
     SettingsModule,
     TimetableModule,

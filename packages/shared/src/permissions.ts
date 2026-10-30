@@ -47,6 +47,8 @@ export const PERMISSIONS = [
   'finance.cash.close',
   'finance.cash.approve',
   'communication.write',
+  'messaging.use',
+  'messaging.oversee',
   'health.read',
   'audit.read',
   'settings.write',
@@ -80,6 +82,7 @@ export const ROLE_PERMISSIONS: Record<StaffRole, readonly Permission[]> = {
     'reportcards.generate',
     'communication.write',
     'lessons.read',
+    'messaging.use',
   ],
   SUPERVISOR: [
     'dashboard.read',
@@ -91,6 +94,7 @@ export const ROLE_PERMISSIONS: Record<StaffRole, readonly Permission[]> = {
     'discipline.write',
     'communication.write',
     'discipline.read',
+    'messaging.use',
   ],
   SECRETARY: [
     'dashboard.read',
@@ -126,6 +130,7 @@ export const ROLE_PERMISSIONS: Record<StaffRole, readonly Permission[]> = {
     'grades.write',
     'lessons.read',
     'lessons.write',
+    'messaging.use',
   ],
   NURSE: ['students.read', 'health.read'],
 };

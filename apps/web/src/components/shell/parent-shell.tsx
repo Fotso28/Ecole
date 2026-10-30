@@ -1,12 +1,22 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { BookOpen, CalendarDays, FileText, Home, LogOut, Wallet } from 'lucide-react';
+import {
+  BookOpen,
+  CalendarDays,
+  CalendarRange,
+  FileText,
+  Home,
+  LogOut,
+  MessagesSquare,
+  Wallet,
+} from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { useParentUnread } from '@/lib/communication';
 import { cn } from '@/lib/utils';
 
 export interface Child {
@@ -40,6 +50,8 @@ const NAV = [
   { href: '/portail/absences', label: 'Absences', icon: CalendarDays },
   { href: '/portail/devoirs', label: 'Devoirs', icon: BookOpen },
   { href: '/portail/paiement', label: 'Payer', icon: Wallet },
+  { href: '/portail/messages', label: 'Messages', icon: MessagesSquare },
+  { href: '/portail/calendrier', label: 'Agenda', icon: CalendarRange },
 ];
 
 export function ParentShell({ children }: { children: ReactNode }) {
@@ -47,6 +59,7 @@ export function ParentShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const unread = useParentUnread().data?.count ?? 0;
 
   useEffect(() => {
     if (status === 'anonymous') router.replace('/parent/connexion');
@@ -114,11 +127,12 @@ export function ParentShell({ children }: { children: ReactNode }) {
         <main className="flex flex-1 flex-col gap-4 px-4 pt-2 pb-28">{children}</main>
         <nav
           aria-label="Navigation"
-          className="fixed inset-x-0 bottom-0 z-30 mx-auto grid w-full max-w-md grid-cols-5 border-t border-line bg-white px-1 pt-1 pb-safe"
+          className="fixed inset-x-0 bottom-0 z-30 mx-auto grid w-full max-w-md grid-cols-7 border-t border-line bg-white px-1 pt-1 pb-safe"
         >
           {NAV.map((item) => {
             const active =
               item.href === '/portail' ? pathname === '/portail' : pathname.startsWith(item.href);
+            const badge = item.href === '/portail/messages' && unread > 0;
             return (
               <Link
                 key={item.href}
@@ -129,8 +143,21 @@ export function ParentShell({ children }: { children: ReactNode }) {
                   active ? 'font-bold text-primary' : 'font-semibold text-muted',
                 )}
               >
-                <item.icon className="size-[22px]" aria-hidden />
+                <span className="relative">
+                  <item.icon className="size-[22px]" aria-hidden />
+                  {badge ? (
+                    <span
+                      aria-hidden
+                      className="absolute -top-1.5 -right-2.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-bold text-white"
+                    >
+                      {unread}
+                    </span>
+                  ) : null}
+                </span>
                 {item.label}
+                {badge ? (
+                  <span className="sr-only">{`(${unread} ${unread > 1 ? 'non lus' : 'non lu'})`}</span>
+                ) : null}
               </Link>
             );
           })}

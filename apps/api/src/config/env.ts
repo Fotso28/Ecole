@@ -19,6 +19,16 @@ const envSchema = z.object({
   SMS_HTTP_URL: z.string().optional(),
   SMS_HTTP_TOKEN: z.string().optional(),
   SMS_SENDER: z.string().default('ECOLE'),
+  EMAIL_PROVIDER: z.enum(['console', 'memory', 'smtp']).default('console'),
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.coerce.number().int().positive().default(587),
+  SMTP_SECURE: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASSWORD: z.string().optional(),
+  EMAIL_FROM: z.string().default('Ecole <no-reply@ecole.cm>'),
   MOBILE_MONEY_PROVIDER: z.enum(['simulator', 'http', 'operators']).default('simulator'),
   MOBILE_MONEY_HTTP_URL: z.string().optional(),
   MOBILE_MONEY_HTTP_TOKEN: z.string().optional(),

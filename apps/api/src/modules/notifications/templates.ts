@@ -37,4 +37,17 @@ export const templates = {
     `${p.school} : ${p.title}. Détails dans l'application.`,
   subscriptionReminder: (p: { school: string; number: string; due: number; dueDate: string }) =>
     `Ecole : la facture d'abonnement ${p.number} de ${p.school} présente un reste à payer de ${formatFcfa(p.due)} (échéance ${p.dueDate}). Détail dans Paramètres.`,
+  announcementEmail: (p: { school: string; title: string; body: string }) =>
+    `${p.title}\n\n${p.body}\n\n${p.school}`,
+  messageNew: (p: { school: string; from: string; student: string }) =>
+    `${p.school} : nouveau message de ${p.from} au sujet de ${p.student}. Lisez-le et répondez dans l'application.`,
+  eventReminder: (p: { school: string; title: string; date: string; time?: string | null }) =>
+    `${p.school} : rappel, ${p.title} demain ${p.date}${p.time ? ` à ${p.time}` : ''}. Détails dans l'application.`,
+};
+
+/** Objets des e-mails, par modèle. */
+export const subjects = {
+  announcement: (p: { school: string; title: string }) => `${p.school} : ${p.title}`,
+  messageNew: (p: { student: string }) => `Nouveau message au sujet de ${p.student}`,
+  eventReminder: (p: { title: string }) => `Rappel : ${p.title} demain`,
 };

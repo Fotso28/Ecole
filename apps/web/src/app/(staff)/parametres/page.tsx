@@ -6,7 +6,7 @@ import { TriangleAlert } from 'lucide-react';
 import { StateBadge } from '@/components/billing';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, ErrorBlock, LoadingBlock, PageHeader } from '@/components/ui/card';
-import { Checkbox, InputField } from '@/components/ui/field';
+import { Checkbox, InputField, SelectField } from '@/components/ui/field';
 import { useToast } from '@/components/ui/toast';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -26,6 +26,7 @@ interface SchoolSettings {
     absenceNotificationDelayMinutes?: number;
     reminderOffsets?: number[];
     mfaRequired?: boolean;
+    preferredChannel?: 'SMS' | 'EMAIL';
   };
 }
 interface AuditPage {
@@ -169,6 +170,7 @@ export default function SettingsPage() {
                   .map(Number)
                   .filter((n) => Number.isInteger(n) && n > 0),
                 mfaRequired: fd.get('mfaRequired') === 'on',
+                preferredChannel: fd.get('preferredChannel') === 'EMAIL' ? 'EMAIL' : 'SMS',
               },
             });
           }}
@@ -198,6 +200,16 @@ export default function SettingsPage() {
             hint="Exemple : 5, 15, 30"
             containerClassName="sm:col-span-2"
           />
+          <SelectField
+            label="Canal des notifications aux familles"
+            name="preferredChannel"
+            defaultValue={s.settings.preferredChannel ?? 'SMS'}
+            hint="Utilisé quand le parent a donné un téléphone et un e-mail ; sinon, le seul canal connu."
+            containerClassName="sm:col-span-2"
+          >
+            <option value="SMS">SMS en priorité</option>
+            <option value="EMAIL">E-mail en priorité</option>
+          </SelectField>
           <Checkbox
             name="mfaRequired"
             defaultChecked={!!s.settings.mfaRequired}

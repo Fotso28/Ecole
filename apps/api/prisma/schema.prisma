@@ -156,9 +156,32 @@ enum NotificationStatus {
   PENDING
   SENT
   FAILED
+  CANCELLED
 }
 
 enum AnnouncementScope {
+  SCHOOL
+  CYCLE
+  LEVEL
+  CLASS
+  STUDENTS
+}
+
+enum MessageAuthor {
+  PARENT
+  STAFF
+}
+
+enum EventCategory {
+  PARENT_MEETING
+  HOLIDAY
+  CELEBRATION
+  OUTING
+  EXAM
+  OTHER
+}
+
+enum EventScope {
   SCHOOL
   CYCLE
   LEVEL
@@ -823,10 +846,69 @@ model Announcement {
   body        String
   scope       AnnouncementScope
   targetId    String?
+  /// Portée STUDENTS : élèves dont les parents sont destinataires.
+  studentIds  String[]          @default([])
   authorId    String
   publishedAt DateTime          @default(now())
 
   @@index([schoolId, publishedAt])
+}
+
+/// Fil de discussion entre un parent et un membre du personnel, au sujet d'un élève.
+model MessageThread {
+  id               String    @id @default(cuid())
+  schoolId         String
+  studentId        String
+  guardianId       String
+  staffUserId      String
+  createdById      String
+  createdAt        DateTime  @default(now())
+  lastMessageAt    DateTime  @default(now())
+  parentLastReadAt DateTime?
+  staffLastReadAt  DateTime?
+
+  messages Message[]
+
+  @@unique([studentId, guardianId, staffUserId])
+  @@index([schoolId, staffUserId, lastMessageAt])
+  @@index([schoolId, guardianId])
+}
+
+model Message {
+  id           String        @id @default(cuid())
+  schoolId     String
+  threadId     String
+  authorKind   MessageAuthor
+  authorUserId String
+  body         String
+  createdAt    DateTime      @default(now())
+
+  thread MessageThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@index([threadId, createdAt])
+  @@index([schoolId])
+}
+
+/// Événement du calendrier (réunion de parents, congé, fête, sortie…), dates incluses.
+model SchoolEvent {
+  id             String        @id @default(cuid())
+  schoolId       String
+  title          String
+  description    String?
+  category       EventCategory
+  startDate      DateTime      @db.Date
+  endDate        DateTime      @db.Date
+  startTime      String?
+  endTime        String?
+  location       String?
+  scope          EventScope
+  targetId       String?
+  remindBySms    Boolean       @default(false)
+  reminderSentAt DateTime?
+  authorId       String
+  createdAt      DateTime      @default(now())
+
+  @@index([schoolId, startDate])
 }
 
 model AuditLog {

@@ -49,7 +49,11 @@ describe('appareil de confiance', () => {
     expect(token).not.toContain('677123456');
     expect(AuthService.isTrustedDevice(PHONE, token)).toBe(true);
     expect(AuthService.isTrustedDevice('+237699887766', token)).toBe(false);
-    expect(AuthService.isTrustedDevice(PHONE, `${token.slice(0, -1)}0`)).toBe(false);
+    // Signature altérée : le dernier caractère est changé (remplacé par « 0 », il resterait
+    // identique une fois sur seize et le test échouerait au hasard).
+    const tampered = `${token.slice(0, -1)}${token.endsWith('0') ? '1' : '0'}`;
+    expect(tampered).not.toBe(token);
+    expect(AuthService.isTrustedDevice(PHONE, tampered)).toBe(false);
     expect(AuthService.isTrustedDevice(PHONE, undefined)).toBe(false);
     const old = AuthService.deviceToken(PHONE, Date.now() - 200 * 86_400_000);
     expect(AuthService.isTrustedDevice(PHONE, old)).toBe(false);

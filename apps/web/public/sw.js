@@ -6,7 +6,8 @@
  *   sont des coquilles statiques, identiques pour tous : aucune donnée personnelle dedans.
  * - Données (GET /api/portal/*, /api/teacher/*) : réseau d'abord, dernière réponse en secours,
  *   marquée de l'heure d'enregistrement (en-tête x-ecole-cached-at) pour le bandeau.
- * - Jamais de cache : authentification, paiements, santé, fichiers, toute requête autre que GET.
+ * - Jamais de cache : authentification, paiements, santé, fichiers et documents PDF (bulletins,
+ *   relevés, reçus), toute requête autre que GET.
  *   Le cache des données est purgé par le site à la déconnexion.
  */
 const VERSION = 'v1';
@@ -26,7 +27,8 @@ const OFFLINE_PAGES = [
 ];
 const PAGE_SCOPE = /^\/(portail|enseignant)(\/|$)/;
 const DATA_SCOPE = /^\/api\/(portal|teacher)\//;
-const NEVER_CACHED = /\/(auth|health|payments?|paiement|finance|files|webhooks?)(\/|$)/;
+const NEVER_CACHED =
+  /\/(auth|health|payments?|paiement|finance|files?|webhooks?)(\/|$)|(\/|\.)pdf$/;
 
 const OFFLINE_HTML = `<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Hors connexion · Ecole</title></head><body style="font-family:system-ui,sans-serif;background:#F6F5F0;color:#14201A;padding:24px;max-width:28rem;margin:auto"><h1 style="font-size:1.5rem">Hors connexion</h1><p>Cette page n’a pas encore été consultée sur ce téléphone. Elle sera disponible au retour du réseau.</p><p><a href="/portail" style="color:#0E6B4A;font-weight:600">Retour à l’accueil</a></p></body></html>`;
 
@@ -60,6 +62,17 @@ self.addEventListener('install', (event) => {
   );
 });
 
+/** Retire des données gardées ce qui n'aurait pas dû l'être (PDF gardés par une version antérieure). */
+async function purgeNeverCached() {
+  const data = await caches.open(DATA_CACHE);
+  const keys = await data.keys();
+  await Promise.all(
+    keys
+      .filter((req) => NEVER_CACHED.test(new URL(req.url).pathname.slice(4)))
+      .map((req) => data.delete(req)),
+  );
+}
+
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches
@@ -73,6 +86,7 @@ self.addEventListener('activate', (event) => {
             .map((k) => caches.delete(k)),
         ),
       )
+      .then(purgeNeverCached)
       .then(() => self.clients.claim()),
   );
 });

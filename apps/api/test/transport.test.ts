@@ -281,6 +281,30 @@ describe('appel dans le car', () => {
     await http().get('/transport/my-lines').set(s.prof.auth).expect(403);
   });
 
+  it('applique la limite de lignes d’un rôle propre à l’école', async () => {
+    const n = await prepared();
+    const role = await http()
+      .post('/roles/custom')
+      .set(s.direction.auth)
+      .send({ name: 'Accompagnatrice', permissions: ['transport.rollcall'], lineScoped: true })
+      .expect(201);
+    await prisma.membership.updateMany({
+      where: { userId: driver2Id, schoolId: f.schoolId },
+      data: { roles: [], customRoleIds: [role.body.id] },
+    });
+    const q = `lineId=${n.lineA}&date=${today}&direction=OUTBOUND`;
+    await http().get(`/transport/trips?${q}`).set(driver2.auth).expect(403);
+    const mine = await http().get('/transport/my-lines').set(driver2.auth).expect(200);
+    expect(mine.body.map((l: { id: string }) => l.id)).toEqual([n.lineB]);
+    // Sans la limite, le rôle fait l'appel sur toutes les lignes.
+    await http()
+      .put(`/roles/custom/${role.body.id}`)
+      .set(s.direction.auth)
+      .send({ name: 'Accompagnatrice', permissions: ['transport.rollcall'] })
+      .expect(200);
+    await http().get(`/transport/trips?${q}`).set(driver2.auth).expect(200);
+  });
+
   it('liste les élèves attendus par sens, dans l’ordre des arrêts', async () => {
     const n = await prepared();
     const morning = await http()

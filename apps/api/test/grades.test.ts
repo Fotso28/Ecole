@@ -596,6 +596,35 @@ describe('bulletins', () => {
     });
   });
 
+  it('impose de préparer à nouveau après une décision du conseil, et ignore un élève parti', async () => {
+    await fillTerm();
+    const body = { classId: f.class4AId, termId: f.term1Id };
+    await http().post('/report-cards/generate').set(s.censeur.auth).send(body).expect(201);
+    // Le conseil de classe statue après la préparation : le brouillon n'a pas la décision.
+    await http()
+      .put('/report-cards/decisions')
+      .set(s.censeur.auth)
+      .send({ studentId: ids.bilong, termId: f.term1Id, decision: 'HONOR_ROLL' })
+      .expect(200);
+    const stale = await http().post('/report-cards/publish').set(s.direction.auth).send(body);
+    expect(stale.status).toBe(409);
+    expect(stale.body.message).toMatch(/préparez à nouveau/);
+
+    // Un élève quitte la classe : la nouvelle préparation ne doit pas laisser son ancien brouillon
+    // bloquer la publication.
+    await prisma.enrollment.updateMany({
+      where: { studentId: ids.tchana, classId: f.class4AId },
+      data: { status: 'TRANSFERRED' },
+    });
+    const gen = await http().post('/report-cards/generate').set(s.censeur.auth).send(body);
+    expect(gen.body.generated).toBe(3);
+    await http().post('/report-cards/publish').set(s.direction.auth).send(body).expect(201);
+    const published = await prisma.reportCard.findMany({ where: { termId: f.term1Id } });
+    expect(published.map((r) => r.status).sort()).toEqual(['PUBLISHED', 'PUBLISHED', 'PUBLISHED']);
+    const bilong = published.find((r) => r.studentId === ids.bilong)!;
+    expect(JSON.stringify(bilong.data)).toContain('HONOR_ROLL');
+  });
+
   it('ne divulgue rien pour un code inconnu ou un brouillon', async () => {
     await http().get('/verify/INCONNU123').expect(404);
     await http().get('/verify/abc').expect(404);

@@ -12,6 +12,7 @@ import {
 } from '@ecole/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  Banknote,
   Calculator,
   FileDown,
   Printer,
@@ -23,6 +24,7 @@ import {
   Undo2,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { PayoutSheet, payoutSummary } from '@/components/hr-payout';
 import { Badge } from '@/components/ui/badge';
 import { Button, ButtonLink } from '@/components/ui/button';
 import { Card, ErrorBlock, LoadingBlock, PageHeader, Stat } from '@/components/ui/card';
@@ -240,6 +242,7 @@ export default function PayrollPage() {
   const [editing, setEditing] = useState<PayslipView | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [rejecting, setRejecting] = useState(false);
+  const [paying, setPaying] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
   const q = useQuery({
     queryKey: ['hr', 'payroll', month],
@@ -349,6 +352,12 @@ export default function PayrollPage() {
               </Button>
             </>
           ) : null}
+          {status === 'VALIDATED' && !run?.payout && can('hr.payroll.pay') ? (
+            <Button onClick={() => setPaying(true)}>
+              <Banknote className="size-4" aria-hidden />
+              Marquer comme versée
+            </Button>
+          ) : null}
           {status === 'VALIDATED' ? (
             <>
               <Button variant="secondary" onClick={printAll}>
@@ -386,6 +395,13 @@ export default function PayrollPage() {
               ) : (
                 <Badge tone="neutral">Non calculée</Badge>
               )}
+              {status === 'VALIDATED' ? (
+                run?.payout ? (
+                  <Badge tone="success">Versée</Badge>
+                ) : (
+                  <Badge tone="warn">À verser</Badge>
+                )
+              ) : null}
             </div>
             {run?.computedAt ? (
               <p className="text-muted">
@@ -408,7 +424,15 @@ export default function PayrollPage() {
                 Renvoyée par {run.rejectedBy} : {run.rejectReason}
               </p>
             ) : null}
-            {status === 'VALIDATED' ? (
+            {run?.payout ? (
+              <p className="font-medium">
+                {payoutSummary(run.payout)}
+                {run.payout.sameAsValidator
+                  ? ' · enregistré par la personne qui a validé (aucune autre personne habilitée)'
+                  : ''}
+              </p>
+            ) : null}
+            {status === 'VALIDATED' && !run?.payout ? (
               <p className="text-muted">
                 Aucun virement n’est envoyé par Ecole : exportez l’état des virements et exécutez-le
                 auprès de la banque ou de l’opérateur.
@@ -514,6 +538,16 @@ export default function PayrollPage() {
       )}
 
       <ElementsSheet month={month} slip={editing} onClose={() => setEditing(null)} />
+      <PayoutSheet
+        open={paying}
+        onClose={() => setPaying(false)}
+        title="Marquer la paie comme versée"
+        path={`/hr/payroll/${month}/pay`}
+        amount={run?.totals?.net ?? 0}
+        debitAccount="422 (rémunérations dues)"
+        success="Paie marquée comme versée"
+        intro={`Salaires de ${formatPayrollMonth(month)} exécutés auprès de la banque, en caisse ou par Mobile Money.`}
+      />
       <Sheet
         open={confirming}
         onClose={() => setConfirming(false)}

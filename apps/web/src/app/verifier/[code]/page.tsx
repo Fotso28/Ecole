@@ -1,5 +1,7 @@
 import { CheckCircle2, ShieldAlert, XCircle } from 'lucide-react';
 import type { Metadata } from 'next';
+import { headers } from 'next/headers';
+import { forwardedFor } from '@/lib/client-ip';
 
 export const metadata: Metadata = { title: 'Vérification d’un document' };
 export const dynamic = 'force-dynamic';
@@ -58,7 +60,11 @@ function heading(result: Result): string {
 async function verify(code: string): Promise<Result | null> {
   const base = process.env.API_URL ?? 'http://localhost:4000';
   try {
-    const res = await fetch(`${base}/verify/${encodeURIComponent(code)}`, { cache: 'no-store' });
+    // Limite de débit par visiteur, et non une seule pour tous les visiteurs du site.
+    const res = await fetch(`${base}/verify/${encodeURIComponent(code)}`, {
+      cache: 'no-store',
+      headers: forwardedFor((await headers()).get('x-real-ip')),
+    });
     if (!res.ok) return null;
     return (await res.json()) as Result;
   } catch {

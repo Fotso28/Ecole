@@ -208,6 +208,8 @@ model School {
   settings        Json         @default("{}")
   modules         String[]     @default(["students", "attendance", "grades", "finance", "communication", "portal"])
   status          SchoolStatus @default(ACTIVE)
+  /// Incrémenté à chaque modification des rôles : invalide le cache des droits effectifs.
+  rolesVersion    Int          @default(0)
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
 
@@ -246,6 +248,8 @@ model Membership {
   userId         String
   schoolId       String
   roles          StaffRole[]
+  /// Rôles propres à l'école (CustomRole), en plus des rôles intégrés.
+  customRoleIds  String[]    @default([])
   maxWeeklyHours Int?
   active         Boolean     @default(true)
   createdAt      DateTime    @default(now())
@@ -1397,6 +1401,7 @@ enum ExpenseStatus {
   PENDING_APPROVAL
   POSTED
   REJECTED
+  CANCELLED
 }
 
 model AccountingAccount {
@@ -1448,7 +1453,8 @@ model AccountingEntry {
   date            DateTime @db.Date
   label           String
   pieceRef        String?
-  /// Origine d'une écriture automatique (LEDGER, EXPENSE, EXPENSE_PAYMENT, CARRY_FORWARD) : jamais passée deux fois.
+  /// Origine d'une écriture automatique (LEDGER, EXPENSE, EXPENSE_PAYMENT, CARRY_FORWARD, PAYROLL,
+  /// PAYROLL_PAYMENT, ADVANCE_PAYMENT, STOCK_PURCHASE) : jamais passée deux fois.
   sourceType      String?
   sourceId        String?
   reversesEntryId String?  @unique
@@ -1506,7 +1512,40 @@ model Expense {
   approvedById   String?
   approvedAt     DateTime?
   rejectedReason String?
+  /// Annulation d'une dépense comptabilisée : ses écritures sont contre-passées.
+  cancelledById  String?
+  cancelledAt    DateTime?
+  cancelReason   String?
   createdAt      DateTime      @default(now())
+
+  @@index([schoolId, status])
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+/// Écriture manuelle touchant la trésorerie (caisse, banque, Mobile Money) au-delà du seuil de
+/// validation des dépenses : passée seulement après l'accord d'une autre personne.
+model ManualEntryRequest {
+  id           String         @id @default(cuid())
+  schoolId     String
+  journalCode  String
+  date         DateTime       @db.Date
+  label        String
+  pieceRef     String?
+  /// Lignes demandées : [{ accountNumber, debit, credit, label? }].
+  lines        Json
+  total        Int
+  status       ApprovalStatus @default(PENDING)
+  createdById  String
+  decidedById  String?
+  decidedAt    DateTime?
+  decisionNote String?
+  entryId      String?        @unique
+  createdAt    DateTime       @default(now())
 
   @@index([schoolId, status])
 }
@@ -1617,6 +1656,27 @@ model TeachingSession {
   @@index([schoolId, teacherId, date])
 }
 
+/// Changement des coordonnées de paiement d'un dossier (mode, banque, Mobile Money) : il ne
+/// prend effet qu'après l'approbation d'une autre personne.
+model PayoutDetailsChange {
+  id                String         @id @default(cuid())
+  schoolId          String
+  employeeId        String
+  /// Nouvelles valeurs demandées, chiffrées.
+  encryptedChange   String
+  /// Empreintes (HMAC) des coordonnées avant et après, pour l'audit sans valeur en clair.
+  beforeFingerprint String
+  afterFingerprint  String
+  status            ApprovalStatus @default(PENDING)
+  requestedById     String
+  decidedById       String?
+  decidedAt         DateTime?
+  decisionNote      String?
+  createdAt         DateTime       @default(now())
+
+  @@index([schoolId, employeeId, status])
+}
+
 /// Avance sur salaire : demandée, accordée par la direction, retenue sur les paies suivantes.
 model SalaryAdvance {
   id            String              @id @default(cuid())
@@ -1653,6 +1713,32 @@ model AdvanceRepayment {
   advance SalaryAdvance @relation(fields: [advanceId], references: [id], onDelete: Restrict)
 
   @@unique([advanceId, payslipId])
+}
+
+enum StaffPayoutKind {
+  PAYROLL
+  ADVANCE
+}
+
+/// Versement au personnel (salaires d'une paie validée ou avance accordée), en ajout seul :
+/// un déclencheur interdit UPDATE et DELETE. Une seule fois par paie ou par avance.
+model StaffPayout {
+  id              String          @id @default(cuid())
+  schoolId        String
+  kind            StaffPayoutKind
+  /// Paie (`PayrollRun.id`) ou avance (`SalaryAdvance.id`) versée.
+  sourceId        String
+  date            DateTime        @db.Date
+  method          PaymentMethod
+  reference       String?
+  amount          Int
+  paidById        String
+  /// Vrai si la personne qui verse est aussi celle qui a validé (école sans autre personne habilitée).
+  sameAsValidator Boolean         @default(false)
+  createdAt       DateTime        @default(now())
+
+  @@unique([schoolId, kind, sourceId])
+  @@index([schoolId, date])
 }
 
 /// Barème de paie daté (cotisations et impôts), paramétrable par école ; jamais modifié.
@@ -1696,23 +1782,26 @@ model PayrollRun {
 
 /// Bulletin de paie : éléments saisis, heures retenues, résultat du calcul et identité figés.
 model Payslip {
-  id           String       @id @default(cuid())
-  schoolId     String
-  runId        String
-  employeeId   String
-  number       String?
-  contractType ContractType
-  elements     Json         @default("[]")
-  absenceDays  Int          @default(0)
+  id              String       @id @default(cuid())
+  schoolId        String
+  runId           String
+  employeeId      String
+  number          String?
+  contractType    ContractType
+  elements        Json         @default("[]")
+  absenceDays     Int          @default(0)
   /// Entrées du calcul (heures, salaire, avances) et identité au moment du calcul.
-  inputs       Json
+  inputs          Json
   /// Résultat de `computePayslip`.
-  result       Json
-  gross        Int
-  net          Int
-  employerCost Int
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  result          Json
+  gross           Int
+  net             Int
+  employerCost    Int
+  /// Coordonnées de paiement figées à la validation (chiffrées) : l'état des virements et le
+  /// versement les lisent, jamais le dossier modifiable.
+  encryptedPayout String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
 
   run PayrollRun @relation(fields: [runId], references: [id], onDelete: Cascade)
 
@@ -2004,4 +2093,37 @@ model StockInventory {
   movements StockMovement[]
 
   @@index([schoolId, createdAt])
+}
+
+/// Adaptation d'un rôle intégré par une école : permissions ajoutées et retirées par rapport au code.
+model RoleOverride {
+  id          String    @id @default(cuid())
+  schoolId    String
+  role        StaffRole
+  added       String[]  @default([])
+  removed     String[]  @default([])
+  updatedById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([schoolId, role])
+}
+
+/// Rôle propre à une école : nom, permissions et limites de périmètre.
+model CustomRole {
+  id          String   @id @default(cuid())
+  schoolId    String
+  name        String
+  description String?
+  permissions String[] @default([])
+  /// Limité aux classes et matières de la personne, comme un enseignant.
+  classScoped Boolean  @default(false)
+  /// Appel du transport limité aux lignes de la personne, comme un chauffeur.
+  lineScoped  Boolean  @default(false)
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([schoolId, name])
+  @@index([schoolId])
 }

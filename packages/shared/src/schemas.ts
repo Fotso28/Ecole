@@ -70,16 +70,27 @@ export const schoolCreateSchema = z.object({
 });
 
 // Personnel
-export const staffCreateSchema = z.object({
-  firstName: name,
-  lastName: name,
-  email: z.string().trim().toLowerCase().email(),
-  phone: cameroonPhone.optional(),
-  password: z.string().min(10, '10 caractères minimum'),
-  roles: z.array(z.enum(STAFF_ROLES)).min(1, 'Au moins un rôle'),
-  maxWeeklyHours: z.number().int().positive().max(60).optional(),
+export const staffCreateSchema = z
+  .object({
+    firstName: name,
+    lastName: name,
+    email: z.string().trim().toLowerCase().email(),
+    phone: cameroonPhone.optional(),
+    password: z.string().min(10, '10 caractères minimum'),
+    roles: z.array(z.enum(STAFF_ROLES)).default([]),
+    /** Rôles propres à l'école, en plus des rôles intégrés. */
+    customRoleIds: z.array(id).max(20).default([]),
+    maxWeeklyHours: z.number().int().positive().max(60).optional(),
+  })
+  .refine((v) => v.roles.length + v.customRoleIds.length > 0, {
+    message: 'Au moins un rôle',
+    path: ['roles'],
+  });
+export const staffRolesSchema = z.object({
+  roles: z.array(z.enum(STAFF_ROLES)),
+  /** Absent : les rôles propres à l'école déjà attribués sont conservés. */
+  customRoleIds: z.array(id).max(20).optional(),
 });
-export const staffRolesSchema = z.object({ roles: z.array(z.enum(STAFF_ROLES)).min(1) });
 
 // Structure académique
 export const academicYearCreateSchema = z

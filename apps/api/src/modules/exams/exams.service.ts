@@ -993,7 +993,9 @@ export class ExamsService {
         const c = candidateById.get(r.candidateId)!;
         const s = student.get(c.studentId);
         return {
-          candidateId: c.id,
+          // Avant publication, l'identifiant du candidat (repris par la liste des salles avec le
+          // nom) permettrait de rattacher chaque numéro à un élève sans lever l'anonymat.
+          candidateId: published ? c.id : null,
           code: published ? null : c.anonymityCode,
           name: s ? fullName(s) : null,
           matricule: s?.matricule ?? null,

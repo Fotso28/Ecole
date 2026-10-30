@@ -193,6 +193,7 @@ export class ReportCardsService {
     const { students, enrollments, classSubjects, evaluations, issues, digest } = await this.inputs(
       classId,
       final ? yearTerms.flatMap((t) => t.sequences) : term.sequences,
+      termId,
     );
     if (students.length === 0) throw new ConflictException('Aucun élève inscrit dans cette classe');
     if (!evaluations.some((e) => term.sequences.some((sq) => sq.id === e.sequenceId)))
@@ -277,6 +278,16 @@ export class ReportCardsService {
       [];
 
     await this.db.$transaction(async (tx) => {
+      // Brouillons des élèves sortis de la classe depuis la dernière préparation : ils garderaient
+      // une empreinte périmée et bloqueraient la publication.
+      await tx.reportCard.deleteMany({
+        where: {
+          classId,
+          termId,
+          status: 'DRAFT',
+          studentId: { notIn: students.map((s) => s.id) },
+        },
+      });
       for (const s of students) {
         const g = general.get(s.id);
         const rank = generalRanks.get(s.id);
@@ -528,6 +539,7 @@ export class ReportCardsService {
     const { issues } = await this.inputs(
       classId,
       final ? yearTerms.flatMap((t) => t.sequences) : term.sequences,
+      termId,
     );
     return { issues, annual: final };
   }
@@ -556,8 +568,12 @@ export class ReportCardsService {
    * Données d'entrée des bulletins : élèves, matières, évaluations soumises, saisies manquantes
    * (feuille non soumise, note absente) et empreinte permettant de détecter un brouillon périmé.
    */
-  private async inputs(classId: string, sequences: readonly { id: string; name: string }[]) {
-    const [students, enrollments, classSubjects] = await Promise.all([
+  private async inputs(
+    classId: string,
+    sequences: readonly { id: string; name: string }[],
+    termId: string,
+  ) {
+    const [students, enrollments, classSubjects, decisions] = await Promise.all([
       this.scope.classStudents(classId),
       this.db.enrollment.findMany({
         where: { classId },
@@ -568,6 +584,7 @@ export class ReportCardsService {
         include: { subject: true },
         orderBy: { subject: { name: 'asc' } },
       }),
+      this.db.councilDecision.findMany({ where: { termId }, orderBy: { studentId: 'asc' } }),
     ]);
     const all = await this.db.evaluation.findMany({
       where: {
@@ -608,6 +625,15 @@ export class ReportCardsService {
           e.maxScore,
           e.grades.map((g) => `${g.studentId}:${g.status}:${g.valueCenti ?? ''}`).sort(),
         ]),
+        // Coefficients et décisions du conseil figurent aussi sur le bulletin : les modifier après
+        // la préparation impose de préparer à nouveau.
+        coefficients: classSubjects.map((cs) => [cs.id, cs.coefficient]),
+        decisions: decisions.map((d) => [
+          d.studentId,
+          d.decision,
+          d.yearEndDecision ?? '',
+          d.comment ?? '',
+        ]),
       }),
     );
     return { students, enrollments, classSubjects, evaluations, issues, digest };
@@ -627,6 +653,7 @@ export class ReportCardsService {
     const { issues, digest } = await this.inputs(
       classId,
       final ? yearTerms.flatMap((t) => t.sequences) : term.sequences,
+      termId,
     );
     if (drafts.some((d) => (d.data as unknown as ReportCardData).inputsDigest !== digest))
       throw new ConflictException(

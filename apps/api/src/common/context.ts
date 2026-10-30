@@ -8,6 +8,14 @@ export interface StaffContext {
   schoolId: string;
   roles: StaffRole[];
   permissions: ReadonlySet<Permission>;
+  /** Rôles propres à l'école attribués à la personne. */
+  customRoleIds?: string[];
+  /**
+   * Permissions limitées aux classes de la personne et appel du transport limité à ses lignes,
+   * calculés par le garde. Absents (contextes construits par le code) : valeurs des rôles intégrés.
+   */
+  classScoped?: ReadonlySet<Permission>;
+  lineScoped?: boolean;
   isPlatformAdmin: boolean;
   breakGlass: boolean;
   ip?: string;

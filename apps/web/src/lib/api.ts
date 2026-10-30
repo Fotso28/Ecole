@@ -28,6 +28,7 @@ export class ApiError extends Error {
 let accessToken: string | null = null;
 let refreshing: Promise<boolean> | null = null;
 let onSessionLost: (() => void) | null = null;
+let onSessionRefreshed: (() => void) | null = null;
 let refreshFailure: 'network' | 'denied' | null = null;
 
 /** Cause du dernier échec de rafraîchissement : réseau absent ou session refusée. */
@@ -45,6 +46,14 @@ export function getAccessToken(): string | null {
 
 export function setSessionLostHandler(handler: (() => void) | null): void {
   onSessionLost = handler;
+}
+
+/**
+ * Appelé après le rafraîchissement du jeton en cours d'utilisation : le profil (droits effectifs)
+ * est relu, pour qu'une modification des rôles s'applique au plus tard à ce moment.
+ */
+export function setSessionRefreshedHandler(handler: (() => void) | null): void {
+  onSessionRefreshed = handler;
 }
 
 /** Rafraîchit la session une seule fois même si plusieurs requêtes échouent en même temps. */
@@ -127,6 +136,7 @@ async function request(path: string, options: RequestOptions = {}): Promise<Resp
   }
   if (res.status === 401 && !path.startsWith('/auth/')) {
     if (await refreshSession()) {
+      onSessionRefreshed?.();
       res = await send(path, options);
     } else {
       onSessionLost?.();

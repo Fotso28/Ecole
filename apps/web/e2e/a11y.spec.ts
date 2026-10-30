@@ -70,6 +70,7 @@ test('écrans de la direction', async ({ page }) => {
     '/transport/appel',
     '/bibliotheque',
     '/stock',
+    '/parametres/roles',
   ]) {
     await page.goto(path);
     await expect(page.locator('main h1').first()).toBeVisible();
@@ -87,11 +88,33 @@ test('écrans de la direction', async ({ page }) => {
   await expectAccessible(page, '/eleves/[id] (dépôt de pièce)');
 });
 
+test('écran des rôles et fenêtre d’édition', async ({ page }) => {
+  await loginStaff(page, 'direction@demo.cm');
+  await page.goto('/parametres/roles');
+  await page.getByRole('button', { name: 'Modifier le rôle Secrétariat' }).click();
+  await expect(page.getByRole('dialog', { name: 'Secrétariat' })).toBeVisible();
+  await expectAccessible(page, '/parametres/roles (rôle intégré)');
+  await page.getByRole('button', { name: 'Fermer' }).click();
+  await page.getByRole('button', { name: 'Nouveau rôle' }).click();
+  await expect(page.getByRole('dialog', { name: 'Nouveau rôle' })).toBeVisible();
+  await expectAccessible(page, '/parametres/roles (nouveau rôle)');
+  await page.getByRole('button', { name: 'Fermer' }).click();
+  await page.goto('/personnel');
+  await page
+    .getByRole('button', { name: /^Modifier les rôles de / })
+    .first()
+    .click();
+  await expect(page.getByRole('dialog', { name: /^Rôles de / })).toBeVisible();
+  await expectAccessible(page, '/personnel (rôles)');
+});
+
 test('dossier du personnel et fenêtres du module RH', async ({ page }) => {
   await loginStaff(page, 'direction@demo.cm');
   await page.goto('/rh');
   await page.getByRole('link', { name: 'Mbarga Paul' }).first().click();
   await expect(page.getByRole('heading', { name: 'Mbarga Paul', level: 1 })).toBeVisible();
+  // Nouveau RIB du jeu de démonstration en attente d'approbation (tant que le parcours RH ne l'a
+  // pas approuvé).
   await expectAccessible(page, '/rh/[id]');
   await page.getByRole('button', { name: 'Afficher' }).click();
   await expect(page.getByRole('dialog', { name: 'Données sensibles' })).toBeVisible();
@@ -108,6 +131,18 @@ test('dossier du personnel et fenêtres du module RH', async ({ page }) => {
   await page.getByRole('button', { name: 'Nouvelle version' }).click();
   await expect(page.getByRole('dialog', { name: 'Nouvelle version du barème' })).toBeVisible();
   await expectAccessible(page, '/rh/baremes (nouvelle version)');
+  // Paie validée du jeu de démonstration (deux mois plus tôt) : fenêtre de versement.
+  await page.goto('/rh/paie');
+  const now = new Date(Date.now() + 3_600_000);
+  const demoMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 2, 1))
+    .toISOString()
+    .slice(0, 7);
+  await page.getByLabel('Mois de paie').selectOption(demoMonth);
+  await expect(page.getByText('Validée', { exact: true })).toBeVisible();
+  await expectAccessible(page, '/rh/paie (paie validée)');
+  await page.getByRole('button', { name: 'Marquer comme versée' }).click();
+  await expect(page.getByRole('dialog', { name: 'Marquer la paie comme versée' })).toBeVisible();
+  await expectAccessible(page, '/rh/paie (versement)');
 });
 
 test('journal des paiements et déplacement d’un cours', async ({ page }) => {
@@ -190,6 +225,21 @@ test('formulaires de la comptabilité', async ({ page }) => {
   await page.getByRole('button', { name: 'Nouvelle dépense' }).click();
   await expect(page.getByRole('dialog', { name: 'Nouvelle dépense' })).toBeVisible();
   await expectAccessible(page, '/comptabilite/depenses (nouvelle dépense)');
+  // Dépense comptabilisée du jeu de démonstration : fenêtre d'annulation.
+  await page.getByRole('button', { name: 'Fermer' }).click();
+  await page
+    .getByRole('button', { name: /^Annuler la dépense Facture d’eau/ })
+    .filter({ visible: true })
+    .first()
+    .click();
+  await expect(page.getByRole('dialog', { name: 'Annuler cette dépense ?' })).toBeVisible();
+  await expectAccessible(page, '/comptabilite/depenses (annulation)');
+  // Sortie de banque au-delà du seuil en attente de validation.
+  await page.goto('/comptabilite/ecritures');
+  await expect(
+    page.getByRole('heading', { name: 'Écritures de trésorerie à valider' }),
+  ).toBeVisible();
+  await expectAccessible(page, '/comptabilite/ecritures (écritures à valider)');
   for (const kind of ['grand-livre', 'bilan']) {
     await page.goto('/comptabilite/etats');
     await page.getByLabel('État').selectOption(kind);

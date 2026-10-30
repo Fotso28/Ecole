@@ -80,7 +80,8 @@ export interface ExamResults {
   papers: { id: string; subjectName: string; maxScore: number; classIds: string[] }[];
   missing: number;
   rows: {
-    candidateId: string;
+    /** Absent avant publication : les candidats ne sont alors désignés que par leur numéro. */
+    candidateId: string | null;
     code: string | null;
     name: string | null;
     matricule: string | null;

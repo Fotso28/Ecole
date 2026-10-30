@@ -109,6 +109,8 @@ async function main(): Promise<void> {
   const { TransportService } = await import('./modules/transport/transport.service');
   const { LibraryService } = await import('./modules/library/library.service');
   const { StockService } = await import('./modules/library/stock.service');
+  const { PayrollService } = await import('./modules/hr/payroll.service');
+  const { EmployeesService } = await import('./modules/hr/employees.service');
   const app = await NestFactory.createApplicationContext(AppModule, { logger: ['error', 'warn'] });
   const students = app.get(StudentsService);
   const finance = app.get(FinanceService);
@@ -676,6 +678,11 @@ async function main(): Promise<void> {
     ],
     ['prof.histoire@demo.cm', 'Vacataire d’histoire-géographie', 'HOURLY', 3000, 'CASH', {}],
   ];
+  // Paie validée de démonstration : deux mois avant le mois courant, contrats commencés avant.
+  const [ty, tm] = today.slice(0, 7).split('-').map(Number) as [number, number];
+  const demoPayrollMonth = new Date(Date.UTC(ty, tm - 3, 1)).toISOString().slice(0, 7);
+  const contractStart =
+    `${demoPayrollMonth}-01` < '2026-09-01' ? `${demoPayrollMonth}-01` : '2026-09-01';
   const hrFiles: Record<string, string> = {};
   for (const [email, position, type, amount, payoutMethod, sensitive] of hrDefs) {
     const file = await base.employeeFile.create({
@@ -683,7 +690,7 @@ async function main(): Promise<void> {
         schoolId,
         userId: staff[email] ?? '',
         position,
-        hireDate: toDbDate('2026-09-01'),
+        hireDate: toDbDate(contractStart),
         diplomas: email.startsWith('prof')
           ? [
               {
@@ -705,7 +712,7 @@ async function main(): Promise<void> {
         schoolId,
         employeeId: file.id,
         type,
-        startDate: toDbDate('2026-09-01'),
+        startDate: toDbDate(contractStart),
         endDate: type === 'CDD' ? toDbDate(addDays(today, 20)) : null,
         baseSalary: type === 'HOURLY' ? null : amount,
         hourlyRate: type === 'HOURLY' ? amount : null,
@@ -854,6 +861,46 @@ async function main(): Promise<void> {
       size: '',
       quantity: 10,
       reason: 'Dotation de la salle des professeurs',
+    });
+  });
+
+  // Paie validée (préparée par la comptabilité, validée par la direction), pas encore versée,
+  // puis écritures comptables de la paie et des achats de stock.
+  const payroll = app.get(PayrollService);
+  await runInContext(accountantCtx, async () => {
+    await payroll.computeMonth(demoPayrollMonth);
+    await payroll.submit(demoPayrollMonth);
+  });
+  await runInContext(directionCtx, () => payroll.validate(demoPayrollMonth));
+  // Nouveau RIB saisi par la comptabilité : en attente de l'accord de la direction.
+  await runInContext(accountantCtx, () =>
+    app.get(EmployeesService).update(hrFiles['prof.maths@demo.cm'] ?? '', {
+      sensitive: { bankName: 'Ecobank', bankAccount: '10029 00001 09876543210 77' },
+    }),
+  );
+  await runAsSystem('seed:accounting', () => app.get(AccountingService).syncOperations(), schoolId);
+  // Une dépense sous le seuil (comptabilisée) et une sortie de banque au-delà du seuil, en attente
+  // de l'accord d'une autre personne.
+  await runInContext(accountantCtx, async () => {
+    const accounting = app.get(AccountingService);
+    await accounting.createExpense({
+      supplierName: 'CAMWATER',
+      date: addDays(today, -3),
+      label: 'Facture d’eau',
+      amount: 18_500,
+      accountNumber: '6051',
+      method: 'BANK',
+      pieceRef: 'CW-2026-118',
+    });
+    await accounting.createManualEntry({
+      journal: 'BQ',
+      date: addDays(today, -1),
+      label: 'Retrait bancaire pour la caisse',
+      pieceRef: 'CHQ-004512',
+      lines: [
+        { accountNumber: '585', debit: 250_000, credit: 0 },
+        { accountNumber: '521', debit: 0, credit: 250_000 },
+      ],
     });
   });
 

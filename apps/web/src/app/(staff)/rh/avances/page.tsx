@@ -2,8 +2,9 @@
 
 import { formatFcfa, formatPayrollMonth } from '@ecole/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, Plus, X } from 'lucide-react';
+import { Banknote, Check, Plus, X } from 'lucide-react';
 import { useState } from 'react';
+import { PayoutSheet, payoutSummary } from '@/components/hr-payout';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { EmptyState, ErrorBlock, LoadingBlock, PageHeader } from '@/components/ui/card';
@@ -111,6 +112,7 @@ export default function AdvancesPage() {
   const toast = useToast();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
+  const [paying, setPaying] = useState<AdvanceRow | null>(null);
   const q = useQuery({
     queryKey: ['hr', 'advances'],
     queryFn: () => api<AdvanceRow[]>('/hr/advances'),
@@ -170,6 +172,19 @@ export default function AdvancesPage() {
                   ? ` · remboursé ${formatFcfa(a.repaid)}, reste ${formatFcfa(a.remaining)}`
                   : ''}
               </p>
+              {a.payout ? (
+                <p className="text-[13px] font-medium">{payoutSummary(a.payout)}</p>
+              ) : a.status === 'APPROVED' ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge tone="warn">À verser</Badge>
+                  {can('hr.payroll.pay') ? (
+                    <Button size="sm" variant="secondary" onClick={() => setPaying(a)}>
+                      <Banknote className="size-4" aria-hidden />
+                      Verser<span className="sr-only"> l’avance de {a.lastName}</span>
+                    </Button>
+                  ) : null}
+                </div>
+              ) : null}
               {a.status === 'REQUESTED' &&
               can('hr.payroll.validate') &&
               a.requestedById !== me?.user.id ? (
@@ -197,6 +212,16 @@ export default function AdvancesPage() {
         </ul>
       )}
       <RequestSheet open={open} onClose={() => setOpen(false)} />
+      <PayoutSheet
+        open={!!paying}
+        onClose={() => setPaying(null)}
+        title="Versement de l’avance"
+        path={`/hr/advances/${paying?.id ?? ''}/pay`}
+        amount={paying?.amount ?? 0}
+        debitAccount="421 (avances au personnel)"
+        success="Avance versée"
+        intro={`Avance de ${paying?.lastName ?? ''} ${paying?.firstName ?? ''}, remboursée ensuite par retenue sur les paies.`}
+      />
     </>
   );
 }

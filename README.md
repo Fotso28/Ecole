@@ -64,6 +64,7 @@ Mot de passe commun : `Ecole2026!demo`
 | Comptabilité                                                                               | compta@demo.cm                                             |
 | Infirmerie                                                                                 | infirmerie@demo.cm                                         |
 | Enseignant (mathématiques, professeur principal de 4e A)                                   | prof.maths@demo.cm                                         |
+| Chauffeur ou accompagnateur du car (appel de la ligne 1 – Bastos)                          | chauffeur@demo.cm                                          |
 | Super-administrateur de la plateforme (double authentification à activer au premier accès) | admin@ecole.cm                                             |
 | Parent (Marie-Claire et Paul-Henri Ngono)                                                  | 6 77 12 34 56, code SMS affiché dans les journaux de l'API |
 

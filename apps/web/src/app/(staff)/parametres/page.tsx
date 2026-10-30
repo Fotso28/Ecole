@@ -122,6 +122,8 @@ const MODULE_LABELS: Record<string, string> = {
   timetable: 'Emploi du temps',
   exams: 'Examens',
   documents: 'Documents',
+  transport: 'Transport scolaire',
+  library: 'Bibliothèque et stock',
 };
 
 export default function SettingsPage() {

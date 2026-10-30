@@ -2,6 +2,7 @@ import type { INestApplicationContext } from '@nestjs/common';
 import { runAsSystem } from './common/context';
 import { CalendarService } from './modules/calendar/calendar.module';
 import { FinanceService } from './modules/finance/finance.service';
+import { LibraryService } from './modules/library/library.service';
 import { NotificationsService } from './modules/notifications/notifications.service';
 
 export const JOBS = {
@@ -13,6 +14,8 @@ export const JOBS = {
   reminders: { pattern: '0 8 * * *', tz: 'Africa/Douala' },
   /** Rappels des événements du lendemain, chaque soir à 18 h (heure de Douala). */
   eventReminders: { pattern: '0 18 * * *', tz: 'Africa/Douala' },
+  /** Rappels des prêts de bibliothèque en retard, chaque matin à 9 h (heure de Douala). */
+  libraryReminders: { pattern: '0 9 * * *', tz: 'Africa/Douala' },
 } as const;
 
 export type JobName = keyof typeof JOBS;
@@ -27,6 +30,10 @@ export async function runJob(app: INestApplicationContext, name: string): Promis
       return runAsSystem('job:reminders', () => app.get(FinanceService).sendReminders());
     case 'eventReminders':
       return runAsSystem('job:event-reminders', () => app.get(CalendarService).sendReminders());
+    case 'libraryReminders':
+      return runAsSystem('job:library-reminders', () =>
+        app.get(LibraryService).sendOverdueReminders(),
+      );
     default:
       throw new Error(`Tâche inconnue : ${name}`);
   }

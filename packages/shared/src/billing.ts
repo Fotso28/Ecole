@@ -22,6 +22,8 @@ export const SUBSCRIPTION_MODULE_LABELS: Record<Module, string> = {
   timetable: 'Emploi du temps',
   exams: 'Examens',
   documents: 'Documents',
+  transport: 'Transport scolaire',
+  library: 'Bibliothèque et stock',
 };
 
 export const SUBSCRIPTION_PAYMENT_METHODS = [

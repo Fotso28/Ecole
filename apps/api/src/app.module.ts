@@ -34,6 +34,8 @@ import { VerifyModule } from './modules/verify/verify.module';
 import { DisciplineModule } from './modules/discipline/discipline.module';
 import { DocumentsModule } from './modules/documents/documents.module';
 import { ReenrollmentModule } from './modules/reenrollment/reenrollment.module';
+import { TransportModule } from './modules/transport/transport.module';
+import { LibraryModule } from './modules/library/library.module';
 
 @Module({
   imports: [
@@ -72,6 +74,8 @@ import { ReenrollmentModule } from './modules/reenrollment/reenrollment.module';
     ReenrollmentModule,
     FilesModule,
     LessonsModule,
+    TransportModule,
+    LibraryModule,
   ],
   controllers: [HealthController],
   providers: [

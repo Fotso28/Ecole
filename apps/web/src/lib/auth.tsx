@@ -161,6 +161,7 @@ export function homeFor(me: Me | null, teacherOnly: boolean): string {
   if (!me) return '/connexion';
   if (me.kind === 'parent') return '/portail';
   if (teacherOnly) return '/enseignant';
+  if (me.roles.length > 0 && me.roles.every((r) => r === 'TRANSPORT')) return '/transport/appel';
   if (me.user.isPlatformAdmin && !me.activeSchool) return '/plateforme/facturation';
   if (me.permissions.includes('dashboard.read')) return '/tableau-de-bord';
   return '/eleves';

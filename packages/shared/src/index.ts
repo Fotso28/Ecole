@@ -5,4 +5,5 @@ export * from './identity';
 export * from './permissions';
 export * from './results';
 export * from './schemas';
+export * from './secretariat';
 export * from './timetable';

@@ -1,16 +1,17 @@
 'use client';
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { ChevronRight, FileSpreadsheet } from 'lucide-react';
+import { ChevronRight, Download, FileSpreadsheet, X } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, PageHeader } from '@/components/ui/card';
 import { SelectField, TextareaField } from '@/components/ui/field';
 import { useToast } from '@/components/ui/toast';
-import { api } from '@/lib/api';
+import { api, downloadFile } from '@/lib/api';
 import { plural } from '@/lib/format';
 import { useClasses } from '@/lib/queries';
+import { upload } from '@/lib/upload';
 
 interface ImportReport {
   total: number;
@@ -27,14 +28,23 @@ export default function ImportPage() {
   const toast = useToast();
   const queryClient = useQueryClient();
   const [csv, setCsv] = useState('');
+  const [xlsx, setXlsx] = useState<File | null>(null);
   const [classId, setClassId] = useState('');
   const [report, setReport] = useState<ImportReport | null>(null);
   const run = useMutation({
-    mutationFn: (dryRun: boolean) =>
-      api<ImportReport>('/students/import', {
+    mutationFn: (dryRun: boolean) => {
+      if (xlsx) {
+        const form = new FormData();
+        form.append('file', xlsx);
+        form.append('dryRun', String(dryRun));
+        if (classId) form.append('classId', classId);
+        return upload<ImportReport>('/students/import/xlsx', form);
+      }
+      return api<ImportReport>('/students/import', {
         method: 'POST',
         body: { csv, classId: classId || undefined, dryRun },
-      }),
+      });
+    },
     onSuccess: (r, dryRun) => {
       setReport(r);
       if (!dryRun && r.created > 0) {
@@ -56,35 +66,72 @@ export default function ImportPage() {
       </nav>
       <PageHeader
         title="Importer des élèves"
-        subtitle="Fichier CSV exporté d’Excel (séparateur point-virgule ou virgule)."
+        subtitle="Classeur Excel (.xlsx) ou fichier CSV (séparateur point-virgule ou virgule)."
+        actions={
+          <Button
+            variant="secondary"
+            onClick={() =>
+              downloadFile('/students/import/template.xlsx', 'modele-import-eleves.xlsx').catch(
+                (e: unknown) => toast(e instanceof Error ? e.message : 'Erreur', 'error'),
+              )
+            }
+          >
+            <Download className="size-4" aria-hidden />
+            Modèle Excel
+          </Button>
+        }
       />
       <Card className="flex flex-col gap-4">
         <label className="flex min-h-14 cursor-pointer items-center justify-center gap-2 rounded-[12px] border-2 border-dashed border-line-strong px-4 text-sm font-semibold text-primary">
           <FileSpreadsheet className="size-5" aria-hidden />
-          Choisir un fichier CSV
+          Choisir un fichier Excel ou CSV
           <input
             type="file"
-            accept=".csv,text/csv"
+            accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             className="sr-only"
             onChange={async (e) => {
               const file = e.target.files?.[0];
-              if (file) {
+              e.target.value = '';
+              if (!file) return;
+              setReport(null);
+              if (file.name.toLowerCase().endsWith('.xlsx')) {
+                setXlsx(file);
+                setCsv('');
+              } else {
+                setXlsx(null);
                 setCsv(await file.text());
-                setReport(null);
               }
             }}
           />
         </label>
-        <TextareaField
-          label="Contenu du fichier"
-          value={csv}
-          onChange={(e) => {
-            setCsv(e.target.value);
-            setReport(null);
-          }}
-          className="min-h-40 font-mono text-[13px]"
-          hint={`Colonnes attendues : ${TEMPLATE.split('\n')[0]}`}
-        />
+        {xlsx ? (
+          <div className="flex items-center gap-3 rounded-[12px] bg-primary-soft p-3 text-sm">
+            <FileSpreadsheet className="size-5 shrink-0 text-primary" aria-hidden />
+            <span className="min-w-0 flex-1 truncate font-semibold">{xlsx.name}</span>
+            <button
+              type="button"
+              aria-label="Retirer le fichier Excel"
+              onClick={() => {
+                setXlsx(null);
+                setReport(null);
+              }}
+              className="flex size-11 items-center justify-center rounded-[10px] hover:bg-white"
+            >
+              <X className="size-4" aria-hidden />
+            </button>
+          </div>
+        ) : (
+          <TextareaField
+            label="Contenu du fichier CSV"
+            value={csv}
+            onChange={(e) => {
+              setCsv(e.target.value);
+              setReport(null);
+            }}
+            className="min-h-40 font-mono text-[13px]"
+            hint={`Colonnes attendues : ${TEMPLATE.split('\n')[0]}`}
+          />
+        )}
         <SelectField
           label="Inscrire dans la classe"
           value={classId}
@@ -99,13 +146,15 @@ export default function ImportPage() {
           ))}
         </SelectField>
         <div className="flex flex-col gap-2 sm:flex-row">
-          <Button variant="secondary" onClick={() => setCsv(TEMPLATE)}>
-            Insérer un exemple
-          </Button>
+          {xlsx ? null : (
+            <Button variant="secondary" onClick={() => setCsv(TEMPLATE)}>
+              Insérer un exemple CSV
+            </Button>
+          )}
           <Button
             onClick={() => run.mutate(true)}
             loading={run.isPending && run.variables}
-            disabled={!csv.trim()}
+            disabled={!xlsx && !csv.trim()}
           >
             Vérifier sans importer
           </Button>

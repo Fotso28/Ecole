@@ -27,6 +27,9 @@ import { TeacherModule } from './modules/teacher/teacher.module';
 import { TimetableModule } from './modules/timetable/timetable.module';
 import { TranscriptsModule } from './modules/transcripts/transcripts.module';
 import { VerifyModule } from './modules/verify/verify.module';
+import { DisciplineModule } from './modules/discipline/discipline.module';
+import { DocumentsModule } from './modules/documents/documents.module';
+import { ReenrollmentModule } from './modules/reenrollment/reenrollment.module';
 
 @Module({
   imports: [
@@ -58,6 +61,9 @@ import { VerifyModule } from './modules/verify/verify.module';
     VerifyModule,
     TranscriptsModule,
     DevModule,
+    DocumentsModule,
+    DisciplineModule,
+    ReenrollmentModule,
   ],
   controllers: [HealthController],
   providers: [

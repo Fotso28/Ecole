@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { isClassScoped, type Permission } from '@ecole/shared';
+import { isClassScoped, isLineScoped, type Permission } from '@ecole/shared';
 import { currentContext } from './context';
 import { Db, InjectDb, Tx } from './prisma';
 
@@ -22,10 +22,18 @@ export class ScopeService {
     return year;
   }
 
-  /** Vrai si la permission ne vient que du rôle enseignant (accès limité à ses classes). */
+  /** Vrai si la permission n'est accordée que par un rôle limité aux classes de la personne. */
   isClassScoped(permission: Permission): boolean {
     const ctx = currentContext();
-    return ctx?.kind === 'staff' && isClassScoped(ctx.roles, permission);
+    if (ctx?.kind !== 'staff') return false;
+    return ctx.classScoped ? ctx.classScoped.has(permission) : isClassScoped(ctx.roles, permission);
+  }
+
+  /** Vrai si l'appel du transport est limité aux lignes de la personne. */
+  isLineScoped(): boolean {
+    const ctx = currentContext();
+    if (ctx?.kind !== 'staff') return false;
+    return ctx.lineScoped ?? isLineScoped(ctx.roles);
   }
 
   can(permission: Permission): boolean {

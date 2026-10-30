@@ -205,6 +205,8 @@ model School {
   settings        Json         @default("{}")
   modules         String[]     @default(["students", "attendance", "grades", "finance", "communication", "portal"])
   status          SchoolStatus @default(ACTIVE)
+  /// Incrémenté à chaque modification des rôles : invalide le cache des droits effectifs.
+  rolesVersion    Int          @default(0)
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
 
@@ -243,6 +245,8 @@ model Membership {
   userId         String
   schoolId       String
   roles          StaffRole[]
+  /// Rôles propres à l'école (CustomRole), en plus des rôles intégrés.
+  customRoleIds  String[]    @default([])
   maxWeeklyHours Int?
   active         Boolean     @default(true)
   createdAt      DateTime    @default(now())
@@ -1995,4 +1999,37 @@ model StockInventory {
   movements StockMovement[]
 
   @@index([schoolId, createdAt])
+}
+
+/// Adaptation d'un rôle intégré par une école : permissions ajoutées et retirées par rapport au code.
+model RoleOverride {
+  id          String    @id @default(cuid())
+  schoolId    String
+  role        StaffRole
+  added       String[]  @default([])
+  removed     String[]  @default([])
+  updatedById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([schoolId, role])
+}
+
+/// Rôle propre à une école : nom, permissions et limites de périmètre.
+model CustomRole {
+  id          String   @id @default(cuid())
+  schoolId    String
+  name        String
+  description String?
+  permissions String[] @default([])
+  /// Limité aux classes et matières de la personne, comme un enseignant.
+  classScoped Boolean  @default(false)
+  /// Appel du transport limité aux lignes de la personne, comme un chauffeur.
+  lineScoped  Boolean  @default(false)
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([schoolId, name])
+  @@index([schoolId])
 }

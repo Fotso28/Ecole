@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   ConflictException,
   Controller,
@@ -11,12 +12,13 @@ import {
   Post,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { staffCreateSchema, staffRolesSchema } from '@ecole/shared';
+import { staffCreateSchema, staffRolesSchema, type StaffRole } from '@ecole/shared';
 import { z } from 'zod';
+import { AccessService } from '../../common/access.service';
 import { AuditService } from '../../common/audit.service';
 import { currentSchoolId, staffContext } from '../../common/context';
 import { RequirePermissions } from '../../common/decorators';
-import { Db, InjectDb } from '../../common/prisma';
+import { Db, InjectDb, Tx } from '../../common/prisma';
 import { ZodPipe } from '../../common/zod.pipe';
 import { AuthService } from '../auth/auth.service';
 
@@ -35,7 +37,18 @@ export class StaffService {
   constructor(
     @InjectDb() private readonly db: Db,
     private readonly audit: AuditService,
+    private readonly access: AccessService,
   ) {}
+
+  /** Permissions effectives d'une attribution de rôles, dans l'état de la transaction. */
+  private async permissionsOf(
+    tx: Db | Tx,
+    roles: readonly StaffRole[],
+    customRoleIds: readonly string[],
+  ) {
+    const config = await this.access.load(tx);
+    return AccessService.resolve(config, { roles, customRoleIds }).permissions;
+  }
 
   async list(onlyTeachers = false) {
     const memberships = await this.db.membership.findMany({
@@ -49,6 +62,7 @@ export class StaffService {
     return memberships.map((m) => ({
       ...m.user,
       roles: m.roles,
+      customRoleIds: m.customRoleIds,
       active: m.active,
       maxWeeklyHours: m.maxWeeklyHours,
     }));
@@ -63,6 +77,8 @@ export class StaffService {
       });
       if (m) throw new ConflictException('Cette personne fait déjà partie du personnel');
     }
+    const customRoleIds = await this.access.checkCustomRoleIds(this.db, input.customRoleIds);
+    this.access.assertCanGrant(await this.permissionsOf(this.db, input.roles, customRoleIds));
     const user =
       existing ??
       (await this.db.user.create({
@@ -75,13 +91,19 @@ export class StaffService {
         },
       }));
     await this.db.membership.create({
-      data: { userId: user.id, schoolId, roles: input.roles, maxWeeklyHours: input.maxWeeklyHours },
+      data: {
+        userId: user.id,
+        schoolId,
+        roles: input.roles,
+        customRoleIds,
+        maxWeeklyHours: input.maxWeeklyHours,
+      },
     });
     await this.audit.log({
       action: 'staff.created',
       entity: 'User',
       entityId: user.id,
-      after: { email: input.email, roles: input.roles },
+      after: { email: input.email, roles: input.roles, customRoleIds },
     });
     return {
       id: user.id,
@@ -89,31 +111,46 @@ export class StaffService {
       lastName: user.lastName,
       email: user.email,
       roles: input.roles,
+      customRoleIds,
     };
   }
 
-  async setRoles(userId: string, roles: z.infer<typeof staffRolesSchema>['roles']) {
+  async setRoles(userId: string, input: z.infer<typeof staffRolesSchema>) {
     const schoolId = currentSchoolId();
-    if (userId === staffContext().userId && !roles.includes('DIRECTOR')) {
-      const directors = await this.db.membership.count({
-        where: { schoolId, roles: { has: 'DIRECTOR' }, active: true },
+    return this.db.$transaction(async (tx) => {
+      await this.access.lock(tx, schoolId);
+      const before = await tx.membership.findUnique({
+        where: { userId_schoolId: { userId, schoolId } },
       });
-      if (directors <= 1)
-        throw new ConflictException('L’établissement doit garder au moins un directeur');
-    }
-    const before = await this.db.membership.findUnique({
-      where: { userId_schoolId: { userId, schoolId } },
+      if (!before) throw new NotFoundException('Membre du personnel introuvable');
+      const customRoleIds = await this.access.checkCustomRoleIds(
+        tx,
+        input.customRoleIds ?? before.customRoleIds,
+      );
+      if (input.roles.length + customRoleIds.length === 0)
+        throw new BadRequestException('Au moins un rôle');
+      const [had, gets] = await Promise.all([
+        this.permissionsOf(tx, before.roles, before.customRoleIds),
+        this.permissionsOf(tx, input.roles, customRoleIds),
+      ]);
+      this.access.assertCanGrant([...gets].filter((p) => !had.has(p)));
+      const after = await tx.membership.update({
+        where: { id: before.id },
+        data: { roles: input.roles, customRoleIds },
+      });
+      await this.access.assertSomeoneKeepsControl(tx, schoolId);
+      await this.audit.log(
+        {
+          action: 'staff.roles_changed',
+          entity: 'Membership',
+          entityId: before.id,
+          before: { roles: before.roles, customRoleIds: before.customRoleIds },
+          after: { roles: after.roles, customRoleIds: after.customRoleIds },
+        },
+        tx,
+      );
+      return after;
     });
-    if (!before) throw new NotFoundException('Membre du personnel introuvable');
-    const after = await this.db.membership.update({ where: { id: before.id }, data: { roles } });
-    await this.audit.log({
-      action: 'staff.roles_changed',
-      entity: 'Membership',
-      entityId: before.id,
-      before: before.roles,
-      after: after.roles,
-    });
-    return after;
   }
 
   async deactivate(userId: string) {
@@ -124,7 +161,11 @@ export class StaffService {
       where: { userId_schoolId: { userId, schoolId } },
     });
     if (!m) throw new NotFoundException('Membre du personnel introuvable');
-    await this.db.membership.update({ where: { id: m.id }, data: { active: false } });
+    await this.db.$transaction(async (tx) => {
+      await this.access.lock(tx, schoolId);
+      await tx.membership.update({ where: { id: m.id }, data: { active: false } });
+      await this.access.assertSomeoneKeepsControl(tx, schoolId);
+    });
     await this.db.refreshToken.updateMany({
       where: { userId, schoolId, revokedAt: null },
       data: { revokedAt: new Date() },
@@ -164,7 +205,7 @@ export class StaffController {
     @Param('userId') userId: string,
     @Body(new ZodPipe(staffRolesSchema)) body: z.infer<typeof staffRolesSchema>,
   ) {
-    return this.staff.setRoles(userId, body.roles);
+    return this.staff.setRoles(userId, body);
   }
 
   @RequirePermissions('staff.write')

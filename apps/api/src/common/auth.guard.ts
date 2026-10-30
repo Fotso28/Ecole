@@ -7,8 +7,9 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
-import { PERMISSIONS, permissionsForRoles, type Permission, type StaffRole } from '@ecole/shared';
+import { PERMISSIONS, type Permission, type StaffRole } from '@ecole/shared';
 import type { Request } from 'express';
+import { AccessService } from './access.service';
 import { setContext } from './context';
 import {
   ACCOUNT_KEY,
@@ -30,7 +31,6 @@ export interface AccessTokenPayload {
   bg?: boolean;
 }
 
-const ADMIN_ROLES: readonly StaffRole[] = ['DIRECTOR', 'CENSOR', 'SECRETARY', 'ACCOUNTANT'];
 const READ_ONLY: ReadonlySet<Permission> = new Set(
   PERMISSIONS.filter((p) => p.endsWith('.read') && p !== 'health.read'),
 );
@@ -45,6 +45,7 @@ export class AuthGuard implements CanActivate {
     private readonly reflector: Reflector,
     private readonly jwt: JwtService,
     @InjectDb() private readonly db: Db,
+    private readonly access: AccessService,
   ) {}
 
   private meta<T>(context: ExecutionContext, key: string): T | undefined {
@@ -108,24 +109,37 @@ export class AuthGuard implements CanActivate {
 
     const school = await this.db.school.findUnique({
       where: { id: payload.sch },
-      select: { status: true, modules: true, settings: true },
+      select: { status: true, modules: true, settings: true, rolesVersion: true },
     });
     if (!school || school.status !== 'ACTIVE')
       throw new ForbiddenException('Établissement inaccessible');
 
     let roles: StaffRole[] = [];
+    let customRoleIds: string[] = [];
     let permissions: ReadonlySet<Permission>;
+    let classScoped: ReadonlySet<Permission> = new Set();
+    let lineScoped = false;
+    let requiresMfa = false;
     if (payload.bg) {
       if (!user.isPlatformAdmin || !user.mfaEnabled) throw new UnauthorizedException();
       permissions = READ_ONLY;
     } else {
       const membership = await this.db.membership.findUnique({
         where: { userId_schoolId: { userId: payload.sub, schoolId: payload.sch } },
-        select: { roles: true, active: true },
+        select: { roles: true, customRoleIds: true, active: true },
       });
       if (!membership?.active) throw new ForbiddenException('Accès retiré pour cet établissement');
       roles = membership.roles;
-      permissions = permissionsForRoles(roles);
+      customRoleIds = membership.customRoleIds;
+      // Droits effectifs depuis la base (rôles adaptés par l'école, rôles propres), mis en cache.
+      const access = await this.access.resolve(payload.sch, school.rolesVersion, {
+        roles,
+        customRoleIds,
+      });
+      permissions = access.permissions;
+      classScoped = access.classScoped;
+      lineScoped = access.lineScoped;
+      requiresMfa = access.requiresMfa;
     }
 
     const settings = (school.settings ?? {}) as SchoolSettings;
@@ -133,7 +147,7 @@ export class AuthGuard implements CanActivate {
       settings.mfaRequired &&
       !payload.bg &&
       !user.mfaEnabled &&
-      roles.some((r) => ADMIN_ROLES.includes(r)) &&
+      requiresMfa &&
       !this.meta<boolean>(context, ALLOW_WITHOUT_MFA_KEY)
     ) {
       throw new ForbiddenException({
@@ -158,6 +172,9 @@ export class AuthGuard implements CanActivate {
       schoolId: payload.sch,
       roles,
       permissions,
+      customRoleIds,
+      classScoped,
+      lineScoped,
       isPlatformAdmin: user.isPlatformAdmin,
       breakGlass: !!payload.bg,
       ip,

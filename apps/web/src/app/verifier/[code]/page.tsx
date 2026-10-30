@@ -28,7 +28,32 @@ type Result =
       number: string;
       amount: string;
       issuedAt: string;
+    }
+  | {
+      type: 'document';
+      documentType: string;
+      label: string;
+      valid: boolean;
+      status: 'ISSUED' | 'CANCELLED';
+      school: string;
+      student: string;
+      class: string;
+      year: string;
+      number: string;
+      duplicateOf: string | null;
+      issuedAt: string;
+      cancelledAt: string | null;
     };
+
+function heading(result: Result): string {
+  if (result.type === 'document')
+    return result.valid ? `${result.label} authentique` : `${result.label} annulé(e)`;
+  if (result.valid)
+    return result.type === 'report-card' ? 'Bulletin authentique' : 'Reçu authentique';
+  return result.type === 'report-card'
+    ? `Bulletin remplacé par la version ${result.latestVersion ?? '—'}`
+    : 'Reçu annulé';
+}
 
 async function verify(code: string): Promise<Result | null> {
   const base = process.env.API_URL ?? 'http://localhost:4000';
@@ -81,15 +106,7 @@ export default async function VerifyPage({ params }: { params: Promise<{ code: s
             ) : (
               <XCircle className="size-10 text-warn" aria-hidden />
             )}
-            <h1 className="font-display text-xl font-bold">
-              {result.valid
-                ? result.type === 'report-card'
-                  ? 'Bulletin authentique'
-                  : 'Reçu authentique'
-                : result.type === 'report-card'
-                  ? `Bulletin remplacé par la version ${result.latestVersion ?? '—'}`
-                  : 'Reçu annulé'}
-            </h1>
+            <h1 className="font-display text-xl font-bold">{heading(result)}</h1>
           </div>
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
             <dt className="text-muted">Établissement</dt>
@@ -112,6 +129,29 @@ export default async function VerifyPage({ params }: { params: Promise<{ code: s
                 <dd className="text-right font-semibold">
                   {result.version} · publiée le {fr(result.publishedAt)}
                 </dd>
+              </>
+            ) : result.type === 'document' ? (
+              <>
+                <dt className="text-muted">Classe</dt>
+                <dd className="text-right font-semibold">
+                  {result.class} · {result.year}
+                </dd>
+                <dt className="text-muted">Numéro</dt>
+                <dd className="text-right font-semibold tabular">{result.number}</dd>
+                {result.duplicateOf ? (
+                  <>
+                    <dt className="text-muted">Duplicata de</dt>
+                    <dd className="text-right font-semibold tabular">{result.duplicateOf}</dd>
+                  </>
+                ) : null}
+                <dt className="text-muted">Délivré le</dt>
+                <dd className="text-right font-semibold">{fr(result.issuedAt)}</dd>
+                {result.cancelledAt ? (
+                  <>
+                    <dt className="text-muted">Annulé le</dt>
+                    <dd className="text-right font-semibold">{fr(result.cancelledAt)}</dd>
+                  </>
+                ) : null}
               </>
             ) : (
               <>

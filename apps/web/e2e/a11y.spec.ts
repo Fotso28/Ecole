@@ -37,11 +37,33 @@ test('écrans de la direction', async ({ page }) => {
     '/impayes',
     '/emploi-du-temps',
     '/parametres',
+    '/eleves/import',
+    '/documents',
+    '/documents/modeles',
+    '/incidents',
+    '/rentree',
   ]) {
     await page.goto(path);
     await expect(page.locator('main h1').first()).toBeVisible();
     await expectAccessible(page, path);
   }
+});
+
+test('fenêtres du secrétariat et de la surveillance', async ({ page }) => {
+  await loginStaff(page, 'secretariat@demo.cm');
+  await page.goto('/documents');
+  await page.getByRole('button', { name: 'Délivrer un document' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Délivrer un document' });
+  await dialog.getByLabel('Élève').fill('Ngono');
+  await expect(dialog.getByRole('button', { name: /Ngono Marie-Claire/ })).toBeVisible();
+  await expectAccessible(page, '/documents (délivrance)');
+  await page.goto('/connexion');
+  await page.evaluate(() => fetch('/api/auth/logout', { method: 'POST' }));
+  await loginStaff(page, 'surveillant@demo.cm');
+  await page.goto('/incidents');
+  await page.getByRole('button', { name: 'Signaler un incident' }).click();
+  await expect(page.getByRole('dialog', { name: 'Signaler un incident' })).toBeVisible();
+  await expectAccessible(page, '/incidents (saisie)');
 });
 
 test('appel et notes de l’enseignant', async ({ page }) => {

@@ -111,4 +111,31 @@ describe('redirection après connexion', () => {
       expect(safeNextPath(next)).toBeNull();
     }
   });
+
+  it('ouvre les écrans du secrétariat et de la discipline aux seuls rôles concernés', () => {
+    const modules = [
+      'students',
+      'attendance',
+      'grades',
+      'finance',
+      'communication',
+      'portal',
+      'documents',
+    ];
+    expect(hrefs(me(['SECRETARY'], modules))).toEqual(
+      expect.arrayContaining(['/documents', '/rentree', '/eleves/nouveau']),
+    );
+    expect(hrefs(me(['SECRETARY'], modules))).not.toContain('/incidents');
+    expect(hrefs(me(['SUPERVISOR'], modules))).toContain('/incidents');
+    expect(hrefs(me(['SUPERVISOR'], modules))).not.toContain('/documents');
+    expect(hrefs(me(['DIRECTOR'], modules))).toEqual(
+      expect.arrayContaining(['/documents', '/incidents', '/rentree']),
+    );
+    for (const role of ['CENSOR', 'TEACHER', 'ACCOUNTANT'] as const) {
+      expect(hrefs(me([role], modules))).not.toContain('/incidents');
+      expect(hrefs(me([role], modules))).not.toContain('/documents');
+    }
+    // Module « documents » non souscrit : l'entrée disparaît.
+    expect(hrefs(me(['SECRETARY']))).not.toContain('/documents');
+  });
 });

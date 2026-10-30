@@ -11,6 +11,7 @@ import {
 } from '@ecole/shared';
 import { Bus, MapPin, Plus, TriangleAlert } from 'lucide-react';
 import { useState } from 'react';
+import { CreditNoteSheet, type CreditNoteTarget } from '@/components/credit-note-sheet';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -575,6 +576,7 @@ function SubscriptionsTab({ lines, manage }: { lines: Line[]; manage: boolean })
   const toast = useToast();
   const qc = useQueryClient();
   const [lineId, setLineId] = useState('');
+  const [creditFor, setCreditFor] = useState<CreditNoteTarget | null>(null);
   const q = useQuery({
     queryKey: ['transport', 'subscriptions', lineId],
     queryFn: () =>
@@ -588,7 +590,7 @@ function SubscriptionsTab({ lines, manage }: { lines: Line[]; manage: boolean })
       }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['transport'] });
-      toast('Abonnement résilié ; la facture reste dans la scolarité');
+      toast('Abonnement résilié ; accordez un avoir si un remboursement est décidé');
     },
     onError: (e) => toast(e instanceof Error ? e.message : 'Erreur', 'error'),
   });
@@ -647,11 +649,31 @@ function SubscriptionsTab({ lines, manage }: { lines: Line[]; manage: boolean })
                     Résilier
                   </Button>
                 ) : null}
+                {manage && sub.invoiced ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() =>
+                      setCreditFor({
+                        url: `/transport/subscriptions/${sub.id}/credit`,
+                        label: `l’abonnement de ${sub.student ? `${sub.student.firstName} ${sub.student.lastName}` : 'l’élève'}`,
+                      })
+                    }
+                    aria-label={`Avoir sur l’abonnement de ${sub.student?.firstName ?? 'l’élève'}`}
+                  >
+                    Avoir
+                  </Button>
+                ) : null}
               </div>
             </li>
           ))}
         </ul>
       )}
+      <CreditNoteSheet
+        target={creditFor}
+        onClose={() => setCreditFor(null)}
+        onDone={() => void qc.invalidateQueries({ queryKey: ['transport'] })}
+      />
     </div>
   );
 }

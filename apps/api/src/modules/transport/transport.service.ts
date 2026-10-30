@@ -477,6 +477,15 @@ export class TransportService implements OnModuleInit {
         where: { studentId: input.studentId, academicYearId: year.id, status: 'ACTIVE' },
       });
       if (existing) throw new ConflictException('L’élève est déjà abonné au transport cette année');
+      // Abonnements résiliés de l'année (changement de ligne ou de sens) : remplacés par celui-ci.
+      const replaced = await tx.transportSubscription.findMany({
+        where: {
+          studentId: input.studentId,
+          academicYearId: year.id,
+          status: 'CANCELLED',
+          replacedAt: null,
+        },
+      });
       if (!line.vehicle) throw new ConflictException('Affectez d’abord un véhicule à cette ligne');
       if (
         !fitsCapacity(
@@ -519,12 +528,43 @@ export class TransportService implements OnModuleInit {
           data: { invoiceLineId },
         });
       }
+      // Pas de double facturation : avoir du reste dû de l'ancien abonnement, et ce qui y a déjà
+      // été payé vient en déduction du nouveau.
+      let alreadyPaid = 0;
+      for (const old of replaced) {
+        if (old.invoiceLineId) {
+          const { before } = await this.finance.creditNote(
+            {
+              lineId: old.invoiceLineId,
+              amount: old.fee,
+              reason: `abonnement transport remplacé (${line.name})`,
+              source: 'transport',
+            },
+            tx,
+          );
+          alreadyPaid += Math.min(before.paid, before.due);
+        }
+        await tx.transportSubscription.update({
+          where: { id: old.id },
+          data: { replacedAt: new Date() },
+        });
+      }
+      if (invoiceLineId && alreadyPaid > 0)
+        await this.finance.creditNote(
+          {
+            lineId: invoiceLineId,
+            amount: alreadyPaid,
+            reason: 'montant déjà payé sur l’abonnement transport remplacé',
+            source: 'transport',
+          },
+          tx,
+        );
       await this.audit.log(
         {
           action: 'transport.subscribed',
           entity: 'TransportSubscription',
           entityId: created.id,
-          after: { ...input, fee, invoiceLineId },
+          after: { ...input, fee, invoiceLineId, replaced: replaced.map((r) => r.id) },
         },
         tx,
       );
@@ -553,7 +593,8 @@ export class TransportService implements OnModuleInit {
 
   /**
    * Résiliation : l'élève quitte la liste d'appel. La ligne de facture reste (écritures en ajout
-   * seul) ; un éventuel geste commercial passe par une remise dans la scolarité.
+   * seul) ; un réabonnement la même année la crédite automatiquement, et un geste commercial
+   * (résiliation en cours d'année) passe par un avoir sur l'abonnement (`credit`).
    */
   async cancel(id: string, reason: string) {
     const sub = await this.db.transportSubscription.findUnique({ where: { id } });
@@ -574,6 +615,34 @@ export class TransportService implements OnModuleInit {
       reason,
     });
     return { ok: true };
+  }
+
+  /**
+   * Avoir sur la facture d'un abonnement, par le gestionnaire du transport : limité à la ligne de
+   * cet abonnement et à son reste dû, sans autre droit sur la scolarité.
+   */
+  async credit(id: string, amount: number, reason: string) {
+    const sub = await this.db.transportSubscription.findUnique({ where: { id } });
+    if (!sub) throw new NotFoundException('Abonnement introuvable');
+    if (!sub.invoiceLineId) throw new ConflictException('Cet abonnement n’a pas été facturé');
+    const lineId = sub.invoiceLineId;
+    return this.db.$transaction(async (tx) => {
+      const { applied } = await this.finance.creditNote(
+        { lineId, amount, reason, source: 'transport', strict: true },
+        tx,
+      );
+      await this.audit.log(
+        {
+          action: 'transport.credited',
+          entity: 'TransportSubscription',
+          entityId: id,
+          after: { invoiceLineId: lineId, amount: applied },
+          reason,
+        },
+        tx,
+      );
+      return { credited: applied };
+    });
   }
 
   // ---------------------------------------------------------------- Appel dans le car

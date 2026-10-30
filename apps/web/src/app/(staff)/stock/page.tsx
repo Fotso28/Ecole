@@ -9,6 +9,7 @@ import {
 } from '@ecole/shared';
 import { Plus, TriangleAlert } from 'lucide-react';
 import { useState } from 'react';
+import { CreditNoteSheet, type CreditNoteTarget } from '@/components/credit-note-sheet';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, EmptyState, ErrorBlock, LoadingBlock, PageHeader, Stat } from '@/components/ui/card';
@@ -346,6 +347,7 @@ function MovementsTab({ canWrite }: { canWrite: boolean }) {
   const toast = useToast();
   const qc = useQueryClient();
   const [page, setPage] = useState(1);
+  const [creditFor, setCreditFor] = useState<CreditNoteTarget | null>(null);
   const q = useQuery({
     queryKey: ['stock', 'movements', page],
     queryFn: () => api<Paged<Movement>>(`/stock/movements?page=${page}&pageSize=30`),
@@ -353,16 +355,21 @@ function MovementsTab({ canWrite }: { canWrite: boolean }) {
   });
   const reverse = useMutation({
     mutationFn: (id: string) =>
-      api<{ invoiced: boolean }>(`/stock/movements/${id}/reverse`, {
-        method: 'POST',
-        body: { reason: 'Correction de saisie' },
-      }),
+      api<{ invoiced: boolean; credited: number; notCredited: number }>(
+        `/stock/movements/${id}/reverse`,
+        {
+          method: 'POST',
+          body: { reason: 'Correction de saisie' },
+        },
+      ),
     onSuccess: (r) => {
       void qc.invalidateQueries({ queryKey: ['stock'] });
       toast(
-        r.invoiced
-          ? 'Mouvement corrigé. La facture reste : accordez une remise dans la scolarité si besoin'
-          : 'Mouvement corrigé par un mouvement inverse',
+        !r.invoiced
+          ? 'Mouvement corrigé par un mouvement inverse'
+          : r.notCredited > 0
+            ? `Vente annulée : avoir de ${formatFcfa(r.credited)} ; ${formatFcfa(r.notCredited)} déjà payés restent à rembourser par la scolarité`
+            : `Vente annulée : avoir de ${formatFcfa(r.credited)} sur la facture`,
       );
     },
     onError: onError(toast),
@@ -405,10 +412,30 @@ function MovementsTab({ canWrite }: { canWrite: boolean }) {
                   Corriger
                 </Button>
               ) : null}
+              {canWrite && m.type === 'SALE' && m.invoiced ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() =>
+                    setCreditFor({
+                      url: `/stock/movements/${m.id}/credit`,
+                      label: `la vente ${m.item.name}${m.student ? ` à ${m.student.name}` : ''}`,
+                    })
+                  }
+                  aria-label={`Avoir sur la vente ${m.item.name}`}
+                >
+                  Avoir
+                </Button>
+              ) : null}
             </div>
           </li>
         ))}
       </ul>
+      <CreditNoteSheet
+        target={creditFor}
+        onClose={() => setCreditFor(null)}
+        onDone={() => void qc.invalidateQueries({ queryKey: ['stock'] })}
+      />
       {pages > 1 ? (
         <div className="flex justify-center gap-2">
           <Button

@@ -66,11 +66,11 @@ test('facturation de l’abonnement : plateforme puis direction', async ({ page,
   await expect(page.getByText('Total annuel').first()).toBeVisible();
 
   await page.getByRole('button', { name: 'Émettre la facture' }).click();
-  await expect(page.getByText(/Facture ABO-\d{4}-\d{4} émise/)).toBeVisible();
-  // La facture la plus récente est en tête de liste.
-  const number = (
-    await page.getByRole('heading', { level: 3, name: /ABO-/ }).first().textContent()
-  )?.trim();
+  // Numéro lu dans la confirmation : la liste peut encore afficher l'état d'avant l'émission.
+  const issued = page.getByText(/Facture ABO-\d{4}-\d{4} émise/);
+  await expect(issued).toBeVisible();
+  const number = (await issued.textContent())?.match(/ABO-\d{4}-\d{4}/)?.[0];
+  expect(number).toBeTruthy();
   const invoice = page
     .locator('li')
     .filter({ has: page.getByRole('heading', { level: 3, name: number }) });

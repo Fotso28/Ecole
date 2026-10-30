@@ -74,6 +74,7 @@ test('dossier du personnel, données sensibles, heures de cours et avance', asyn
   // Versement de l'avance accordée par la comptabilité (une seule fois : base partagée).
   await navigate(page, info, 'Avances sur salaire');
   const accorded = visibleItem(page, 'Eyenga Brigitte');
+  await expect(accorded.getByText(/À verser|Versée le/).first()).toBeVisible();
   const pay = accorded.getByRole('button', { name: /Verser/ });
   if (await pay.count()) {
     await pay.click();

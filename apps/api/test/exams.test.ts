@@ -509,6 +509,38 @@ describe('module Examens', () => {
         durationMinutes: 60,
       })
       .expect(409);
+
+    // Coefficients figés à la publication : moyennes et rangs restent ceux annoncés aux parents.
+    await prisma.classSubject.updateMany({
+      where: { classId: f.class4AId },
+      data: { coefficient: 1 },
+    });
+    await prisma.classSubject.update({ where: { id: f.cs.maths4A }, data: { coefficient: 9 } });
+    const later = await http()
+      .get(`/exams/sessions/${p.sessionId}/results`)
+      .set(s.censeur.auth)
+      .expect(200);
+    expect(later.body.rows).toEqual(results.body.rows);
+
+    // Notes reportées : non modifiables dans la grille ; supprimer l'évaluation annule le report.
+    const frSheet = await http()
+      .get(`/grades/sheet?classSubjectId=${f.cs.francais4A}&sequenceId=${f.seq2Id}`)
+      .set(s.prof2.auth)
+      .expect(200);
+    const frRow = frSheet.body.rows[0];
+    const changed = await http()
+      .put(`/grades/evaluations/${frEval.id}/grades`)
+      .set(s.prof2.auth)
+      .send({ grades: [{ studentId: frRow.student.id, value: '40' }] })
+      .expect(409);
+    expect(changed.body.message).toMatch(/Notes reportées/);
+    await http().delete(`/grades/evaluations/${frEval.id}`).set(s.prof2.auth).expect(200);
+    const redo = await http()
+      .post(`/exams/sessions/${p.sessionId}/transfer`)
+      .set(s.censeur.auth)
+      .send({})
+      .expect(201);
+    expect(redo.body.created).toEqual([{ className: '4e A', subjectName: 'Français' }]);
   });
 
   it('réserve la levée de l’anonymat à la direction et au censeur, et la journalise', async () => {

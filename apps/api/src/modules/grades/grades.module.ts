@@ -220,6 +220,22 @@ export class GradesService {
       where: { evaluationId, studentId: { in: rows.map((r) => r.studentId) } },
     });
     const beforeBy = new Map(before.map((g) => [g.studentId, g]));
+    // Notes reportées d'un examen publié : elles ne se corrigent pas dans la grille.
+    if (await this.db.examTransfer.count({ where: { evaluationId } })) {
+      const changed = parsed.some((p) => {
+        const prev = beforeBy.get(p.studentId);
+        return (
+          prev &&
+          (p.stored === null ||
+            (p.stored !== 'invalid' &&
+              (p.stored.status !== prev.status || p.stored.valueCenti !== prev.valueCenti)))
+        );
+      });
+      if (changed)
+        throw new ConflictException(
+          'Notes reportées d’un examen publié : elles ne se modifient pas ici (supprimez l’évaluation pour annuler le report)',
+        );
+    }
     const changes: { studentId: string; before: string; after: string }[] = [];
     await this.db.$transaction(async (tx) => {
       // Écritures groupées : une requête pour les nouvelles notes et une pour les effacements,

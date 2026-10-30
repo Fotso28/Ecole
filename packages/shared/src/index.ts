@@ -4,6 +4,7 @@ export * from './communication';
 export * from './finance';
 export * from './grades';
 export * from './identity';
+export * from './payroll';
 export * from './permissions';
 export * from './results';
 export * from './schemas';

@@ -16,15 +16,22 @@ function loadServiceWorker(): (url: string, mode?: string) => boolean {
     fileURLToPath(new URL('../../public/sw.js', import.meta.url)),
     'utf8',
   );
-  runInNewContext(source, { self, URL, Response, Headers, caches: {}, fetch: () => undefined });
+  // Réseau et caches factices : les stratégies lancées par respondWith vont jusqu'au bout.
+  const caches = {
+    match: async () => undefined,
+    open: async () => ({ put: async () => undefined }),
+  };
+  const fetch = async () => new Response('{}', { status: 200 });
+  runInNewContext(source, { self, URL, Response, Headers, caches, fetch });
   const onFetch = listeners.get('fetch');
   if (!onFetch) throw new Error('Gestionnaire fetch absent');
   return (url, mode = 'cors') => {
     let handled = false;
     onFetch({
       request: { method: 'GET', url: `https://ecole.test${url}`, mode },
-      respondWith: () => {
+      respondWith: (response: Promise<unknown>) => {
         handled = true;
+        void Promise.resolve(response).catch(() => undefined);
       },
     });
     return handled;

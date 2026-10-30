@@ -118,6 +118,11 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     if (/^0+$/.test(parsed.data.DATA_ENCRYPTION_KEY)) {
       throw new Error('Clé de chiffrement par défaut interdite en production');
     }
+    // Le fournisseur « console » écrit chaque SMS, codes de connexion des parents compris, dans
+    // les journaux ; « memory » les garde en mémoire sans les envoyer.
+    if (parsed.data.SMS_PROVIDER !== 'http') {
+      throw new Error('SMS_PROVIDER=http obligatoire en production (passerelle SMS)');
+    }
   }
   if (parsed.data.STORAGE_PROVIDER === 's3') {
     const missing = (['S3_BUCKET', 'S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY'] as const).filter(

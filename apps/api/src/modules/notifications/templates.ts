@@ -29,4 +29,17 @@ export const templates = {
     `Le bulletin du ${p.term} de ${p.student} est disponible${p.average === null ? '' : ` (moyenne ${formatGrade(p.average)}/20)`}.`,
   announcement: (p: { school: string; title: string }) =>
     `${p.school} : ${p.title}. Détails dans l'application.`,
+  announcementEmail: (p: { school: string; title: string; body: string }) =>
+    `${p.title}\n\n${p.body}\n\n${p.school}`,
+  messageNew: (p: { school: string; from: string; student: string }) =>
+    `${p.school} : nouveau message de ${p.from} au sujet de ${p.student}. Lisez-le et répondez dans l'application.`,
+  eventReminder: (p: { school: string; title: string; date: string; time?: string | null }) =>
+    `${p.school} : rappel, ${p.title} demain ${p.date}${p.time ? ` à ${p.time}` : ''}. Détails dans l'application.`,
+};
+
+/** Objets des e-mails, par modèle. */
+export const subjects = {
+  announcement: (p: { school: string; title: string }) => `${p.school} : ${p.title}`,
+  messageNew: (p: { student: string }) => `Nouveau message au sujet de ${p.student}`,
+  eventReminder: (p: { title: string }) => `Rappel : ${p.title} demain`,
 };

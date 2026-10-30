@@ -19,6 +19,7 @@ interface Guardian {
   firstName: string;
   lastName: string;
   phone: string;
+  email: string;
   relationship: 'FATHER' | 'MOTHER' | 'TUTOR' | 'OTHER';
   isPrimary: boolean;
   isEmergencyContact: boolean;
@@ -55,6 +56,7 @@ const emptyGuardian = (primary: boolean): Guardian => ({
   firstName: '',
   lastName: '',
   phone: '',
+  email: '',
   relationship: 'FATHER',
   isPrimary: primary,
   isEmergencyContact: primary,
@@ -62,6 +64,9 @@ const emptyGuardian = (primary: boolean): Guardian => ({
 });
 
 type Errors = Record<string, string>;
+
+/** L'adresse e-mail est facultative : un champ vide n'est pas envoyé. */
+const withoutEmptyEmail = (g: Guardian) => ({ ...g, email: g.email.trim() || undefined });
 
 export default function NewStudentPage() {
   const router = useRouter();
@@ -91,7 +96,7 @@ export default function NewStudentPage() {
     gender: identity.gender || undefined,
     birthPlace: identity.birthPlace || undefined,
     previousSchool: identity.previousSchool || undefined,
-    guardians,
+    guardians: guardians.map(withoutEmptyEmail),
     classId: classId || undefined,
     confirmNotDuplicate: dismissed,
   });
@@ -131,7 +136,7 @@ export default function NewStudentPage() {
     }
     if (step === 1) {
       guardians.forEach((g, idx) => {
-        const r = guardianInputSchema.safeParse(g);
+        const r = guardianInputSchema.safeParse(withoutEmptyEmail(g));
         if (!r.success)
           for (const i of r.error.issues) next[`guardians.${idx}.${String(i.path[0])}`] = i.message;
       });
@@ -377,6 +382,17 @@ export default function NewStudentPage() {
                     onChange={(e) => updateGuardian(idx, { phone: e.target.value })}
                     error={err(`guardians.${idx}.phone`)}
                     hint="Sert à la connexion au portail par SMS."
+                  />
+                  <InputField
+                    label="Adresse e-mail"
+                    type="email"
+                    inputMode="email"
+                    autoComplete="off"
+                    optional
+                    value={g.email}
+                    onChange={(e) => updateGuardian(idx, { email: e.target.value })}
+                    error={err(`guardians.${idx}.email`)}
+                    hint="Pour recevoir les notifications par e-mail."
                   />
                   <SelectField
                     label="Lien"

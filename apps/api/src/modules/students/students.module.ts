@@ -15,6 +15,7 @@ import {
   duplicateCheckSchema,
   enrollmentCreateSchema,
   ENROLLMENT_STATUSES,
+  guardianContactSchema,
   guardianInputSchema,
   studentCreateSchema,
   studentImportSchema,
@@ -114,6 +115,16 @@ export class StudentsController {
     @Body(new ZodPipe(guardianInputSchema)) body: z.infer<typeof guardianInputSchema>,
   ) {
     return this.students.addGuardian(id, body);
+  }
+
+  @RequirePermissions('students.write')
+  @Patch('students/:id/guardians/:linkId/contact')
+  setGuardianContact(
+    @Param('id') id: string,
+    @Param('linkId') linkId: string,
+    @Body(new ZodPipe(guardianContactSchema)) body: z.infer<typeof guardianContactSchema>,
+  ) {
+    return this.students.setGuardianEmail(id, linkId, body.email);
   }
 
   @RequirePermissions('students.write')

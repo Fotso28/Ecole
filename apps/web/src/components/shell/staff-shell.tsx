@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 're
 import { ROLE_LABELS } from '@ecole/shared';
 import { Sheet } from '@/components/ui/sheet';
 import { homeFor, useAuth } from '@/lib/auth';
+import { useStaffUnread } from '@/lib/communication';
 import { activeHref, primaryNav, visibleNav } from '@/lib/nav';
 import { cn } from '@/lib/utils';
 
@@ -34,6 +35,7 @@ export function StaffShell({ children }: { children: ReactNode }) {
 
   useEffect(() => setMenuOpen(false), [pathname]);
 
+  const unread = useStaffUnread().data?.count ?? 0;
   const groups = useMemo(() => visibleNav(me), [me]);
   const primary = useMemo(() => primaryNav(me), [me]);
   const allItems = groups.flatMap((g) => g.items);
@@ -86,6 +88,12 @@ export function StaffShell({ children }: { children: ReactNode }) {
                   aria-hidden
                 />
                 {item.label}
+                {item.href === '/messages' && unread > 0 ? (
+                  <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-saffron px-1.5 text-xs font-bold text-ink">
+                    {unread}
+                    <span className="sr-only"> non lus</span>
+                  </span>
+                ) : null}
               </Link>
             );
           })}
@@ -255,7 +263,14 @@ export function StaffShell({ children }: { children: ReactNode }) {
           className="flex min-h-14 flex-col items-center justify-center gap-0.5 rounded-[10px] text-[11px] font-semibold text-muted"
           aria-haspopup="dialog"
         >
-          <Menu className="size-[22px]" aria-hidden />
+          <span className="relative">
+            <Menu className="size-[22px]" aria-hidden />
+            {unread > 0 && !primary.some((i) => i.href === '/messages') ? (
+              <span className="absolute -top-1 -right-1.5 size-2.5 rounded-full bg-danger">
+                <span className="sr-only">Messages non lus</span>
+              </span>
+            ) : null}
+          </span>
           Menu
         </button>
       </nav>

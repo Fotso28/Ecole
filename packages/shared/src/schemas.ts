@@ -284,14 +284,100 @@ export const cashCloseSchema = z.object({
 });
 
 // Communication
-export const ANNOUNCEMENT_SCOPES = ['SCHOOL', 'CYCLE', 'LEVEL', 'CLASS'] as const;
-export const announcementCreateSchema = z.object({
-  title: z.string().trim().min(3).max(120),
-  body: z.string().trim().min(3).max(4000),
-  scope: z.enum(ANNOUNCEMENT_SCOPES),
-  targetId: id.optional(),
-  sendSms: z.boolean().default(false),
+export const ANNOUNCEMENT_SCOPES = ['SCHOOL', 'CYCLE', 'LEVEL', 'CLASS', 'STUDENTS'] as const;
+export const announcementCreateSchema = z
+  .object({
+    title: z.string().trim().min(3).max(120),
+    body: z.string().trim().min(3).max(4000),
+    scope: z.enum(ANNOUNCEMENT_SCOPES),
+    targetId: id.optional(),
+    /** Portée STUDENTS : élèves dont les parents reçoivent l'annonce. */
+    studentIds: z.array(id).max(100).default([]),
+    /** Notification aux parents (SMS ou e-mail selon les coordonnées et le réglage de l'école). */
+    sendSms: z.boolean().default(false),
+  })
+  .refine((v) => v.scope !== 'STUDENTS' || v.studentIds.length > 0, {
+    message: 'Choisissez au moins un élève',
+    path: ['studentIds'],
+  })
+  .refine((v) => v.scope === 'SCHOOL' || v.scope === 'STUDENTS' || !!v.targetId, {
+    message: 'Cible obligatoire',
+    path: ['targetId'],
+  });
+
+// Messagerie enseignants-parents
+const messageBody = z.string().trim().min(1, 'Message vide').max(2000, '2 000 caractères maximum');
+export const messageSendSchema = z.object({ body: messageBody });
+export const staffThreadCreateSchema = z.object({
+  studentId: id,
+  guardianId: id,
+  body: messageBody,
 });
+export const parentThreadCreateSchema = z.object({
+  studentId: id,
+  staffUserId: id,
+  body: messageBody,
+});
+export const threadConsultSchema = z.object({
+  reason: z.string().trim().min(10, 'Motif de 10 caractères minimum').max(300),
+});
+export const guardianContactSchema = z.object({
+  email: z.string().trim().toLowerCase().email('Adresse e-mail invalide').max(120).nullable(),
+});
+
+// Calendrier des événements
+export const EVENT_CATEGORIES = [
+  'PARENT_MEETING',
+  'HOLIDAY',
+  'CELEBRATION',
+  'OUTING',
+  'EXAM',
+  'OTHER',
+] as const;
+export const EVENT_CATEGORY_LABELS: Record<(typeof EVENT_CATEGORIES)[number], string> = {
+  PARENT_MEETING: 'Réunion de parents',
+  HOLIDAY: 'Congé',
+  CELEBRATION: 'Fête',
+  OUTING: 'Sortie',
+  EXAM: 'Examen',
+  OTHER: 'Autre',
+};
+export const EVENT_SCOPES = ['SCHOOL', 'CYCLE', 'LEVEL', 'CLASS'] as const;
+export const eventCreateSchema = z
+  .object({
+    title: z.string().trim().min(3).max(120),
+    description: z.string().trim().max(2000).optional(),
+    category: z.enum(EVENT_CATEGORIES),
+    startDate: isoDate,
+    endDate: isoDate.optional(),
+    startTime: timeOfDay.optional(),
+    endTime: timeOfDay.optional(),
+    location: z.string().trim().max(120).optional(),
+    scope: z.enum(EVENT_SCOPES),
+    targetId: id.optional(),
+    remindBySms: z.boolean().default(false),
+  })
+  .refine((v) => !v.endDate || v.endDate >= v.startDate, {
+    message: 'La fin doit suivre le début',
+    path: ['endDate'],
+  })
+  .refine((v) => !v.startTime || !v.endTime || v.endTime > v.startTime, {
+    message: 'L’heure de fin doit suivre l’heure de début',
+    path: ['endTime'],
+  })
+  .refine((v) => v.scope === 'SCHOOL' || !!v.targetId, {
+    message: 'Cible obligatoire',
+    path: ['targetId'],
+  });
+export const eventRangeSchema = z
+  .object({ from: isoDate, to: isoDate })
+  .refine((v) => v.from <= v.to, { message: 'Période invalide', path: ['to'] })
+  .refine(
+    (v) =>
+      new Date(`${v.to}T00:00:00Z`).getTime() - new Date(`${v.from}T00:00:00Z`).getTime() <=
+      400 * 86_400_000,
+    { message: 'Période trop longue', path: ['to'] },
+  );
 
 export const paginationSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
@@ -304,3 +390,4 @@ export type GuardianInput = z.infer<typeof guardianInputSchema>;
 export type AttendanceSubmitInput = z.infer<typeof attendanceSubmitSchema>;
 export type PaymentCreateInput = z.infer<typeof paymentCreateSchema>;
 export type EvaluationCreateInput = z.infer<typeof evaluationCreateSchema>;
+export type EventCreateInput = z.infer<typeof eventCreateSchema>;

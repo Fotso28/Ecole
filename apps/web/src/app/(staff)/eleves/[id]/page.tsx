@@ -40,6 +40,7 @@ interface Overview {
     firstName: string;
     lastName: string;
     phone: string;
+    email: string | null;
     relationship: 'FATHER' | 'MOTHER' | 'TUTOR' | 'OTHER';
     isPrimary: boolean;
     isEmergencyContact: boolean;
@@ -392,6 +393,12 @@ export default function StudentPage({ params }: { params: Promise<{ id: string }
                       {g.portalActive ? 'Portail actif' : 'Portail jamais utilisé'}
                     </Badge>
                   </div>
+                  <GuardianEmail
+                    studentId={s.id}
+                    linkId={g.linkId}
+                    email={g.email}
+                    editable={can('students.write')}
+                  />
                 </li>
               ))}
             </ul>
@@ -604,5 +611,78 @@ export default function StudentPage({ params }: { params: Promise<{ id: string }
         </Card>
       ) : null}
     </>
+  );
+}
+
+/** Adresse e-mail facultative du parent, modifiable par le secrétariat. */
+function GuardianEmail({
+  studentId,
+  linkId,
+  email,
+  editable,
+}: {
+  studentId: string;
+  linkId: string;
+  email: string | null;
+  editable: boolean;
+}) {
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const save = useMutation({
+    mutationFn: (value: string | null) =>
+      api(`/students/${studentId}/guardians/${linkId}/contact`, {
+        method: 'PATCH',
+        body: { email: value },
+      }),
+    onSuccess: () => {
+      toast('Adresse e-mail enregistrée');
+      setEditing(false);
+      void queryClient.invalidateQueries({ queryKey: ['student', studentId] });
+    },
+    onError: (e) => toast(e instanceof Error ? e.message : 'Erreur', 'error'),
+  });
+  if (editing)
+    return (
+      <form
+        className="flex flex-col gap-2 sm:flex-row sm:items-end"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const value = String(new FormData(e.currentTarget).get('email') ?? '').trim();
+          save.mutate(value || null);
+        }}
+      >
+        <InputField
+          label="Adresse e-mail du parent"
+          name="email"
+          type="email"
+          defaultValue={email ?? ''}
+          optional
+          containerClassName="flex-1"
+        />
+        <Button type="submit" size="sm" loading={save.isPending}>
+          Enregistrer
+        </Button>
+      </form>
+    );
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+      {email ? (
+        <a href={`mailto:${email}`} className="text-primary [overflow-wrap:anywhere]">
+          {email}
+        </a>
+      ) : (
+        <span className="text-muted">Aucune adresse e-mail</span>
+      )}
+      {editable ? (
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          className="min-h-11 font-semibold text-primary"
+        >
+          {email ? 'Modifier l’e-mail' : 'Ajouter un e-mail'}
+        </button>
+      ) : null}
+    </div>
   );
 }

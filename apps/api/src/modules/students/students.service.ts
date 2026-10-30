@@ -321,7 +321,7 @@ export class StudentsService {
         phone: g.phone,
         email: g.email,
       },
-      update: {},
+      update: g.email ? { email: g.email } : {},
     });
     const hasPrimary = await tx.studentGuardian.count({ where: { studentId, isPrimary: true } });
     return tx.studentGuardian.upsert({
@@ -362,6 +362,24 @@ export class StudentsService {
       );
       return link;
     });
+  }
+
+  /** Adresse e-mail facultative du parent (notifications par e-mail). */
+  async setGuardianEmail(studentId: string, linkId: string, email: string | null) {
+    const link = await this.db.studentGuardian.findFirst({
+      where: { id: linkId, studentId },
+      include: { guardian: true },
+    });
+    if (!link) throw new NotFoundException('Lien introuvable');
+    await this.db.guardian.update({ where: { id: link.guardianId }, data: { email } });
+    await this.audit.log({
+      action: 'students.guardian_contact_updated',
+      entity: 'Guardian',
+      entityId: link.guardianId,
+      before: { email: link.guardian.email },
+      after: { email },
+    });
+    return { ok: true, email };
   }
 
   async removeGuardian(studentId: string, linkId: string) {

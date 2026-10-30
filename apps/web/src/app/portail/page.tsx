@@ -1,10 +1,16 @@
 'use client';
 
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CircleAlert } from 'lucide-react';
 import Link from 'next/link';
-import { ButtonLink } from '@/components/ui/button';
+import { useState } from 'react';
+import { Button, ButtonLink } from '@/components/ui/button';
 import { Card, CardHeader, EmptyState, ErrorBlock, LoadingBlock } from '@/components/ui/card';
 import { ChildSwitcher, useChildren } from '@/components/shell/parent-shell';
+import { InputField } from '@/components/ui/field';
+import { useToast } from '@/components/ui/toast';
+import { api } from '@/lib/api';
+import { formatCameroonPhone } from '@/lib/format';
 import { formatFcfa, formatShortDate, formatWeekday } from '@/lib/format';
 import { useChildOverview } from '@/lib/portal';
 
@@ -130,6 +136,78 @@ export default function PortalHome() {
           ))}
         </>
       )}
+      <ContactCard />
     </>
+  );
+}
+
+/** Coordonnées du parent : téléphone de connexion, e-mail facultatif pour les notifications. */
+function ContactCard() {
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const q = useQuery({
+    queryKey: ['portal-contact'],
+    queryFn: () => api<{ phone: string | null; email: string | null }>('/portal/contact'),
+  });
+  const save = useMutation({
+    mutationFn: (email: string | null) =>
+      api('/portal/contact', { method: 'PATCH', body: { email } }),
+    onSuccess: () => {
+      toast('Coordonnées enregistrées');
+      setEditing(false);
+      void queryClient.invalidateQueries({ queryKey: ['portal-contact'] });
+    },
+    onError: (e) => toast(e instanceof Error ? e.message : 'Erreur', 'error'),
+  });
+  if (!q.data) return null;
+  return (
+    <Card>
+      <CardHeader
+        title="Mes coordonnées"
+        subtitle="L’école vous prévient par SMS ou par e-mail selon vos coordonnées."
+      />
+      <dl className="flex flex-col gap-2 text-sm">
+        <div className="flex justify-between gap-3">
+          <dt className="text-muted">Téléphone</dt>
+          <dd className="font-semibold tabular">
+            {q.data.phone ? formatCameroonPhone(q.data.phone) : '—'}
+          </dd>
+        </div>
+        <div className="flex justify-between gap-3">
+          <dt className="text-muted">E-mail</dt>
+          <dd className="font-semibold [overflow-wrap:anywhere]">
+            {q.data.email ?? 'Non renseigné'}
+          </dd>
+        </div>
+      </dl>
+      {editing ? (
+        <form
+          className="mt-3 flex flex-col gap-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const value = String(new FormData(e.currentTarget).get('email') ?? '').trim();
+            save.mutate(value || null);
+          }}
+        >
+          <InputField
+            label="Adresse e-mail"
+            name="email"
+            type="email"
+            inputMode="email"
+            optional
+            defaultValue={q.data.email ?? ''}
+            hint="Laissez vide pour ne recevoir que des SMS."
+          />
+          <Button type="submit" loading={save.isPending} block>
+            Enregistrer
+          </Button>
+        </form>
+      ) : (
+        <Button variant="secondary" block className="mt-3" onClick={() => setEditing(true)}>
+          {q.data.email ? 'Modifier mon e-mail' : 'Ajouter mon e-mail'}
+        </Button>
+      )}
+    </Card>
   );
 }

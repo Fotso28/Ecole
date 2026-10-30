@@ -19,6 +19,8 @@ const settingsSchema = z.object({
       absenceNotificationDelayMinutes: z.number().int().min(0).max(1440).optional(),
       reminderOffsets: z.array(z.number().int().min(1).max(120)).max(5).optional(),
       mfaRequired: z.boolean().optional(),
+      /** Canal des notifications aux familles quand les deux coordonnées sont connues. */
+      preferredChannel: z.enum(['SMS', 'EMAIL']).optional(),
     })
     .optional(),
 });

@@ -148,6 +148,7 @@ export class PortalService {
             where: {
               OR: [
                 { scope: 'SCHOOL' },
+                { scope: 'STUDENTS', studentIds: { has: studentId } },
                 ...(enrollment
                   ? [
                       { scope: 'CLASS' as const, targetId: enrollment.classId },

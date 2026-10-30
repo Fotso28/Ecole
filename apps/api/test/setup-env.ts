@@ -6,6 +6,7 @@ process.env.JWT_SECRET = 'test-jwt-secret-with-enough-length-0123456789';
 process.env.OTP_SECRET = 'test-otp-secret-with-enough-length-0123456789';
 process.env.DATA_ENCRYPTION_KEY = 'a'.repeat(64);
 process.env.SMS_PROVIDER = 'memory';
+process.env.EMAIL_PROVIDER = 'memory';
 process.env.MOBILE_MONEY_PROVIDER = 'simulator';
 process.env.MOBILE_MONEY_WEBHOOK_SECRET = 'test-webhook-secret-0123456789';
 process.env.QUEUES_ENABLED = 'false';

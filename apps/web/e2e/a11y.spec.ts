@@ -70,6 +70,7 @@ test('écrans de la direction', async ({ page }) => {
     '/transport/appel',
     '/bibliotheque',
     '/stock',
+    '/parametres/roles',
   ]) {
     await page.goto(path);
     await expect(page.locator('main h1').first()).toBeVisible();
@@ -85,6 +86,26 @@ test('écrans de la direction', async ({ page }) => {
     .click();
   await expect(page.getByRole('dialog')).toBeVisible();
   await expectAccessible(page, '/eleves/[id] (dépôt de pièce)');
+});
+
+test('écran des rôles et fenêtre d’édition', async ({ page }) => {
+  await loginStaff(page, 'direction@demo.cm');
+  await page.goto('/parametres/roles');
+  await page.getByRole('button', { name: 'Modifier le rôle Secrétariat' }).click();
+  await expect(page.getByRole('dialog', { name: 'Secrétariat' })).toBeVisible();
+  await expectAccessible(page, '/parametres/roles (rôle intégré)');
+  await page.getByRole('button', { name: 'Fermer' }).click();
+  await page.getByRole('button', { name: 'Nouveau rôle' }).click();
+  await expect(page.getByRole('dialog', { name: 'Nouveau rôle' })).toBeVisible();
+  await expectAccessible(page, '/parametres/roles (nouveau rôle)');
+  await page.getByRole('button', { name: 'Fermer' }).click();
+  await page.goto('/personnel');
+  await page
+    .getByRole('button', { name: /^Modifier les rôles de / })
+    .first()
+    .click();
+  await expect(page.getByRole('dialog', { name: /^Rôles de / })).toBeVisible();
+  await expectAccessible(page, '/personnel (rôles)');
 });
 
 test('dossier du personnel et fenêtres du module RH', async ({ page }) => {

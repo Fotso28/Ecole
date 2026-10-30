@@ -201,11 +201,10 @@ describe('double authentification', () => {
     const setup = await http().post('/auth/mfa/setup').set(s.auth).expect(200);
     expect(setup.body.otpauthUrl).toContain('otpauth://totp/');
     await http().post('/auth/mfa/enable').set(s.auth).send({ code: '000000' }).expect(400);
-    await http()
-      .post('/auth/mfa/enable')
-      .set(s.auth)
-      .send({ code: totp(setup.body.secret) })
-      .expect(204);
+    // Le code d'activation est gardé tel quel : le recalculer plus loin donnerait le code du pas
+    // suivant si une frontière de 30 s tombait entre-temps, et le test échouerait au hasard.
+    const activation = totp(setup.body.secret);
+    await http().post('/auth/mfa/enable').set(s.auth).send({ code: activation }).expect(204);
 
     const step1 = await http()
       .post('/auth/login')
@@ -220,7 +219,7 @@ describe('double authentification', () => {
     // Le code ayant servi à l'activation ne peut pas être réutilisé.
     await http()
       .post('/auth/mfa/verify')
-      .send({ mfaToken: step1.body.mfaToken, code: totp(setup.body.secret) })
+      .send({ mfaToken: step1.body.mfaToken, code: activation })
       .expect(401);
     const next = totp(setup.body.secret, Date.now() + 30_000);
     const step2 = await http()

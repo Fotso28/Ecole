@@ -11,6 +11,7 @@ export * from './payroll';
 export * from './library';
 export * from './permissions';
 export * from './results';
+export * from './roles';
 export * from './schemas';
 export * from './secretariat';
 export * from './timetable';

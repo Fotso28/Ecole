@@ -239,4 +239,30 @@ describe('redirection après connexion', () => {
     for (const role of ['TEACHER', 'SECRETARY', 'CENSOR', 'SUPERVISOR'] as const)
       expect(hrefs(me([role], withHr))).not.toContain('/rh');
   });
+
+  it('construit le menu à partir des droits effectifs, y compris pour un rôle propre', () => {
+    expect(hrefs(me(['DIRECTOR']))).toContain('/parametres/roles');
+    expect(hrefs(me(['CENSOR']))).not.toContain('/parametres/roles');
+    // Rôle propre seul : aucun rôle intégré, menu et menu du téléphone issus des permissions.
+    const librarian: Me = {
+      ...me([], ['students', 'library']),
+      customRoles: [{ id: 'r', name: 'Bibliothécaire' }],
+      permissions: ['students.read', 'library.read', 'library.loans'],
+      scopes: { classes: false, lines: false },
+    };
+    expect(hrefs(librarian)).toEqual(expect.arrayContaining(['/eleves', '/bibliotheque']));
+    expect(hrefs(librarian)).not.toContain('/caisse');
+    expect(primaryNav(librarian).map((i) => i.href)).toEqual(
+      expect.arrayContaining(['/eleves', '/bibliotheque']),
+    );
+    // Les écrans réservés aux enseignants suivent la limite « ses classes ».
+    const tutor: Me = { ...me(['TEACHER']), roles: [], scopes: { classes: true, lines: false } };
+    expect(hrefs(tutor)).toEqual(hrefs(me(['TEACHER'])));
+    // Un enseignant enrichi d'une permission la voit apparaître dans son menu.
+    const teacher = me(['TEACHER']);
+    expect(hrefs(teacher)).not.toContain('/incidents');
+    expect(
+      hrefs({ ...teacher, permissions: [...teacher.permissions, 'discipline.read'] }),
+    ).toContain('/incidents');
+  });
 });

@@ -8,11 +8,12 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { permissionsForRoles, type StaffRole } from '@ecole/shared';
+import { type StaffRole } from '@ecole/shared';
 import { TokenKind, User } from '@prisma/client';
 import * as argon2 from 'argon2';
 import { randomUUID } from 'node:crypto';
 import { env } from '../../config/env';
+import { AccessService } from '../../common/access.service';
 import { AuditService } from '../../common/audit.service';
 import type { AccessTokenPayload } from '../../common/auth.guard';
 import { runAsSystem } from '../../common/context';
@@ -72,6 +73,7 @@ export class AuthService {
     private readonly jwt: JwtService,
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
+    private readonly access: AccessService,
   ) {}
 
   static hashPassword(password: string): Promise<string> {
@@ -307,16 +309,43 @@ export class AuthService {
         mfaEnabled: true,
       },
     });
-    if (kind === 'parent') return { user, kind, schools: [], activeSchool: null, permissions: [] };
+    if (kind === 'parent')
+      return {
+        user,
+        kind,
+        schools: [],
+        activeSchool: null,
+        roles: [],
+        customRoles: [],
+        permissions: [],
+        scopes: { classes: false, lines: false },
+        adminAccess: false,
+      };
     const memberships = await this.db.membership.findMany({
       where: { userId, active: true },
       include: {
-        school: { select: { id: true, name: true, city: true, modules: true, settings: true } },
+        school: {
+          select: {
+            id: true,
+            name: true,
+            city: true,
+            modules: true,
+            settings: true,
+            rolesVersion: true,
+          },
+        },
       },
       orderBy: { createdAt: 'asc' },
     });
     const active = memberships.find((m) => m.schoolId === activeSchoolId);
     const roles = (active?.roles ?? []) as StaffRole[];
+    // Mêmes droits effectifs que le garde d'authentification : le site affiche ce que l'API autorise.
+    const config = active
+      ? await this.access.config(active.schoolId, active.school.rolesVersion)
+      : null;
+    const resolved = config
+      ? AccessService.resolve(config, { roles, customRoleIds: active?.customRoleIds ?? [] })
+      : null;
     const currentYear = active
       ? await runAsSystem(
           'me-year',
@@ -348,7 +377,16 @@ export class AuthService {
           }
         : null,
       roles,
-      permissions: [...permissionsForRoles(roles)],
+      customRoles: (active?.customRoleIds ?? [])
+        .map((id) => config?.customRoles.get(id))
+        .filter((r) => !!r)
+        .map((r) => ({ id: r.id, name: r.name })),
+      permissions: resolved ? [...resolved.permissions] : [],
+      scopes: {
+        classes: !!resolved && resolved.classScoped.size > 0,
+        lines: !!resolved?.lineScoped,
+      },
+      adminAccess: !!resolved?.requiresMfa,
     };
   }
 

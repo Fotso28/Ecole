@@ -355,6 +355,13 @@ export const NAV: NavGroup[] = [
         module: 'students',
       },
       { href: '/parametres', label: 'Paramètres', icon: Settings, permission: 'settings.write' },
+      {
+        href: '/parametres/roles',
+        label: 'Rôles et droits',
+        short: 'Rôles',
+        icon: ShieldCheck,
+        permission: 'roles.manage',
+      },
     ],
   },
   {
@@ -403,7 +410,7 @@ export function visibleNav(me: Me | null): NavGroup[] {
       (i) =>
         (!i.permission || perms.has(i.permission)) &&
         (!i.module || modules.has(i.module)) &&
-        (!i.teacherOnly || me.roles.includes('TEACHER')) &&
+        (!i.teacherOnly || (me.scopes?.classes ?? me.roles.includes('TEACHER'))) &&
         (!i.platformAdmin || me.user.isPlatformAdmin),
     ),
   })).filter((g) => g.items.length > 0);
@@ -412,7 +419,12 @@ export function visibleNav(me: Me | null): NavGroup[] {
 export function primaryNav(me: Me | null): NavItem[] {
   const items = visibleNav(me).flatMap((g) => g.items);
   const role = ROLE_ORDER.find((r) => me?.roles.includes(r));
-  const wanted = role ? PRIMARY[role] : me?.user.isPlatformAdmin ? ['/plateforme/facturation'] : [];
+  // Sans rôle intégré (rôles propres à l'école seulement) : les premières destinations permises.
+  const wanted = role
+    ? PRIMARY[role]
+    : me?.user.isPlatformAdmin
+      ? ['/plateforme/facturation']
+      : items.map((i) => i.href);
   return wanted
     .map((href) => items.find((i) => i.href === href))
     .filter((i): i is NavItem => !!i)

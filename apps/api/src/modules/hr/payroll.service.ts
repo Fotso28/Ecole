@@ -648,6 +648,20 @@ export class PayrollService {
       throw new ForbiddenException(
         'La validation doit être faite par une autre personne que celle qui a préparé la paie',
       );
+    // Saisir une prime sur un bulletin, c'est aussi préparer la paie : sinon la personne qui
+    // ajoute un élément (y compris sur son propre bulletin) pourrait ensuite le valider elle-même.
+    const edited = await this.db.auditLog.count({
+      where: {
+        schoolId,
+        actorId: actor,
+        action: 'hr.payslip_updated',
+        entityId: { in: run.payslips.map((p) => p.id) },
+      },
+    });
+    if (edited > 0)
+      throw new ForbiddenException(
+        'La validation doit être faite par une autre personne que celle qui a modifié des bulletins',
+      );
     const school = await this.db.school.findUniqueOrThrow({ where: { id: schoolId } });
     const preparer = run.preparedById ? await this.contacts([run.preparedById]) : [];
     const slips = [...run.payslips].sort((a, b) => {
@@ -995,6 +1009,9 @@ export class PayrollService {
   // -------------------------------------------------------------------------------------------
 
   private async sensitiveByEmployee(employeeIds: string[]) {
+    // Bulletins imprimés et état des virements contiennent numéros CNPS et coordonnées bancaires.
+    if (staffContext().breakGlass)
+      throw new ForbiddenException('Données sensibles inaccessibles en accès exceptionnel');
     const files = await this.db.employeeFile.findMany({ where: { id: { in: employeeIds } } });
     return new Map(
       files.map((f) => [f.id, { file: f, data: decryptSensitive(f.encryptedSensitive) }]),

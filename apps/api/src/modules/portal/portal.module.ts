@@ -219,7 +219,11 @@ export class PortalService {
             totals: account.totals,
             nextDue: account.nextDue,
             lines: account.lines,
-            payments: account.payments.slice(0, 10),
+            // Le téléphone payeur, la référence de l'opérateur et l'agent de caisse ne regardent
+            // pas l'autre tuteur : seul `GET /portal/payments/:id` les montre, à l'auteur du paiement.
+            payments: account.payments
+              .slice(0, 10)
+              .map(({ payerPhone: _phone, operatorReference: _ref, receivedById: _by, ...p }) => p),
           },
           grades: grades.map((g) => {
             const parsed = toParsed(g);

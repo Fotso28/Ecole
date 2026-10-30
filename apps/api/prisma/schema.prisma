@@ -1495,3 +1495,206 @@ model AccountingSettings {
   schoolId                 String @unique
   expenseApprovalThreshold Int    @default(100000)
 }
+
+enum ContractType {
+  CDI
+  CDD
+  HOURLY
+}
+
+enum PayoutMethod {
+  BANK
+  MOBILE_MONEY
+  CASH
+}
+
+enum TeachingSessionKind {
+  REGULAR
+  OVERTIME
+}
+
+enum TeachingSessionStatus {
+  DONE
+  ABSENT
+}
+
+enum SalaryAdvanceStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  REPAID
+}
+
+enum PayrollRunStatus {
+  DRAFT
+  PREPARED
+  VALIDATED
+}
+
+/// Dossier RH d'un membre du personnel. Les données sensibles (pièce d'identité, CNPS,
+/// coordonnées personnelles et bancaires) sont chiffrées dans `encryptedSensitive`.
+model EmployeeFile {
+  id                 String       @id @default(cuid())
+  schoolId           String
+  userId             String
+  position           String
+  hireDate           DateTime     @db.Date
+  /// Diplômes : [{ title, year?, institution? }].
+  diplomas           Json         @default("[]")
+  payoutMethod       PayoutMethod @default(CASH)
+  encryptedSensitive String?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  contracts EmploymentContract[]
+  advances  SalaryAdvance[]
+
+  @@unique([schoolId, userId])
+}
+
+/// Contrat de travail : un seul contrat actif (sans `endedAt`) par dossier.
+model EmploymentContract {
+  id           String       @id @default(cuid())
+  schoolId     String
+  employeeId   String
+  type         ContractType
+  startDate    DateTime     @db.Date
+  endDate      DateTime?    @db.Date
+  /// Salaire de base mensuel (CDI, CDD), en FCFA.
+  baseSalary   Int?
+  /// Taux horaire (vacataire), en FCFA.
+  hourlyRate   Int?
+  /// Taux des heures supplémentaires, en FCFA de l'heure.
+  overtimeRate Int?
+  endedAt      DateTime?
+  endReason    String?
+  createdById  String
+  createdAt    DateTime     @default(now())
+
+  employee EmployeeFile @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@index([schoolId, employeeId])
+}
+
+/// Heure de cours suivie : cours prévu marqué fait ou absent, ou heure supplémentaire.
+model TeachingSession {
+  id               String                @id @default(cuid())
+  schoolId         String
+  teacherId        String
+  date             DateTime              @db.Date
+  timetableEntryId String?
+  minutes          Int
+  kind             TeachingSessionKind   @default(REGULAR)
+  status           TeachingSessionStatus
+  justified        Boolean               @default(false)
+  reason           String?
+  recordedById     String
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+
+  @@unique([timetableEntryId, date])
+  @@index([schoolId, teacherId, date])
+}
+
+/// Avance sur salaire : demandée, accordée par la direction, retenue sur les paies suivantes.
+model SalaryAdvance {
+  id            String              @id @default(cuid())
+  schoolId      String
+  employeeId    String
+  amount        Int
+  installments  Int
+  /// Premier mois de retenue (AAAA-MM).
+  firstMonth    String
+  reason        String
+  status        SalaryAdvanceStatus @default(REQUESTED)
+  requestedById String
+  decidedById   String?
+  decidedAt     DateTime?
+  decisionNote  String?
+  createdAt     DateTime            @default(now())
+
+  employee   EmployeeFile       @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  repayments AdvanceRepayment[]
+
+  @@index([schoolId, status])
+}
+
+/// Remboursement d'avance, écrit à la validation de la paie (ajout seul).
+model AdvanceRepayment {
+  id        String   @id @default(cuid())
+  schoolId  String
+  advanceId String
+  payslipId String
+  month     String
+  amount    Int
+  createdAt DateTime @default(now())
+
+  advance SalaryAdvance @relation(fields: [advanceId], references: [id], onDelete: Restrict)
+
+  @@unique([advanceId, payslipId])
+}
+
+/// Barème de paie daté (cotisations et impôts), paramétrable par école ; jamais modifié.
+model PayrollScale {
+  id            String   @id @default(cuid())
+  schoolId      String
+  effectiveFrom DateTime @db.Date
+  label         String
+  config        Json
+  createdById   String
+  createdAt     DateTime @default(now())
+
+  @@index([schoolId, effectiveFrom])
+}
+
+/// Paie mensuelle : préparée par la comptabilité, validée par une autre personne, puis figée.
+model PayrollRun {
+  id            String           @id @default(cuid())
+  schoolId      String
+  /// Mois de paie (AAAA-MM).
+  month         String
+  status        PayrollRunStatus @default(DRAFT)
+  /// Barème appliqué, copié au calcul.
+  scale         Json
+  computedById  String
+  computedAt    DateTime         @default(now())
+  preparedById  String?
+  preparedAt    DateTime?
+  validatedById String?
+  validatedAt   DateTime?
+  rejectedById  String?
+  rejectedAt    DateTime?
+  rejectReason  String?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  payslips Payslip[]
+
+  @@unique([schoolId, month])
+}
+
+/// Bulletin de paie : éléments saisis, heures retenues, résultat du calcul et identité figés.
+model Payslip {
+  id           String       @id @default(cuid())
+  schoolId     String
+  runId        String
+  employeeId   String
+  number       String?
+  contractType ContractType
+  elements     Json         @default("[]")
+  absenceDays  Int          @default(0)
+  /// Entrées du calcul (heures, salaire, avances) et identité au moment du calcul.
+  inputs       Json
+  /// Résultat de `computePayslip`.
+  result       Json
+  gross        Int
+  net          Int
+  employerCost Int
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  run PayrollRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, employeeId])
+  @@index([schoolId])
+}

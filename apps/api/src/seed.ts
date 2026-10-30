@@ -4,7 +4,8 @@ import { NestFactory } from '@nestjs/core';
 import { permissionsForRoles, type StaffRole } from '@ecole/shared';
 import { PrismaClient } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
-import { loadDotEnv } from './config/env';
+import { env, loadDotEnv } from './config/env';
+import { encrypt } from './common/crypto';
 import { runAsSystem, runInContext, type StaffContext } from './common/context';
 import { addDays, todayInCameroon, toDbDate } from './common/dates';
 
@@ -137,6 +138,7 @@ async function main(): Promise<void> {
         'documents',
         'exams',
         'accounting',
+        'hr',
       ],
       settings: { absenceAlertThreshold: 3, reminderOffsets: [5, 15, 30] },
     },
@@ -609,6 +611,103 @@ async function main(): Promise<void> {
     data: {
       lastMessageAt: new Date(Date.now() - 30 * 60_000),
       parentLastReadAt: new Date(Date.now() - 100 * 60_000),
+    },
+  });
+
+  // RH : dossiers (données sensibles chiffrées), contrats et une avance en attente d'accord.
+  const hrDefs: [
+    string,
+    string,
+    'CDI' | 'CDD' | 'HOURLY',
+    number,
+    'BANK' | 'MOBILE_MONEY' | 'CASH',
+    Record<string, string>,
+  ][] = [
+    [
+      'direction@demo.cm',
+      'Directrice',
+      'CDI',
+      450_000,
+      'BANK',
+      {
+        cnpsNumber: '101234567801',
+        bankName: 'Afriland First Bank',
+        bankAccount: '10005 00001 01234567801 45',
+      },
+    ],
+    [
+      'compta@demo.cm',
+      'Comptable',
+      'CDI',
+      220_000,
+      'BANK',
+      { cnpsNumber: '101234567802', bankName: 'SGC', bankAccount: '10003 00200 05123456789 12' },
+    ],
+    [
+      'prof.maths@demo.cm',
+      'Professeur de mathématiques',
+      'CDI',
+      250_000,
+      'BANK',
+      { cnpsNumber: '101234567803', bankName: 'BICEC', bankAccount: '10001 06800 00123456789 33' },
+    ],
+    [
+      'prof.francais@demo.cm',
+      'Professeure de français',
+      'CDD',
+      180_000,
+      'MOBILE_MONEY',
+      { cnpsNumber: '101234567804', mobileMoneyNumber: '677112233', mobileMoneyOperator: 'MTN' },
+    ],
+    ['prof.histoire@demo.cm', 'Vacataire d’histoire-géographie', 'HOURLY', 3000, 'CASH', {}],
+  ];
+  const hrFiles: Record<string, string> = {};
+  for (const [email, position, type, amount, payoutMethod, sensitive] of hrDefs) {
+    const file = await base.employeeFile.create({
+      data: {
+        schoolId,
+        userId: staff[email] ?? '',
+        position,
+        hireDate: toDbDate('2026-09-01'),
+        diplomas: email.startsWith('prof')
+          ? [
+              {
+                title: 'Diplôme de professeur (DIPES II)',
+                year: 2018,
+                institution: 'ENS de Yaoundé',
+              },
+            ]
+          : [],
+        payoutMethod,
+        encryptedSensitive: Object.keys(sensitive).length
+          ? encrypt(JSON.stringify(sensitive), env().DATA_ENCRYPTION_KEY)
+          : null,
+      },
+    });
+    hrFiles[email] = file.id;
+    await base.employmentContract.create({
+      data: {
+        schoolId,
+        employeeId: file.id,
+        type,
+        startDate: toDbDate('2026-09-01'),
+        endDate: type === 'CDD' ? toDbDate(addDays(today, 20)) : null,
+        baseSalary: type === 'HOURLY' ? null : amount,
+        hourlyRate: type === 'HOURLY' ? amount : null,
+        overtimeRate: type === 'HOURLY' ? null : 2500,
+        createdById: director,
+      },
+    });
+  }
+  await base.salaryAdvance.create({
+    data: {
+      schoolId,
+      employeeId: hrFiles['prof.francais@demo.cm'] ?? '',
+      amount: 50_000,
+      installments: 2,
+      firstMonth: today.slice(0, 7),
+      reason: 'Frais de rentrée scolaire des enfants',
+      requestedById: staff['compta@demo.cm'] ?? '',
     },
   });
 

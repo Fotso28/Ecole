@@ -61,6 +61,11 @@ test('écrans de la direction', async ({ page }) => {
     '/comptabilite/depenses',
     '/comptabilite/etats',
     '/comptabilite/plan',
+    '/rh',
+    '/rh/heures',
+    '/rh/paie',
+    '/rh/avances',
+    '/rh/baremes',
   ]) {
     await page.goto(path);
     await expect(page.locator('main h1').first()).toBeVisible();
@@ -76,6 +81,29 @@ test('écrans de la direction', async ({ page }) => {
     .click();
   await expect(page.getByRole('dialog')).toBeVisible();
   await expectAccessible(page, '/eleves/[id] (dépôt de pièce)');
+});
+
+test('dossier du personnel et fenêtres du module RH', async ({ page }) => {
+  await loginStaff(page, 'direction@demo.cm');
+  await page.goto('/rh');
+  await page.getByRole('link', { name: 'Mbarga Paul' }).first().click();
+  await expect(page.getByRole('heading', { name: 'Mbarga Paul', level: 1 })).toBeVisible();
+  await expectAccessible(page, '/rh/[id]');
+  await page.getByRole('button', { name: 'Afficher' }).click();
+  await expect(page.getByRole('dialog', { name: 'Données sensibles' })).toBeVisible();
+  await expectAccessible(page, '/rh/[id] (données sensibles)');
+  await page.getByRole('button', { name: 'Fermer' }).click();
+  await page.getByRole('button', { name: 'Nouveau contrat' }).click();
+  await expect(page.getByRole('dialog', { name: 'Nouveau contrat' })).toBeVisible();
+  await expectAccessible(page, '/rh/[id] (nouveau contrat)');
+  await page.goto('/rh/avances');
+  await page.getByRole('button', { name: 'Nouvelle demande' }).click();
+  await expect(page.getByRole('dialog', { name: 'Demande d’avance sur salaire' })).toBeVisible();
+  await expectAccessible(page, '/rh/avances (demande)');
+  await page.goto('/rh/baremes');
+  await page.getByRole('button', { name: 'Nouvelle version' }).click();
+  await expect(page.getByRole('dialog', { name: 'Nouvelle version du barème' })).toBeVisible();
+  await expectAccessible(page, '/rh/baremes (nouvelle version)');
 });
 
 test('fenêtres du secrétariat et de la surveillance', async ({ page }) => {

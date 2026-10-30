@@ -68,6 +68,10 @@ export const PERMISSIONS = [
   'accounting.read',
   'accounting.write',
   'accounting.close',
+  'hr.read',
+  'hr.write',
+  'hr.payroll.prepare',
+  'hr.payroll.validate',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -136,6 +140,9 @@ export const ROLE_PERMISSIONS: Record<StaffRole, readonly Permission[]> = {
     'accounting.read',
     'accounting.write',
     'accounting.close',
+    'hr.read',
+    'hr.write',
+    'hr.payroll.prepare',
   ],
   TEACHER: [
     'academic.read',
@@ -190,5 +197,6 @@ export const MODULES = [
   'exams',
   'documents',
   'accounting',
+  'hr',
 ] as const;
 export type Module = (typeof MODULES)[number];

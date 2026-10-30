@@ -195,4 +195,15 @@ describe('redirection après connexion', () => {
     expect(hrefs(me(['ACCOUNTANT'], modules))).not.toContain('/examens');
     expect(hrefs(me(['CENSOR']))).not.toContain('/examens');
   });
+
+  it('montre le module RH à la direction et à la comptabilité, si l’école l’a activé', () => {
+    const withHr = ['students', 'finance', 'hr'];
+    expect(hrefs(me(['DIRECTOR'], withHr))).toEqual(
+      expect.arrayContaining(['/rh', '/rh/heures', '/rh/paie', '/rh/avances']),
+    );
+    expect(hrefs(me(['ACCOUNTANT'], withHr))).toContain('/rh/paie');
+    expect(hrefs(me(['DIRECTOR']))).not.toContain('/rh');
+    for (const role of ['TEACHER', 'SECRETARY', 'CENSOR', 'SUPERVISOR'] as const)
+      expect(hrefs(me([role], withHr))).not.toContain('/rh');
+  });
 });

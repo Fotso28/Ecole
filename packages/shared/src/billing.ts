@@ -23,6 +23,7 @@ export const SUBSCRIPTION_MODULE_LABELS: Record<Module, string> = {
   exams: 'Examens',
   documents: 'Documents',
   accounting: 'Comptabilité',
+  hr: 'RH et paie',
 };
 
 export const SUBSCRIPTION_PAYMENT_METHODS = [

@@ -3,7 +3,7 @@ import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { MemorySmsProvider } from '../src/modules/notifications/sms.provider';
 import { enrollStudent, seedSchool, sessions, type SchoolFixture } from './fixtures';
-import { createTestApp, prisma, resetDb, type Session } from './helpers';
+import { createStaff, createTestApp, login, prisma, resetDb, type Session } from './helpers';
 
 let app: INestApplication;
 let f: SchoolFixture;
@@ -245,6 +245,34 @@ describe('saisie des notes', () => {
   });
 });
 
+describe('périmètre des enseignants', () => {
+  it('un enseignant également surveillant reste limité à ses matières pour les notes', async () => {
+    await createStaff(f.schoolId, 'mixte@test.cm', ['TEACHER', 'SUPERVISOR']);
+    const mixte = await login(app, 'mixte@test.cm');
+    // Les mathématiques de 4e B sont enseignées par un collègue.
+    await http()
+      .post('/grades/evaluations')
+      .set(mixte.auth)
+      .send({
+        classSubjectId: f.cs.maths4B,
+        sequenceId: f.seq1Id,
+        name: 'DS',
+        type: 'EXAM',
+        weight: 1,
+      })
+      .expect(403);
+    await http()
+      .get(`/grades/sheet?classSubjectId=${f.cs.maths4B}&sequenceId=${f.seq1Id}`)
+      .set(mixte.auth)
+      .expect(403);
+    // Le censeur, lui, accède à toutes les classes.
+    await http()
+      .get(`/grades/sheet?classSubjectId=${f.cs.maths4B}&sequenceId=${f.seq1Id}`)
+      .set(s.censeur.auth)
+      .expect(200);
+  });
+});
+
 describe('bulletins', () => {
   /** Une évaluation par matière et par séquence, saisie puis soumise par le bon enseignant. */
   async function fillTerm() {
@@ -419,6 +447,14 @@ describe('bulletins', () => {
       prisma.reportCard.update({ where: { id: ngono.id }, data: { generalAverageCenti: 2000 } }),
     ).rejects.toThrow(/figé/);
     await expect(prisma.reportCard.delete({ where: { id: ngono.id } })).rejects.toThrow();
+    for (const data of [
+      { classSize: 40 },
+      { verificationCode: 'FAUXCODE1234' },
+      { rankTied: true },
+    ])
+      await expect(prisma.reportCard.update({ where: { id: ngono.id }, data })).rejects.toThrow(
+        /figé/,
+      );
 
     const verified = await http().get(`/verify/${card.body.verificationCode}`).expect(200);
     expect(verified.body).toMatchObject({
@@ -488,6 +524,75 @@ describe('bulletins', () => {
       status: 'SUPERSEDED',
       version: 1,
       latestVersion: 2,
+    });
+  });
+
+  it('refuse de publier des bulletins incomplets sans motif, ou périmés', async () => {
+    await fillTerm();
+    // Le français de la séquence 2 est rouvert puis laissé en brouillon.
+    await http()
+      .post('/grades/sheet/reopen')
+      .set(s.censeur.auth)
+      .send({ classSubjectId: f.cs.francais4A, sequenceId: f.seq2Id, reason: 'Copie égarée' })
+      .expect(201);
+    const body = { classId: f.class4AId, termId: f.term1Id };
+    const gen = await http()
+      .post('/report-cards/generate')
+      .set(s.censeur.auth)
+      .send(body)
+      .expect(201);
+    expect(gen.body.issues).toEqual(['Français · Séquence 2 : saisie non soumise']);
+    const check = await http()
+      .get(`/report-cards/completeness?classId=${f.class4AId}&termId=${f.term1Id}`)
+      .set(s.direction.auth)
+      .expect(200);
+    expect(check.body.issues).toEqual(gen.body.issues);
+    const refused = await http()
+      .post('/report-cards/publish')
+      .set(s.direction.auth)
+      .send(body)
+      .expect(409);
+    expect(refused.body.issues).toEqual(gen.body.issues);
+
+    // La saisie est terminée après la préparation : le brouillon est périmé.
+    await http()
+      .post('/grades/sheet/submit')
+      .set(s.prof2.auth)
+      .send({ classSubjectId: f.cs.francais4A, sequenceId: f.seq2Id })
+      .expect(201);
+    const stale = await http()
+      .post('/report-cards/publish')
+      .set(s.direction.auth)
+      .send({ ...body, overrideReason: 'Conseil de classe tenu hier' })
+      .expect(409);
+    expect(stale.body.message).toMatch(/préparez à nouveau/);
+
+    // Une matière sans aucune note : publication possible avec un motif journalisé.
+    await prisma.evaluation.deleteMany({
+      where: { classSubjectId: f.cs.anglais4A, sequenceId: f.seq2Id },
+    });
+    const again = await http()
+      .post('/report-cards/generate')
+      .set(s.censeur.auth)
+      .send(body)
+      .expect(201);
+    expect(again.body.issues).toEqual(['Anglais · Séquence 2 : aucune note']);
+    await http()
+      .post('/report-cards/publish')
+      .set(s.direction.auth)
+      .send({ ...body, overrideReason: 'Absent' })
+      .expect(400);
+    await http()
+      .post('/report-cards/publish')
+      .set(s.direction.auth)
+      .send({ ...body, overrideReason: 'Enseignant d’anglais absent toute la séquence' })
+      .expect(201);
+    const log = await prisma.auditLog.findFirstOrThrow({
+      where: { action: 'reportcards.published_incomplete' },
+    });
+    expect(log.after).toMatchObject({
+      issues: ['Anglais · Séquence 2 : aucune note'],
+      overrideReason: 'Enseignant d’anglais absent toute la séquence',
     });
   });
 

@@ -3,8 +3,7 @@ import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { addDays, todayInCameroon } from '../src/common/dates';
 import { enrollStudent, seedSchool, sessions, type SchoolFixture } from './fixtures';
-import { createTestApp, prisma, resetDb, toSession } from './helpers';
-import { MemorySmsProvider } from '../src/modules/notifications/sms.provider';
+import { createTestApp, prisma, requestOtp, resetDb, toSession } from './helpers';
 
 let app: INestApplication;
 let f: SchoolFixture;
@@ -176,8 +175,7 @@ describe('justificatifs', () => {
       .expect(201);
     const record = await prisma.attendanceRecord.findFirstOrThrow({ where: { studentId: ngono } });
 
-    await http().post('/auth/otp/request').send({ phone: '677123456' }).expect(202);
-    const code = /(\d{6})/.exec(MemorySmsProvider.lastTo('+237677123456') ?? '')?.[1];
+    const code = await requestOtp(app, '677123456');
     const parent = toSession(
       await http().post('/auth/otp/verify').send({ phone: '677123456', code }).expect(200),
     );
@@ -254,6 +252,47 @@ describe('justificatifs', () => {
       .expect(200);
     const after = await prisma.attendanceRecord.findUniqueOrThrow({ where: { id: record.id } });
     expect(after.justificationId).toBeNull();
+  });
+});
+
+describe('confidentialité des absences', () => {
+  it("un enseignant ne voit ni les absences ni les justificatifs des élèves d'autres classes", async () => {
+    const other = await enrollStudent(app, s.secretariat, {
+      firstName: 'Aline',
+      lastName: 'Mbarga',
+      classId: f.class4BId,
+    });
+    await http()
+      .post('/attendance/sessions')
+      .set(s.surveillant.auth)
+      .send({
+        classId: f.class4BId,
+        date: today(),
+        startTime: '07:30',
+        endTime: '08:25',
+        records: [{ studentId: other.id, status: 'ABSENT' }],
+      })
+      .expect(201);
+    await http()
+      .post('/attendance/sessions')
+      .set(s.prof.auth)
+      .send(appel(today(), '07:30', { [ngono]: 'ABSENT', [bilong]: 'PRESENT' }))
+      .expect(201);
+    for (const studentId of [other.id, ngono]) {
+      const rec = await prisma.attendanceRecord.findFirstOrThrow({ where: { studentId } });
+      await http()
+        .post('/attendance/justifications')
+        .set(s.surveillant.auth)
+        .send({ studentId, recordIds: [rec.id], reason: 'Hospitalisation paludisme' })
+        .expect(201);
+    }
+
+    await http().get(`/attendance/students/${other.id}`).set(s.prof.auth).expect(404);
+    await http().get(`/attendance/students/${ngono}`).set(s.prof.auth).expect(200);
+    const mine = await http().get('/attendance/justifications').set(s.prof.auth).expect(200);
+    expect(mine.body.map((j: { student: { id: string } }) => j.student.id)).toEqual([ngono]);
+    const all = await http().get('/attendance/justifications').set(s.surveillant.auth).expect(200);
+    expect(all.body).toHaveLength(2);
   });
 });
 

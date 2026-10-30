@@ -84,6 +84,7 @@ export interface PaymentView {
   reversalReason: string | null;
   operatorReference: string | null;
   failureReason: string | null;
+  receivedById: string | null;
   createdAt: string;
   confirmedAt: string | null;
   receipt: { number: string; verificationCode: string } | null;

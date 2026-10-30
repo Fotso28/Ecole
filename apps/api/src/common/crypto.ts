@@ -114,12 +114,17 @@ export function totp(secretBase32: string, at = Date.now(), digits = 6): string 
   return hotp(base32Decode(secretBase32), Math.floor(at / 30000), digits);
 }
 
-/** Vérifie un code TOTP en tolérant un décalage d'horloge de ±1 pas. */
-export function verifyTotp(secretBase32: string, code: string, at = Date.now()): boolean {
-  if (!/^\d{6}$/.test(code)) return false;
+/** Pas TOTP correspondant au code (décalage d'horloge de ±1 pas toléré), ou null. */
+export function totpStep(secretBase32: string, code: string, at = Date.now()): number | null {
+  if (!/^\d{6}$/.test(code)) return null;
   const secret = base32Decode(secretBase32);
   const step = Math.floor(at / 30000);
-  return [-1, 0, 1].some((d) => safeEqual(hotp(secret, step + d), code));
+  for (const d of [-1, 0, 1]) if (safeEqual(hotp(secret, step + d), code)) return step + d;
+  return null;
+}
+
+export function verifyTotp(secretBase32: string, code: string, at = Date.now()): boolean {
+  return totpStep(secretBase32, code, at) !== null;
 }
 
 export function generateTotpSecret(): string {

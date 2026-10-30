@@ -52,11 +52,19 @@ const journalSchema = z.object({
   status: z.enum(['PENDING', 'SUCCESS', 'FAILED', 'CANCELLED']).optional(),
 });
 const exportSchema = z.object({ from: isoDate, to: isoDate });
-const webhookSchema = z.object({
-  reference: z.string().min(1),
-  status: z.enum(['SUCCESS', 'FAILED', 'PENDING']),
-  amount: z.number().int().positive().optional(),
-});
+const webhookSchema = z
+  .object({
+    /** Référence de l'opérateur ; à défaut, notre identifiant de paiement (externalId). */
+    reference: z.string().min(1).optional(),
+    externalId: z.string().min(1).optional(),
+    operator: z.enum(['MTN_MOMO', 'ORANGE_MONEY']).optional(),
+    status: z.enum(['SUCCESS', 'FAILED', 'PENDING']),
+    amount: z.number().int().positive().optional(),
+  })
+  .refine((b) => b.reference || b.externalId, { message: 'reference ou externalId requis' })
+  .refine((b) => b.status !== 'SUCCESS' || b.amount !== undefined, {
+    message: 'Le montant est obligatoire pour confirmer un paiement',
+  });
 
 @ApiTags('finance')
 @ApiBearerAuth()
@@ -217,10 +225,7 @@ export class WebhooksController {
   @Public()
   @Post('mobile-money')
   @HttpCode(200)
-  async mobileMoney(
-    @Req() req: Request & { rawBody?: Buffer },
-    @Body(new ZodPipe(webhookSchema)) body: z.infer<typeof webhookSchema>,
-  ) {
+  async mobileMoney(@Req() req: Request & { rawBody?: Buffer }, @Body() raw: unknown) {
     const allowed = env()
       .MOBILE_MONEY_ALLOWED_IPS.split(',')
       .map((s) => s.trim())
@@ -235,7 +240,13 @@ export class WebhooksController {
     ) {
       throw new UnauthorizedException('Signature invalide');
     }
-    return this.finance.confirmMobileMoney(body.reference, body.status, body.amount);
+    // Le contenu n'est validé qu'une fois l'émetteur authentifié.
+    const body = new ZodPipe(webhookSchema).transform(raw);
+    return this.finance.confirmMobileMoney(
+      { reference: body.reference, externalId: body.externalId, operator: body.operator },
+      body.status,
+      body.amount,
+    );
   }
 }
 
@@ -253,7 +264,7 @@ export class MobileMoneySimulatorController {
       throw new NotFoundException();
     if (status !== 'SUCCESS' && status !== 'FAILED') throw new NotFoundException();
     SimulatorMobileMoneyProvider.statuses.set(reference, status);
-    return this.finance.confirmMobileMoney(reference, status);
+    return this.finance.confirmMobileMoney({ reference, externalId: reference }, status);
   }
 }
 

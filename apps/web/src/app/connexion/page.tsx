@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { InputField } from '@/components/ui/field';
 import { ApiError } from '@/lib/api';
 import { homeFor, useAuth } from '@/lib/auth';
+import { safeNextPath } from '@/lib/nav';
 
 type LoginForm = z.input<typeof loginSchema>;
 
@@ -31,12 +32,8 @@ function LoginContent() {
 
   useEffect(() => {
     if (status === 'authenticated' && me) {
-      const next = params.get('suite');
-      router.replace(
-        next && next.startsWith('/') && !next.startsWith('//') && me.kind === 'staff'
-          ? next
-          : homeFor(me, teacherOnly),
-      );
+      const next = safeNextPath(params.get('suite'));
+      router.replace(next && me.kind === 'staff' ? next : homeFor(me, teacherOnly));
     }
   }, [status, me, teacherOnly, router, params]);
 

@@ -28,15 +28,16 @@ test('encaissement en espèces, reçu, annulation et clôture de caisse', async 
   await expect(page.getByRole('heading', { name: /Reçu R-\d{4}-\d{6} émis/ })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Imprimer le reçu' })).toBeVisible();
 
-  // Le paiement apparaît au journal ; on l'annule par une écriture de correction.
+  // Le caissier ne peut pas annuler ses propres espèces : la direction le fait depuis le journal.
   await page.goto('/caisse/journal');
-  const row = page
-    .locator('li')
-    .filter({ hasText: student })
-    .filter({ hasText: 'Encaissé' })
-    .first();
-  await expect(row).toBeVisible();
-  await row.getByRole('button', { name: 'Annuler' }).click();
+  const row = () =>
+    page.locator('li').filter({ hasText: student }).filter({ hasText: 'Encaissé' }).first();
+  await expect(row()).toBeVisible();
+  await expect(row().getByRole('button', { name: 'Annuler' })).toHaveCount(0);
+  await page.evaluate(() => fetch('/api/auth/logout', { method: 'POST' }));
+  await loginStaff(page, 'direction@demo.cm');
+  await page.goto('/caisse/journal');
+  await row().getByRole('button', { name: 'Annuler' }).click();
   const dialog = page.getByRole('dialog', { name: 'Annuler ce paiement ?' });
   await dialog.getByLabel('Motif de l’annulation').fill('Erreur de saisie au guichet');
   await dialog.getByRole('button', { name: 'Créer l’écriture de correction' }).click();
@@ -44,6 +45,8 @@ test('encaissement en espèces, reçu, annulation et clôture de caisse', async 
   await expect(
     page.locator('li').filter({ hasText: student }).filter({ hasText: 'Annulé' }).first(),
   ).toBeVisible();
+  await page.evaluate(() => fetch('/api/auth/logout', { method: 'POST' }));
+  await loginStaff(page, 'compta@demo.cm');
 
   // Clôture : le montant attendu exclut le paiement annulé.
   await page.goto('/caisse');

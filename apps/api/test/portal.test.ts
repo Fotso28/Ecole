@@ -1,17 +1,19 @@
 import type { INestApplication } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { todayInCameroon } from '../src/common/dates';
-import { MemorySmsProvider } from '../src/modules/notifications/sms.provider';
 import { enrollStudent, seedSchool, sessions, type SchoolFixture } from './fixtures';
 import {
   createPlatformAdmin,
   createTestApp,
   login,
+  loginPlatformAdmin,
   prisma,
+  requestOtp,
   resetDb,
-  toSession,
   type Session,
+  toSession,
 } from './helpers';
 
 let app: INestApplication;
@@ -32,8 +34,7 @@ beforeEach(async () => {
 });
 
 async function parentLogin(phone: string): Promise<Session> {
-  await http().post('/auth/otp/request').send({ phone }).expect(202);
-  const code = /(\d{6})/.exec(MemorySmsProvider.sent.at(-1)?.body ?? '')?.[1];
+  const code = await requestOtp(app, phone);
   return toSession(await http().post('/auth/otp/verify').send({ phone, code }).expect(200));
 }
 
@@ -158,6 +159,38 @@ describe('portail parent', () => {
   });
 });
 
+describe('portail et réglages de l’établissement', () => {
+  it("masque les élèves d'un établissement suspendu et respecte les modules activés", async () => {
+    const child = await enrollStudent(app, s.secretariat, {
+      firstName: 'Lucie',
+      lastName: 'Owona',
+      classId: f.class4AId,
+      phone: '677445566',
+    });
+    const parent = await parentLogin('677445566');
+    const school = await prisma.school.findUniqueOrThrow({ where: { id: f.schoolId } });
+    await prisma.school.update({
+      where: { id: f.schoolId },
+      data: { modules: school.modules.filter((m) => m !== 'finance') },
+    });
+    await http()
+      .post('/portal/payments')
+      .set(parent.auth)
+      .send({
+        studentId: child.id,
+        amount: 10000,
+        method: 'MTN_MOMO',
+        payerPhone: '677445566',
+        idempotencyKey: randomUUID(),
+      })
+      .expect(403);
+    await prisma.school.update({ where: { id: f.schoolId }, data: { status: 'SUSPENDED' } });
+    const list = await http().get('/portal/children').set(parent.auth).expect(200);
+    expect(list.body).toEqual([]);
+    await http().get(`/portal/children/${child.id}`).set(parent.auth).expect(404);
+  });
+});
+
 describe('tableau de bord, annonces, audit, paramètres', () => {
   it('donne les indicateurs et les tâches du jour à la direction', async () => {
     await enrollStudent(app, s.secretariat, {
@@ -278,7 +311,7 @@ describe('tableau de bord, annonces, audit, paramètres', () => {
 
   it('donne au super-administrateur un accès exceptionnel en lecture seule', async () => {
     await createPlatformAdmin();
-    const admin = await login(app, 'admin@plateforme.cm', 'motdepasse-admin-1');
+    const admin = await loginPlatformAdmin(app);
     const access = await http()
       .post(`/platform/schools/${f.schoolId}/access`)
       .set(admin.auth)

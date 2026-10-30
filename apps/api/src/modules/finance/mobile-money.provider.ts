@@ -5,6 +5,15 @@ import { randomToken } from '../../common/crypto';
 
 export type OperatorStatus = 'PENDING' | 'SUCCESS' | 'FAILED';
 
+export interface StatusResult {
+  status: OperatorStatus;
+  /** Montant confirmé par l'opérateur, quand il le fournit. */
+  amount?: number;
+}
+
+/** Refus explicite de l'opérateur : la demande n'a pas été prise en compte, rien n'est débité. */
+export class OperatorRejectedError extends Error {}
+
 export interface CollectRequest {
   paymentId: string;
   amount: number;
@@ -17,10 +26,13 @@ export interface CollectRequest {
 /**
  * Passerelle Mobile Money (MTN MoMo, Orange Money). L'école reçoit le résultat par
  * webhook signé ; `checkStatus` sert à la réconciliation des paiements restés en attente.
+ * `requestPayment` lève `OperatorRejectedError` pour un refus certain ; toute autre erreur
+ * (délai dépassé, réseau) laisse l'issue inconnue.
  */
 export interface MobileMoneyProvider {
   requestPayment(req: CollectRequest): Promise<{ reference: string }>;
-  checkStatus(reference: string, method: PaymentMethod): Promise<OperatorStatus>;
+  /** `reference` : référence de l'opérateur, ou à défaut notre identifiant de paiement (externalId). */
+  checkStatus(reference: string, method: PaymentMethod): Promise<StatusResult>;
 }
 
 export const MOBILE_MONEY_PROVIDER = Symbol('MOBILE_MONEY_PROVIDER');
@@ -30,11 +42,19 @@ export class SimulatorMobileMoneyProvider implements MobileMoneyProvider {
   static readonly statuses = new Map<string, OperatorStatus>();
   static readonly requests: CollectRequest[] = [];
   static failNextRequest = false;
+  static timeoutNextRequest = false;
 
   async requestPayment(req: CollectRequest): Promise<{ reference: string }> {
     if (SimulatorMobileMoneyProvider.failNextRequest) {
       SimulatorMobileMoneyProvider.failNextRequest = false;
-      throw new Error('Opérateur indisponible');
+      throw new OperatorRejectedError('Numéro non abonné au service');
+    }
+    if (SimulatorMobileMoneyProvider.timeoutNextRequest) {
+      // La demande parvient à l'opérateur mais la réponse se perd.
+      SimulatorMobileMoneyProvider.timeoutNextRequest = false;
+      SimulatorMobileMoneyProvider.statuses.set(req.paymentId, 'PENDING');
+      SimulatorMobileMoneyProvider.requests.push(req);
+      throw new Error('Délai de réponse dépassé');
     }
     const reference = `SIM-${randomToken(9)}`;
     SimulatorMobileMoneyProvider.statuses.set(reference, 'PENDING');
@@ -42,8 +62,8 @@ export class SimulatorMobileMoneyProvider implements MobileMoneyProvider {
     return { reference };
   }
 
-  async checkStatus(reference: string): Promise<OperatorStatus> {
-    return SimulatorMobileMoneyProvider.statuses.get(reference) ?? 'PENDING';
+  async checkStatus(reference: string): Promise<StatusResult> {
+    return { status: SimulatorMobileMoneyProvider.statuses.get(reference) ?? 'PENDING' };
   }
 }
 
@@ -76,13 +96,15 @@ export class HttpMobileMoneyProvider implements MobileMoneyProvider {
       }),
       signal: AbortSignal.timeout(15000),
     });
+    if (res.status >= 400 && res.status < 500)
+      throw new OperatorRejectedError(`Passerelle Mobile Money : HTTP ${res.status}`);
     if (!res.ok) throw new Error(`Passerelle Mobile Money : HTTP ${res.status}`);
     const body = (await res.json()) as { reference?: string };
     if (!body.reference) throw new Error('Référence opérateur absente');
     return { reference: body.reference };
   }
 
-  async checkStatus(reference: string): Promise<OperatorStatus> {
+  async checkStatus(reference: string): Promise<StatusResult> {
     const url = env().MOBILE_MONEY_HTTP_URL;
     if (!url) throw new Error('MOBILE_MONEY_HTTP_URL manquant');
     const res = await fetch(`${url}/status/${encodeURIComponent(reference)}`, {
@@ -90,8 +112,11 @@ export class HttpMobileMoneyProvider implements MobileMoneyProvider {
       signal: AbortSignal.timeout(15000),
     });
     if (!res.ok) throw new Error(`Passerelle Mobile Money : HTTP ${res.status}`);
-    const body = (await res.json()) as { status?: string };
-    return body.status === 'SUCCESS' || body.status === 'FAILED' ? body.status : 'PENDING';
+    const body = (await res.json()) as { status?: string; amount?: number };
+    return {
+      status: body.status === 'SUCCESS' || body.status === 'FAILED' ? body.status : 'PENDING',
+      amount: typeof body.amount === 'number' ? body.amount : undefined,
+    };
   }
 }
 

@@ -24,7 +24,7 @@ import {
   randomToken,
   safeEqual,
   sha256,
-  verifyTotp,
+  totpStep,
 } from '../../common/crypto';
 import { Db, InjectDb } from '../../common/prisma';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -45,6 +45,8 @@ const OTP_TTL_MS = 5 * 60 * 1000;
 const OTP_MAX_ATTEMPTS = 5;
 const OTP_MAX_PER_WINDOW = 3;
 const OTP_WINDOW_MS = 15 * 60 * 1000;
+const MFA_MAX_FAILURES = 5;
+const MFA_LOCK_MS = 15 * 60 * 1000;
 // Empreinte factice pour garder un temps de réponse constant si l'utilisateur n'existe pas.
 let dummyHash: string | undefined;
 
@@ -95,12 +97,37 @@ export class AuthService {
     const user = await this.db.user.findUnique({ where: { id: payload.sub } });
     if (!user?.mfaSecret || !user.mfaEnabled || user.status !== 'ACTIVE')
       throw new UnauthorizedException();
-    if (!verifyTotp(decrypt(user.mfaSecret, env().DATA_ENCRYPTION_KEY), code)) {
+    if (user.mfaLockedUntil && user.mfaLockedUntil > new Date())
+      throw new HttpException(
+        'Trop de codes erronés. Réessayez dans quelques minutes.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    const step = totpStep(decrypt(user.mfaSecret, env().DATA_ENCRYPTION_KEY), code);
+    // Le pas est enregistré de façon atomique : un code déjà utilisé est refusé.
+    const accepted =
+      step !== null &&
+      (
+        await this.db.user.updateMany({
+          where: { id: user.id, OR: [{ mfaLastStep: null }, { mfaLastStep: { lt: step } }] },
+          data: { mfaLastStep: step, mfaFailedAttempts: 0, mfaLockedUntil: null },
+        })
+      ).count === 1;
+    if (!accepted) {
+      const updated = await this.db.user.update({
+        where: { id: user.id },
+        data: { mfaFailedAttempts: { increment: 1 } },
+      });
+      if (updated.mfaFailedAttempts >= MFA_MAX_FAILURES)
+        await this.db.user.update({
+          where: { id: user.id },
+          data: { mfaFailedAttempts: 0, mfaLockedUntil: new Date(Date.now() + MFA_LOCK_MS) },
+        });
       await this.audit.log({
         action: 'auth.mfa_failed',
         entity: 'User',
         entityId: user.id,
         schoolId: null,
+        after: { replay: step !== null },
       });
       throw new UnauthorizedException('Code de vérification incorrect');
     }
@@ -329,10 +356,12 @@ export class AuthService {
   async enableMfa(userId: string, code: string): Promise<void> {
     const user = await this.db.user.findUniqueOrThrow({ where: { id: userId } });
     if (!user.mfaSecret) throw new BadRequestException('Commencez par générer un secret');
-    if (!verifyTotp(decrypt(user.mfaSecret, env().DATA_ENCRYPTION_KEY), code)) {
-      throw new BadRequestException('Code incorrect');
-    }
-    await this.db.user.update({ where: { id: userId }, data: { mfaEnabled: true } });
+    const step = totpStep(decrypt(user.mfaSecret, env().DATA_ENCRYPTION_KEY), code);
+    if (step === null) throw new BadRequestException('Code incorrect');
+    await this.db.user.update({
+      where: { id: userId },
+      data: { mfaEnabled: true, mfaLastStep: step },
+    });
     await this.audit.log({ action: 'auth.mfa_enabled', entity: 'User', entityId: userId });
   }
 
@@ -366,7 +395,9 @@ export class AuthService {
       template: 'otp',
       body: templates.otp(code),
     });
-    await this.notifications.dispatchNow(n.id);
+    // Envoi sans attendre la passerelle SMS : le temps de réponse ne révèle pas si le numéro
+    // est connu. En cas d'échec, le worker reprend le message de la table d'envoi.
+    void this.notifications.dispatchNow(n.id);
   }
 
   async verifyOtp(phone: string, code: string, userAgent?: string): Promise<SessionResult> {
@@ -376,8 +407,12 @@ export class AuthService {
     });
     const invalid = new UnauthorizedException('Code incorrect ou expiré');
     if (!otp) throw invalid;
-    if (otp.attempts >= OTP_MAX_ATTEMPTS) throw invalid;
-    await this.db.otpCode.update({ where: { id: otp.id }, data: { attempts: { increment: 1 } } });
+    // Comptage atomique : des essais simultanés ne dépassent pas la limite.
+    const counted = await this.db.otpCode.updateMany({
+      where: { id: otp.id, consumedAt: null, attempts: { lt: OTP_MAX_ATTEMPTS } },
+      data: { attempts: { increment: 1 } },
+    });
+    if (counted.count === 0) throw invalid;
     if (!safeEqual(otp.codeHash, hmacSha256(env().OTP_SECRET, `${phone}:${code}`))) throw invalid;
     const consumed = await this.db.otpCode.updateMany({
       where: { id: otp.id, consumedAt: null },

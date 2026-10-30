@@ -12,6 +12,9 @@ test('le censeur prépare les bulletins, la direction les publie', async ({ page
   await expect(page.getByText(/bulletins préparés en brouillon/)).toBeVisible();
   await expect(page.getByText(/Brouillon · v\d/).first()).toBeVisible();
   await expect(page.getByText('Ngono Marie-Claire')).toBeVisible();
+  // Le jeu de démonstration ne note que les mathématiques et le français de la séquence 1.
+  await expect(page.getByRole('heading', { name: /\d+ saisies manquantes/ })).toBeVisible();
+  await expect(page.getByText('Anglais · Séquence 1 : aucune note')).toBeVisible();
   // Le censeur n'a pas le droit de publier.
   await expect(page.getByRole('button', { name: /^Publier/ })).toHaveCount(0);
   await expectNoHorizontalOverflow(page);
@@ -26,7 +29,12 @@ test('le censeur prépare les bulletins, la direction les publie', async ({ page
   await page.getByRole('button', { name: /^Publier \d+ bulletins/ }).click();
   const dialog = page.getByRole('dialog', { name: 'Publier les bulletins ?' });
   await expect(dialog.getByText(/ne peut plus être modifié/)).toBeVisible();
-  await dialog.getByRole('button', { name: 'Publier', exact: true }).click();
+  const confirm = dialog.getByRole('button', { name: 'Publier', exact: true });
+  await expect(confirm).toBeDisabled();
+  await dialog
+    .getByLabel('Motif de publication malgré les saisies manquantes')
+    .fill('Bulletins de mi-trimestre décidés en conseil');
+  await confirm.click();
   await expect(page.getByText(/bulletins publiés · parents prévenus par SMS/)).toBeVisible();
   await expect(page.getByText(/Publié · v\d/).first()).toBeVisible();
 });

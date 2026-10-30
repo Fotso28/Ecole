@@ -1,6 +1,10 @@
 import { Body, Controller, Get, Module, Param, Post, Put, Query, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { councilDecisionSchema, reportCardGenerateSchema } from '@ecole/shared';
+import {
+  councilDecisionSchema,
+  reportCardGenerateSchema,
+  reportCardPublishSchema,
+} from '@ecole/shared';
 import type { Response } from 'express';
 import { z } from 'zod';
 import { RequireModule, RequirePermissions } from '../../common/decorators';
@@ -35,9 +39,17 @@ export class ReportCardsController {
   @RequirePermissions('reportcards.publish')
   @Post('publish')
   publish(
-    @Body(new ZodPipe(reportCardGenerateSchema)) body: z.infer<typeof reportCardGenerateSchema>,
+    @Body(new ZodPipe(reportCardPublishSchema)) body: z.infer<typeof reportCardPublishSchema>,
   ) {
-    return this.cards.publish(body.classId, body.termId);
+    return this.cards.publish(body.classId, body.termId, body.overrideReason);
+  }
+
+  @RequirePermissions('reportcards.read')
+  @Get('completeness')
+  completeness(
+    @Query(new ZodPipe(reportCardGenerateSchema)) q: z.infer<typeof reportCardGenerateSchema>,
+  ) {
+    return this.cards.completeness(q.classId, q.termId);
   }
 
   @RequirePermissions('reportcards.read')

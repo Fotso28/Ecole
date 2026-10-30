@@ -9,7 +9,10 @@ import {
   createStaff,
   createTestApp,
   login,
+  loginPlatformAdmin,
+  PLATFORM_ADMIN_TOTP_SECRET,
   prisma,
+  requestOtp,
   resetDb,
   toSession,
 } from './helpers';
@@ -30,7 +33,7 @@ beforeEach(async () => {
 describe('création d’établissement par la plateforme', () => {
   it('crée une école et son directeur, qui peut ensuite se connecter', async () => {
     await createPlatformAdmin();
-    const admin = await login(app, 'admin@plateforme.cm', 'motdepasse-admin-1');
+    const admin = await loginPlatformAdmin(app);
     const created = await http()
       .post('/platform/schools')
       .set(admin.auth)
@@ -68,7 +71,7 @@ describe('création d’établissement par la plateforme', () => {
   it('journalise un accès exceptionnel motivé et le limite à la lecture', async () => {
     await createPlatformAdmin();
     const school = await createSchool('b');
-    const admin = await login(app, 'admin@plateforme.cm', 'motdepasse-admin-1');
+    const admin = await loginPlatformAdmin(app);
     await http()
       .post(`/platform/schools/${school.id}/access`)
       .set(admin.auth)
@@ -214,14 +217,63 @@ describe('double authentification', () => {
       .post('/auth/mfa/verify')
       .send({ mfaToken: step1.body.mfaToken, code: '123456' })
       .expect(401);
-    const step2 = await http()
+    // Le code ayant servi à l'activation ne peut pas être réutilisé.
+    await http()
       .post('/auth/mfa/verify')
       .send({ mfaToken: step1.body.mfaToken, code: totp(setup.body.secret) })
+      .expect(401);
+    const next = totp(setup.body.secret, Date.now() + 30_000);
+    const step2 = await http()
+      .post('/auth/mfa/verify')
+      .send({ mfaToken: step1.body.mfaToken, code: next })
       .expect(200);
     expect(step2.body.accessToken).toBeTruthy();
+    await http()
+      .post('/auth/mfa/verify')
+      .send({ mfaToken: step1.body.mfaToken, code: next })
+      .expect(401);
 
     const stored = await prisma.user.findUniqueOrThrow({ where: { email: 'compta@mfa.cm' } });
     expect(stored.mfaSecret).not.toContain(setup.body.secret);
+  });
+
+  it('verrouille la vérification après cinq codes erronés', async () => {
+    await createPlatformAdmin();
+    const step1 = await http()
+      .post('/auth/login')
+      .send({ email: 'admin@plateforme.cm', password: 'motdepasse-admin-1' })
+      .expect(200);
+    for (let i = 0; i < 5; i++) {
+      await http()
+        .post('/auth/mfa/verify')
+        .send({ mfaToken: step1.body.mfaToken, code: '000000' })
+        .expect(401);
+    }
+    // Même le bon code est refusé pendant le verrouillage.
+    await http()
+      .post('/auth/mfa/verify')
+      .send({ mfaToken: step1.body.mfaToken, code: totp(PLATFORM_ADMIN_TOTP_SECRET) })
+      .expect(429);
+    await prisma.user.updateMany({ data: { mfaLockedUntil: new Date(Date.now() - 1000) } });
+    await http()
+      .post('/auth/mfa/verify')
+      .send({ mfaToken: step1.body.mfaToken, code: totp(PLATFORM_ADMIN_TOTP_SECRET) })
+      .expect(200);
+  });
+
+  it('exige la double authentification du super-administrateur', async () => {
+    await createPlatformAdmin('admin@plateforme.cm', 'motdepasse-admin-1', { mfa: false });
+    const school = await createSchool('c');
+    const admin = await login(app, 'admin@plateforme.cm', 'motdepasse-admin-1');
+    const res = await http().get('/platform/schools').set(admin.auth).expect(403);
+    expect(res.body.code).toBe('MFA_SETUP_REQUIRED');
+    await http()
+      .post(`/platform/schools/${school.id}/access`)
+      .set(admin.auth)
+      .send({ reason: 'Demande du directeur, ticket support 42' })
+      .expect(403);
+    // L'activation reste possible.
+    await http().post('/auth/mfa/setup').set(admin.auth).expect(200);
   });
 });
 
@@ -233,11 +285,8 @@ describe('connexion des parents par code SMS', () => {
     });
   });
 
-  const lastCode = (phone: string) => /(\d{6})/.exec(MemorySmsProvider.lastTo(phone) ?? '')?.[1];
-
   it('envoie un code au parent connu et ouvre une session parent', async () => {
-    await http().post('/auth/otp/request').send({ phone: '6 77 12 34 56' }).expect(202);
-    const code = lastCode('+237677123456');
+    const code = await requestOtp(app, '6 77 12 34 56');
     expect(code).toMatch(/^\d{6}$/);
     const res = await http()
       .post('/auth/otp/verify')
@@ -274,8 +323,7 @@ describe('connexion des parents par code SMS', () => {
   });
 
   it('bloque le code après cinq essais erronés', async () => {
-    await http().post('/auth/otp/request').send({ phone: '677123456' }).expect(202);
-    const code = lastCode('+237677123456');
+    const code = await requestOtp(app, '677123456');
     for (let i = 0; i < 5; i++) {
       await http()
         .post('/auth/otp/verify')
@@ -285,9 +333,22 @@ describe('connexion des parents par code SMS', () => {
     await http().post('/auth/otp/verify').send({ phone: '677123456', code }).expect(401);
   });
 
+  it('compte les essais simultanés sans dépasser la limite', async () => {
+    const code = await requestOtp(app, '677123456');
+    const wrong = code === '000000' ? '111111' : '000000';
+    const results = await Promise.all(
+      Array.from({ length: 20 }, () =>
+        http().post('/auth/otp/verify').send({ phone: '677123456', code: wrong }),
+      ),
+    );
+    expect(results.every((r) => r.status === 401)).toBe(true);
+    const otp = await prisma.otpCode.findFirstOrThrow();
+    expect(otp.attempts).toBe(5);
+    await http().post('/auth/otp/verify').send({ phone: '677123456', code }).expect(401);
+  });
+
   it('expire le code après cinq minutes', async () => {
-    await http().post('/auth/otp/request').send({ phone: '677123456' }).expect(202);
-    const code = lastCode('+237677123456');
+    const code = await requestOtp(app, '677123456');
     await prisma.otpCode.updateMany({ data: { expiresAt: new Date(Date.now() - 1000) } });
     await http().post('/auth/otp/verify').send({ phone: '677123456', code }).expect(401);
   });

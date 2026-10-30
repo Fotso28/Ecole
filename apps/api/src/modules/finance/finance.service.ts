@@ -34,7 +34,9 @@ import { templates } from '../notifications/templates';
 import {
   MOBILE_MONEY_PROVIDER,
   MobileMoneyProvider,
+  OperatorRejectedError,
   OperatorStatus,
+  StatusResult,
 } from './mobile-money.provider';
 
 export interface LineState {
@@ -229,6 +231,7 @@ export class FinanceService {
         },
         tx,
       );
+      await this.applyCredit(tx, studentId);
       return invoice;
     };
     return outerTx ? run(outerTx) : this.db.$transaction(run);
@@ -237,6 +240,8 @@ export class FinanceService {
   /** Remise ou bourse accordée sur une échéance. */
   async addDiscount(lineId: string, amount: number, reason: string) {
     return this.db.$transaction(async (tx) => {
+      // Verrou : deux remises simultanées ne doivent pas s'écraser.
+      await tx.$queryRaw`SELECT "id" FROM "InvoiceLine" WHERE "id" = ${lineId} AND "schoolId" = ${currentSchoolId()} FOR UPDATE`;
       const line = await tx.invoiceLine.findUnique({ where: { id: lineId }, include: lineInclude });
       if (!line) throw new NotFoundException('Échéance introuvable');
       const state = toLineState(line, todayInCameroon());
@@ -336,6 +341,7 @@ export class FinanceService {
       operatorReference: p.operatorReference,
       payerPhone: p.payerPhone,
       failureReason: p.failureReason,
+      receivedById: p.receivedById,
       createdAt: p.createdAt,
       confirmedAt: p.confirmedAt,
       receipt: p.receipt
@@ -391,6 +397,18 @@ export class FinanceService {
 
     try {
       return await this.db.$transaction(async (tx) => {
+        if (cashSessionId) {
+          // La caisse ne doit pas être clôturée pendant l'encaissement.
+          const locked = await tx.$queryRaw<
+            { status: string }[]
+          >`SELECT "status" FROM "CashSession" WHERE "id" = ${cashSessionId} FOR UPDATE`;
+          if (locked[0]?.status !== 'OPEN')
+            throw new ConflictException({
+              statusCode: 409,
+              code: 'CASH_SESSION_REQUIRED',
+              message: 'Votre caisse vient d’être clôturée : ouvrez-en une nouvelle',
+            });
+        }
         const payment = await tx.payment.create({
           data: {
             schoolId,
@@ -475,14 +493,32 @@ export class FinanceService {
       });
       return { ...this.presentPayment({ ...updated, receipt: null }), replayed: false };
     } catch (e) {
-      await this.db.payment.update({
-        where: { id: payment.id },
-        data: { status: 'FAILED', failureReason: 'Opérateur injoignable' },
-      });
-      this.logger.warn(`Demande Mobile Money impossible : ${e instanceof Error ? e.message : e}`);
-      throw new BadGatewayException(
-        'L’opérateur Mobile Money ne répond pas. Réessayez dans un instant.',
+      if (e instanceof OperatorRejectedError) {
+        await this.db.payment.update({
+          where: { id: payment.id },
+          data: { status: 'FAILED', failureReason: 'Demande refusée par l’opérateur' },
+        });
+        this.logger.warn(`Demande Mobile Money refusée : ${e.message}`);
+        throw new BadGatewayException(
+          'L’opérateur Mobile Money a refusé la demande. Vérifiez le numéro et réessayez.',
+        );
+      }
+      // Issue inconnue (délai dépassé, coupure réseau) : l'opérateur a peut-être débité le payeur.
+      // Le paiement reste en attente ; la réconciliation interroge l'opérateur avec notre identifiant.
+      this.logger.warn(
+        `Demande Mobile Money sans réponse (${payment.id}) : ${e instanceof Error ? e.message : e}`,
       );
+      await this.audit.log({
+        action: 'finance.mobile_money_unconfirmed',
+        entity: 'Payment',
+        entityId: payment.id,
+        after: { amount: input.amount, method: input.method },
+      });
+      return {
+        ...this.presentPayment({ ...payment, receipt: null }),
+        unconfirmed: true,
+        replayed: false,
+      };
     }
   }
 
@@ -595,12 +631,29 @@ export class FinanceService {
 
   /**
    * Résultat de l'opérateur (webhook ou réconciliation). Idempotent : un paiement déjà
-   * finalisé n'est pas retraité. Le montant doit correspondre à la demande.
+   * finalisé n'est pas retraité. Le montant doit correspondre à la demande. Le paiement est
+   * retrouvé par la référence de l'opérateur ou, à défaut, par notre identifiant (externalId).
    */
-  async confirmMobileMoney(reference: string, status: OperatorStatus, amount?: number) {
-    const payment = await runAsSystem('mobile-money-lookup', () =>
-      this.db.payment.findFirst({ where: { operatorReference: reference } }),
+  async confirmMobileMoney(
+    ref: { reference?: string; externalId?: string; operator?: PaymentMethod },
+    status: OperatorStatus,
+    amount?: number,
+  ) {
+    const candidates = await runAsSystem('mobile-money-lookup', () =>
+      this.db.payment.findMany({
+        where: {
+          method: ref.operator ? ref.operator : { in: ['MTN_MOMO', 'ORANGE_MONEY'] },
+          OR: [
+            ...(ref.reference ? [{ operatorReference: ref.reference }] : []),
+            ...(ref.externalId ? [{ id: ref.externalId }] : []),
+          ],
+        },
+        take: 2,
+      }),
     );
+    if (candidates.length > 1)
+      throw new ConflictException('Référence ambiguë : précisez l’opérateur');
+    const payment = candidates[0];
     if (!payment) throw new NotFoundException('Paiement inconnu');
     if (amount !== undefined && amount !== payment.amount) {
       await runAsSystem(
@@ -624,11 +677,44 @@ export class FinanceService {
           const locked = await tx.$queryRaw<
             { status: string }[]
           >`SELECT "status" FROM "Payment" WHERE "id" = ${payment.id} FOR UPDATE`;
-          if (locked[0]?.status !== 'PENDING')
-            return { status: locked[0]?.status ?? payment.status, changed: false };
+          const current = locked[0]?.status ?? payment.status;
+          if (ref.reference && !payment.operatorReference)
+            await tx.payment.update({
+              where: { id: payment.id },
+              data: { operatorReference: ref.reference },
+            });
+          // Confirmation tardive d'un paiement expiré de notre côté : l'argent a été débité,
+          // il est encaissé et signalé.
+          const lateSuccess = current === 'CANCELLED' && status === 'SUCCESS';
+          if (current !== 'PENDING' && !lateSuccess) {
+            if (status === 'SUCCESS' && current !== 'SUCCESS') {
+              this.logger.error(
+                `Succès Mobile Money reçu pour le paiement ${payment.id} au statut ${current} : vérification manuelle`,
+              );
+              await this.audit.log(
+                {
+                  action: 'finance.mobile_money_conflict',
+                  entity: 'Payment',
+                  entityId: payment.id,
+                  after: { status: current, operatorStatus: status },
+                },
+                tx,
+              );
+            }
+            return { status: current, changed: false };
+          }
           if (status === 'SUCCESS') {
             const fresh = await tx.payment.findUniqueOrThrow({ where: { id: payment.id } });
             const result = await this.settle(tx, fresh);
+            if (lateSuccess)
+              await this.audit.log(
+                {
+                  action: 'finance.mobile_money_late_success',
+                  entity: 'Payment',
+                  entityId: payment.id,
+                },
+                tx,
+              );
             return { status: result.status, changed: true };
           }
           await tx.payment.update({
@@ -685,13 +771,23 @@ export class FinanceService {
     let expired = 0;
     for (const p of pending) {
       try {
-        if (p.operatorReference) {
-          const status = await this.mobileMoney.checkStatus(p.operatorReference, p.method);
-          if (status !== 'PENDING') {
-            const r = await this.confirmMobileMoney(p.operatorReference, status);
-            if (r.changed) settled++;
-            continue;
-          }
+        // Opérateur injoignable : le paiement reste en attente, et expire quand même après 24 h.
+        const check = await this.mobileMoney
+          .checkStatus(p.operatorReference ?? p.id, p.method)
+          .catch((e: unknown): StatusResult => {
+            this.logger.warn(
+              `Statut du paiement ${p.id} indisponible : ${e instanceof Error ? e.message : e}`,
+            );
+            return { status: 'PENDING' };
+          });
+        if (check.status !== 'PENDING') {
+          const r = await this.confirmMobileMoney(
+            p.operatorReference ? { reference: p.operatorReference } : { externalId: p.id },
+            check.status,
+            check.amount,
+          );
+          if (r.changed) settled++;
+          continue;
         }
         if (p.createdAt < new Date(now.getTime() - 24 * 3600_000)) {
           await runAsSystem(
@@ -714,6 +810,54 @@ export class FinanceService {
     return { checked: pending.length, settled, expired };
   }
 
+  /**
+   * Impute le trop-perçu (part non imputée des paiements encaissés) sur les échéances restant
+   * dues, du plus ancien paiement vers la plus ancienne échéance. À appeler dans une transaction.
+   */
+  private async applyCredit(tx: Tx, studentId: string) {
+    const schoolId = currentSchoolId();
+    await tx.$queryRaw`
+      SELECT l."id" FROM "InvoiceLine" l JOIN "Invoice" i ON i."id" = l."invoiceId"
+      WHERE l."schoolId" = ${schoolId} AND i."studentId" = ${studentId} ORDER BY l."id" FOR UPDATE OF l`;
+    const payments = await tx.payment.findMany({
+      where: { studentId, status: 'SUCCESS', reversedAt: null },
+      include: { allocations: { select: { amount: true } } },
+      orderBy: { confirmedAt: 'asc' },
+    });
+    const credits = payments
+      .map((p) => ({ id: p.id, left: p.amount - p.allocations.reduce((n, a) => n + a.amount, 0) }))
+      .filter((c) => c.left > 0);
+    if (credits.length === 0) return;
+    const lines = (await this.lineStates({ invoice: { studentId } }, tx)).filter(
+      (l) => l.outstanding > 0,
+    );
+    const applied: { paymentId: string; lineId: string; amount: number }[] = [];
+    for (const line of lines) {
+      let need = line.outstanding;
+      for (const c of credits) {
+        if (need === 0) break;
+        const take = Math.min(need, c.left);
+        if (take === 0) continue;
+        await tx.paymentAllocation.create({
+          data: { schoolId, paymentId: c.id, invoiceLineId: line.id, amount: take },
+        });
+        applied.push({ paymentId: c.id, lineId: line.id, amount: take });
+        c.left -= take;
+        need -= take;
+      }
+    }
+    if (applied.length > 0)
+      await this.audit.log(
+        {
+          action: 'finance.credit_applied',
+          entity: 'Student',
+          entityId: studentId,
+          after: { applied },
+        },
+        tx,
+      );
+  }
+
   /** Annulation d'un paiement par une écriture de correction ; le paiement d'origine reste intact. */
   async reversePayment(id: string, reason: string) {
     return this.db.$transaction(async (tx) => {
@@ -726,6 +870,10 @@ export class FinanceService {
         throw new ConflictException('Seul un paiement encaissé peut être annulé');
       if (payment.reversedAt) throw new ConflictException('Ce paiement a déjà été annulé');
       const actorId = this.actorId();
+      if (payment.method === 'CASH' && payment.receivedById === actorId)
+        throw new ForbiddenException(
+          'Un encaissement en espèces doit être annulé par une autre personne que le caissier',
+        );
       await tx.payment.update({
         where: { id },
         data: { reversedAt: new Date(), reversalReason: reason, reversedById: actorId },
@@ -752,6 +900,8 @@ export class FinanceService {
         },
         tx,
       );
+      // Les échéances rouvertes reprennent le trop-perçu éventuel des autres paiements.
+      await this.applyCredit(tx, payment.studentId);
       return { ok: true };
     });
   }
@@ -817,23 +967,26 @@ export class FinanceService {
 
   async openCashSession() {
     const userId = staffContext().userId;
-    const existing = await this.db.cashSession.findFirst({
-      where: { status: 'OPEN', openedById: userId },
+    return this.db.$transaction(async (tx) => {
+      // Deux ouvertures simultanées ne doivent pas créer deux caisses ouvertes.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`cash:${userId}`}))`;
+      const existing = await tx.cashSession.findFirst({
+        where: { status: 'OPEN', openedById: userId },
+      });
+      if (existing) return existing;
+      const session = await tx.cashSession.create({
+        data: { schoolId: currentSchoolId(), openedById: userId },
+      });
+      await this.audit.log(
+        { action: 'finance.cash_opened', entity: 'CashSession', entityId: session.id },
+        tx,
+      );
+      return session;
     });
-    if (existing) return existing;
-    const session = await this.db.cashSession.create({
-      data: { schoolId: currentSchoolId(), openedById: userId },
-    });
-    await this.audit.log({
-      action: 'finance.cash_opened',
-      entity: 'CashSession',
-      entityId: session.id,
-    });
-    return session;
   }
 
-  private async sessionTotals(sessionId: string) {
-    const payments = await this.db.payment.findMany({
+  private async sessionTotals(sessionId: string, tx?: Tx) {
+    const payments = await (tx ?? this.db).payment.findMany({
       where: { cashSessionId: sessionId, status: 'SUCCESS' },
       select: { amount: true, reversedAt: true },
     });
@@ -869,35 +1022,42 @@ export class FinanceService {
 
   async closeCashSession(id: string, countedAmount: number, note?: string) {
     const ctx = staffContext();
-    const session = await this.db.cashSession.findUnique({ where: { id } });
-    if (!session) throw new NotFoundException('Caisse introuvable');
-    if (session.status !== 'OPEN') throw new ConflictException('Cette caisse est déjà clôturée');
-    if (session.openedById !== ctx.userId && !ctx.permissions.has('finance.cash.approve')) {
-      throw new ForbiddenException('Seul le caissier ou la direction peut clôturer cette caisse');
-    }
-    const totals = await this.sessionTotals(id);
-    const closed = await this.db.cashSession.update({
-      where: { id },
-      data: {
-        status: 'CLOSED',
-        closedAt: new Date(),
-        closedById: ctx.userId,
-        expectedAmount: totals.expected,
-        countedAmount,
-        note,
-      },
+    return this.db.$transaction(async (tx) => {
+      // Verrou : un encaissement en cours se termine avant la clôture et compte dans le total.
+      await tx.$queryRaw`SELECT "id" FROM "CashSession" WHERE "id" = ${id} AND "schoolId" = ${currentSchoolId()} FOR UPDATE`;
+      const session = await tx.cashSession.findUnique({ where: { id } });
+      if (!session) throw new NotFoundException('Caisse introuvable');
+      if (session.status !== 'OPEN') throw new ConflictException('Cette caisse est déjà clôturée');
+      if (session.openedById !== ctx.userId && !ctx.permissions.has('finance.cash.approve')) {
+        throw new ForbiddenException('Seul le caissier ou la direction peut clôturer cette caisse');
+      }
+      const totals = await this.sessionTotals(id, tx);
+      const closed = await tx.cashSession.update({
+        where: { id, status: 'OPEN' },
+        data: {
+          status: 'CLOSED',
+          closedAt: new Date(),
+          closedById: ctx.userId,
+          expectedAmount: totals.expected,
+          countedAmount,
+          note,
+        },
+      });
+      await this.audit.log(
+        {
+          action: 'finance.cash_closed',
+          entity: 'CashSession',
+          entityId: id,
+          after: { expected: totals.expected, counted: countedAmount },
+        },
+        tx,
+      );
+      return {
+        ...closed,
+        difference: countedAmount - totals.expected,
+        operations: totals.operations,
+      };
     });
-    await this.audit.log({
-      action: 'finance.cash_closed',
-      entity: 'CashSession',
-      entityId: id,
-      after: { expected: totals.expected, counted: countedAmount },
-    });
-    return {
-      ...closed,
-      difference: countedAmount - totals.expected,
-      operations: totals.operations,
-    };
   }
 
   async approveCashSession(id: string) {
@@ -906,13 +1066,14 @@ export class FinanceService {
     if (!session) throw new NotFoundException('Caisse introuvable');
     if (session.status !== 'CLOSED')
       throw new ConflictException('La caisse doit être clôturée avant validation');
-    if (session.closedById === ctx.userId && !ctx.roles.includes('DIRECTOR')) {
+    // Contrôle à quatre yeux : ni le caissier ni la personne qui a clôturé ne valident.
+    if (session.closedById === ctx.userId || session.openedById === ctx.userId) {
       throw new ForbiddenException(
-        'La validation doit être faite par une autre personne que celle qui a clôturé',
+        'La validation doit être faite par une autre personne que le caissier',
       );
     }
     const approved = await this.db.cashSession.update({
-      where: { id },
+      where: { id, status: 'CLOSED' },
       data: { status: 'APPROVED', approvedById: ctx.userId, approvedAt: new Date() },
     });
     await this.audit.log({ action: 'finance.cash_approved', entity: 'CashSession', entityId: id });

@@ -212,6 +212,10 @@ export const gradesUpsertSchema = z.object({
   grades: z.array(z.object({ studentId: id, value: z.string().max(10) })).min(1),
 });
 export const reportCardGenerateSchema = z.object({ classId: id, termId: id });
+/** Motif obligatoire pour publier des bulletins malgré des saisies manquantes. */
+export const reportCardPublishSchema = reportCardGenerateSchema.extend({
+  overrideReason: z.string().trim().min(10).max(300).optional(),
+});
 export const councilDecisionSchema = z.object({
   decision: z.enum(['HONOR_ROLL', 'ENCOURAGEMENT', 'WARNING', 'BLAME', 'NONE']),
   comment: z.string().trim().max(300).optional(),

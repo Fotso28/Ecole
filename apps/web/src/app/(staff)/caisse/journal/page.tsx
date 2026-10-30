@@ -27,7 +27,7 @@ const shift = (iso: string, days: number) => {
 };
 
 export default function JournalPage() {
-  const { can } = useAuth();
+  const { can, me } = useAuth();
   const toast = useToast();
   const queryClient = useQueryClient();
   const [from, setFrom] = useState(shift(todayIso(), -7));
@@ -145,7 +145,11 @@ export default function JournalPage() {
                     Reçu
                   </Button>
                 ) : null}
-                {can('finance.payments.reverse') && p.status === 'SUCCESS' && !p.reversed ? (
+                {/* Une remise d'espèces s'annule par une autre personne que le caissier. */}
+                {can('finance.payments.reverse') &&
+                p.status === 'SUCCESS' &&
+                !p.reversed &&
+                !(p.method === 'CASH' && p.receivedById === me?.user.id) ? (
                   <Button
                     variant="danger"
                     size="sm"

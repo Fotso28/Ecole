@@ -127,10 +127,16 @@ export function hasPermission(roles: readonly StaffRole[], permission: Permissio
   return permissionsForRoles(roles).has(permission);
 }
 
-/** Un enseignant pur n'accède qu'à ses classes et matières. */
-export function isTeacherOnly(roles: readonly StaffRole[]): boolean {
-  const scoped: readonly StaffRole[] = ['TEACHER'];
-  return roles.length > 0 && roles.every((r) => scoped.includes(r));
+/**
+ * Vrai si la permission ne vient que du rôle enseignant : elle est alors limitée aux classes et
+ * matières de l'enseignant. Un rôle cumulé ne lève la limite que s'il accorde lui-même la permission
+ * (un enseignant également surveillant ne peut pas noter les classes de ses collègues).
+ */
+export function isClassScoped(roles: readonly StaffRole[], permission: Permission): boolean {
+  return (
+    roles.includes('TEACHER') &&
+    !roles.some((r) => r !== 'TEACHER' && (ROLE_PERMISSIONS[r] ?? []).includes(permission))
+  );
 }
 
 /** Modules activables par abonnement. */

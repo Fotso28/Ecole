@@ -15,6 +15,7 @@ import { Throttle } from '@nestjs/throttler';
 import { formatGrade, justificationCreateSchema, portalPaymentSchema } from '@ecole/shared';
 import type { Response } from 'express';
 import { z } from 'zod';
+import { Prisma } from '@prisma/client';
 import { parentContext, runAsSystem } from '../../common/context';
 import { fromDbDate } from '../../common/dates';
 import { ParentRoute } from '../../common/decorators';
@@ -33,6 +34,12 @@ import type { ReportCardData } from '../report-cards/report-cards.service';
  * plusieurs écoles. Chaque accès vérifie d'abord le lien parent-enfant, puis lit les
  * données avec les droits système limités à l'école de l'enfant.
  */
+/** Le portail ne montre que les élèves d'établissements actifs ayant activé le module portail. */
+const VISIBLE_STUDENT = {
+  deletedAt: null,
+  school: { status: 'ACTIVE', modules: { has: 'portal' } },
+} satisfies Prisma.StudentWhereInput;
+
 @Injectable()
 export class PortalService {
   constructor(
@@ -46,8 +53,8 @@ export class PortalService {
     const userId = parentContext().userId;
     const link = await runAsSystem('portal-link', () =>
       this.db.studentGuardian.findFirst({
-        where: { studentId, guardian: { userId }, student: { deletedAt: null } },
-        include: { student: true },
+        where: { studentId, guardian: { userId }, student: VISIBLE_STUDENT },
+        include: { student: { include: { school: { select: { modules: true } } } } },
       }),
     );
     if (!link) throw new NotFoundException('Enfant introuvable');
@@ -58,7 +65,7 @@ export class PortalService {
     const userId = parentContext().userId;
     const links = await runAsSystem('portal-children', () =>
       this.db.studentGuardian.findMany({
-        where: { guardian: { userId }, student: { deletedAt: null } },
+        where: { guardian: { userId }, student: VISIBLE_STUDENT },
         include: {
           student: {
             include: {
@@ -227,6 +234,8 @@ export class PortalService {
 
   async pay(input: z.infer<typeof portalPaymentSchema>) {
     const link = await this.childLink(input.studentId);
+    if (!link.student.school.modules.includes('finance'))
+      throw new ForbiddenException('Le paiement en ligne n’est pas activé par cet établissement');
     const userId = parentContext().userId;
     return runAsSystem(
       'portal-payment',

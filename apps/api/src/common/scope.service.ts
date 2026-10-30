@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { isTeacherOnly } from '@ecole/shared';
+import { isClassScoped, type Permission } from '@ecole/shared';
 import { currentContext } from './context';
 import { Db, InjectDb, Tx } from './prisma';
 
@@ -22,10 +22,15 @@ export class ScopeService {
     return year;
   }
 
-  /** Vrai si l'utilisateur courant n'a que le rôle enseignant (accès limité à ses classes). */
-  isTeacherOnly(): boolean {
+  /** Vrai si la permission ne vient que du rôle enseignant (accès limité à ses classes). */
+  isClassScoped(permission: Permission): boolean {
     const ctx = currentContext();
-    return ctx?.kind === 'staff' && isTeacherOnly(ctx.roles);
+    return ctx?.kind === 'staff' && isClassScoped(ctx.roles, permission);
+  }
+
+  can(permission: Permission): boolean {
+    const ctx = currentContext();
+    return ctx?.kind === 'staff' && ctx.permissions.has(permission);
   }
 
   userId(): string | undefined {
@@ -33,31 +38,58 @@ export class ScopeService {
     return ctx?.kind === 'staff' ? ctx.userId : undefined;
   }
 
-  async classSubjectForWrite(classSubjectId: string) {
+  async classSubject(classSubjectId: string, permission: Permission) {
     const cs = await this.db.classSubject.findUnique({
       where: { id: classSubjectId },
       include: { class: true, subject: true },
     });
     if (!cs) throw new NotFoundException('Matière de classe introuvable');
-    if (this.isTeacherOnly() && cs.teacherId !== this.userId()) {
+    if (this.isClassScoped(permission) && cs.teacherId !== this.userId()) {
       throw new ForbiddenException('Vous n’enseignez pas cette matière dans cette classe');
     }
     return cs;
   }
 
-  async classForTeacher(classId: string) {
+  async classForTeacher(classId: string, permission: Permission) {
     const cls = await this.db.class.findUnique({
       where: { id: classId },
       include: { level: true },
     });
     if (!cls) throw new NotFoundException('Classe introuvable');
-    if (this.isTeacherOnly()) {
+    if (this.isClassScoped(permission)) {
       const userId = this.userId();
       const teaches = await this.db.classSubject.count({ where: { classId, teacherId: userId } });
       if (teaches === 0 && cls.mainTeacherId !== userId)
         throw new ForbiddenException('Vous n’intervenez pas dans cette classe');
     }
     return cls;
+  }
+
+  /** Classes de l'année en cours où l'utilisateur enseigne ou est professeur principal. */
+  async teacherClassIds(): Promise<string[]> {
+    const year = await this.currentYear();
+    const userId = this.userId();
+    const classes = await this.db.class.findMany({
+      where: {
+        academicYearId: year.id,
+        OR: [{ mainTeacherId: userId }, { subjects: { some: { teacherId: userId } } }],
+      },
+      select: { id: true },
+    });
+    return classes.map((c) => c.id);
+  }
+
+  /**
+   * Un enseignant ne voit que les élèves de ses classes de l'année en cours. Hors de son périmètre,
+   * l'élève est signalé introuvable, pour ne pas révéler son existence.
+   */
+  async assertStudentInScope(studentId: string, permission: Permission): Promise<void> {
+    if (!this.isClassScoped(permission)) return;
+    const classIds = await this.teacherClassIds();
+    const enrolled = await this.db.enrollment.count({
+      where: { studentId, classId: { in: classIds } },
+    });
+    if (enrolled === 0) throw new NotFoundException('Élève introuvable');
   }
 
   /** Élèves inscrits (non sortis) d'une classe, triés par nom. */

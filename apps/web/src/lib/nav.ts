@@ -212,3 +212,18 @@ export function activeHref(pathname: string, items: NavItem[]): string | undefin
     .filter((i) => pathname === i.href || pathname.startsWith(`${i.href}/`))
     .sort((a, b) => b.href.length - a.href.length)[0]?.href;
 }
+
+/**
+ * Chemin interne sûr pour la redirection après connexion, sinon null. Le chemin est résolu comme
+ * le ferait le navigateur : « /\site.com » ou une tabulation après « / » mènent hors du site.
+ */
+export function safeNextPath(next: string | null): string | null {
+  if (!next?.startsWith('/')) return null;
+  const base = 'https://ecole.invalid';
+  try {
+    const url = new URL(next, base);
+    return url.origin === base ? `${url.pathname}${url.search}${url.hash}` : null;
+  } catch {
+    return null;
+  }
+}

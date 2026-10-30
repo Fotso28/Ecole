@@ -58,7 +58,7 @@ export class AttendanceService {
 
   /** Liste d'appel : élèves de la classe et statut déjà saisi pour ce créneau. */
   async roster(classId: string, date: string, startTime: string) {
-    const cls = await this.scope.classForTeacher(classId);
+    const cls = await this.scope.classForTeacher(classId, 'attendance.write');
     const students = await this.scope.classStudents(classId);
     const session = await this.db.attendanceSession.findFirst({
       where: { classId, date: toDbDate(date), startTime },
@@ -90,7 +90,7 @@ export class AttendanceService {
       throw new BadRequestException('L’heure de fin doit suivre l’heure de début');
     if (input.date > todayInCameroon())
       throw new BadRequestException('Impossible de faire l’appel d’une date future');
-    const cls = await this.scope.classForTeacher(input.classId);
+    const cls = await this.scope.classForTeacher(input.classId, 'attendance.write');
     if (input.classSubjectId) {
       const cs = await this.db.classSubject.findUnique({ where: { id: input.classSubjectId } });
       if (!cs || cs.classId !== input.classId)
@@ -284,6 +284,7 @@ export class AttendanceService {
   }
 
   async studentRecords(studentId: string) {
+    await this.scope.assertStudentInScope(studentId, 'attendance.read');
     const year = await this.scope.currentYear();
     const records = await this.db.attendanceRecord.findMany({
       where: { studentId, session: { date: { gte: year.startDate } } },
@@ -343,8 +344,17 @@ export class AttendanceService {
   }
 
   async listJustifications(status?: 'PENDING' | 'ACCEPTED' | 'REJECTED') {
+    // Un enseignant ne voit que les justificatifs des élèves de ses classes (motifs souvent médicaux).
+    const studentIds = this.scope.isClassScoped('attendance.read')
+      ? (
+          await this.db.enrollment.findMany({
+            where: { classId: { in: await this.scope.teacherClassIds() } },
+            select: { studentId: true },
+          })
+        ).map((e) => e.studentId)
+      : null;
     const items = await this.db.justification.findMany({
-      where: { status },
+      where: { status, ...(studentIds ? { studentId: { in: studentIds } } : {}) },
       orderBy: { createdAt: 'desc' },
       take: 200,
       include: { records: { include: { session: true } } },

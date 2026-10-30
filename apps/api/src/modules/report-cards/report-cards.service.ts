@@ -12,7 +12,7 @@ import {
 import { CouncilDecisionType, Prisma, SubjectGroup } from '@prisma/client';
 import { AuditService } from '../../common/audit.service';
 import { currentSchoolId, staffContext } from '../../common/context';
-import { verificationCode } from '../../common/crypto';
+import { sha256, verificationCode } from '../../common/crypto';
 import { fromDbDate } from '../../common/dates';
 import { Db, InjectDb } from '../../common/prisma';
 import { ScopeService } from '../../common/scope.service';
@@ -90,6 +90,10 @@ export interface ReportCardData {
   };
   decision: { type: CouncilDecisionType; label: string; comment: string | null } | null;
   generatedAt: string;
+  /** Empreinte des notes et des élèves utilisés : la publication refuse un brouillon périmé. */
+  inputsDigest?: string;
+  /** Saisies manquantes au moment de la préparation. */
+  issues?: string[];
 }
 
 const hours = (minutes: number) => Math.round((minutes / 60) * 10) / 10;
@@ -105,39 +109,17 @@ export class ReportCardsService {
 
   /** Calcule et enregistre les bulletins (brouillons) d'une classe pour un trimestre. */
   async generate(classId: string, termId: string) {
-    const cls = await this.db.class.findUnique({
-      where: { id: classId },
-      include: { academicYear: true },
-    });
-    if (!cls) throw new NotFoundException('Classe introuvable');
-    const term = await this.db.term.findUnique({
-      where: { id: termId },
-      include: { sequences: { orderBy: { order: 'asc' } } },
-    });
-    if (!term || term.academicYearId !== cls.academicYearId)
-      throw new NotFoundException('Trimestre introuvable pour cette classe');
+    const { cls, term } = await this.classTerm(classId, termId);
     const school = await this.db.school.findUniqueOrThrow({
       where: { id: currentSchoolId() },
       select: { name: true, city: true },
     });
 
-    const [students, enrollments, classSubjects] = await Promise.all([
-      this.scope.classStudents(classId),
-      this.db.enrollment.findMany({
-        where: { classId },
-        select: { studentId: true, status: true },
-      }),
-      this.db.classSubject.findMany({ where: { classId }, include: { subject: true } }),
-    ]);
+    const { students, enrollments, classSubjects, evaluations, issues, digest } = await this.inputs(
+      classId,
+      term,
+    );
     if (students.length === 0) throw new ConflictException('Aucun élève inscrit dans cette classe');
-    const evaluations = await this.db.evaluation.findMany({
-      where: {
-        classSubjectId: { in: classSubjects.map((c) => c.id) },
-        sequenceId: { in: term.sequences.map((s) => s.id) },
-        status: { in: ['SUBMITTED', 'LOCKED'] },
-      },
-      include: { grades: true },
-    });
     if (evaluations.length === 0)
       throw new ConflictException('Aucune note soumise pour ce trimestre');
     const teacherIds = [
@@ -344,6 +326,8 @@ export class ReportCardsService {
               }
             : null,
           generatedAt,
+          inputsDigest: digest,
+          issues,
         };
         const mine = existing.filter((r) => r.studentId === s.id);
         await tx.reportCard.deleteMany({ where: { termId, studentId: s.id, status: 'DRAFT' } });
@@ -372,22 +356,120 @@ export class ReportCardsService {
           action: 'reportcards.generated',
           entity: 'Class',
           entityId: classId,
-          after: { termId, count: students.length },
+          after: { termId, count: students.length, issues },
         },
         tx,
       );
     });
-    return { generated: results.length, results };
+    return { generated: results.length, results, issues };
   }
 
-  /** Publie les brouillons : ils deviennent définitifs, la version précédente est remplacée. */
-  async publish(classId: string, termId: string) {
+  /** Saisies manquantes d'une classe pour un trimestre (affichées avant la publication). */
+  async completeness(classId: string, termId: string) {
+    const { term } = await this.classTerm(classId, termId);
+    const { issues } = await this.inputs(classId, term);
+    return { issues };
+  }
+
+  private async classTerm(classId: string, termId: string) {
+    const cls = await this.db.class.findUnique({
+      where: { id: classId },
+      include: { academicYear: true },
+    });
+    if (!cls) throw new NotFoundException('Classe introuvable');
+    const term = await this.db.term.findUnique({
+      where: { id: termId },
+      include: { sequences: { orderBy: { order: 'asc' } } },
+    });
+    if (!term || term.academicYearId !== cls.academicYearId)
+      throw new NotFoundException('Trimestre introuvable pour cette classe');
+    return { cls, term };
+  }
+
+  /**
+   * Données d'entrée des bulletins : élèves, matières, évaluations soumises, saisies manquantes
+   * (feuille non soumise, note absente) et empreinte permettant de détecter un brouillon périmé.
+   */
+  private async inputs(classId: string, term: { sequences: { id: string; name: string }[] }) {
+    const [students, enrollments, classSubjects] = await Promise.all([
+      this.scope.classStudents(classId),
+      this.db.enrollment.findMany({
+        where: { classId },
+        select: { studentId: true, status: true },
+      }),
+      this.db.classSubject.findMany({
+        where: { classId },
+        include: { subject: true },
+        orderBy: { subject: { name: 'asc' } },
+      }),
+    ]);
+    const all = await this.db.evaluation.findMany({
+      where: {
+        classSubjectId: { in: classSubjects.map((c) => c.id) },
+        sequenceId: { in: term.sequences.map((s) => s.id) },
+      },
+      include: { grades: true },
+      orderBy: { id: 'asc' },
+    });
+    const evaluations = all.filter((e) => e.status === 'SUBMITTED' || e.status === 'LOCKED');
+    const issues: string[] = [];
+    for (const cs of classSubjects) {
+      for (const sq of term.sequences) {
+        const label = `${cs.subject.name} · ${sq.name}`;
+        const evs = all.filter((e) => e.classSubjectId === cs.id && e.sequenceId === sq.id);
+        if (evs.some((e) => e.status === 'DRAFT')) {
+          issues.push(`${label} : saisie non soumise`);
+          continue;
+        }
+        if (evs.length === 0) {
+          issues.push(`${label} : aucune note`);
+          continue;
+        }
+        const missing = students.filter((st) =>
+          evs.some((e) => !e.grades.some((g) => g.studentId === st.id)),
+        ).length;
+        if (missing > 0)
+          issues.push(`${label} : ${missing} élève${missing > 1 ? 's' : ''} sans note`);
+      }
+    }
+    const digest = sha256(
+      JSON.stringify({
+        students: students.map((st) => st.id),
+        evaluations: evaluations.map((e) => [
+          e.id,
+          e.status,
+          e.weight,
+          e.maxScore,
+          e.grades.map((g) => `${g.studentId}:${g.status}:${g.valueCenti ?? ''}`).sort(),
+        ]),
+      }),
+    );
+    return { students, enrollments, classSubjects, evaluations, issues, digest };
+  }
+
+  /**
+   * Publie les brouillons : ils deviennent définitifs, la version précédente est remplacée.
+   * Refusé si les notes ont changé depuis la préparation, ou s'il manque des saisies sans motif
+   * de publication (journalisé).
+   */
+  async publish(classId: string, termId: string, overrideReason?: string) {
     const drafts = await this.db.reportCard.findMany({
       where: { classId, termId, status: 'DRAFT' },
     });
     if (drafts.length === 0) throw new ConflictException('Aucun bulletin en brouillon à publier');
+    const { term } = await this.classTerm(classId, termId);
+    const { issues, digest } = await this.inputs(classId, term);
+    if (drafts.some((d) => (d.data as unknown as ReportCardData).inputsDigest !== digest))
+      throw new ConflictException(
+        'Les notes ou les élèves ont changé depuis la préparation : préparez à nouveau les bulletins',
+      );
+    if (issues.length > 0 && !overrideReason)
+      throw new ConflictException({
+        statusCode: 409,
+        message: `${issues.length} saisie(s) manquante(s) : indiquez un motif pour publier malgré tout`,
+        issues,
+      });
     const actorId = staffContext().userId;
-    const term = await this.db.term.findUniqueOrThrow({ where: { id: termId } });
     await this.db.$transaction(async (tx) => {
       for (const d of drafts) {
         await tx.reportCard.updateMany({
@@ -424,10 +506,14 @@ export class ReportCardsService {
       }
       await this.audit.log(
         {
-          action: 'reportcards.published',
+          action: issues.length > 0 ? 'reportcards.published_incomplete' : 'reportcards.published',
           entity: 'Class',
           entityId: classId,
-          after: { termId, count: drafts.length },
+          after: {
+            termId,
+            count: drafts.length,
+            ...(issues.length ? { issues, overrideReason } : {}),
+          },
         },
         tx,
       );

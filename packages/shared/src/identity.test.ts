@@ -9,7 +9,7 @@ import {
   normalizeCameroonPhone,
   normalizeName,
 } from './identity';
-import { hasPermission, isTeacherOnly, permissionsForRoles } from './permissions';
+import { hasPermission, isClassScoped, permissionsForRoles } from './permissions';
 import { findConflicts, weeklyMinutesByTeacher } from './timetable';
 import {
   attendanceSubmitSchema,
@@ -126,10 +126,15 @@ describe('permissions', () => {
     expect(hasPermission(['NURSE'], 'health.read')).toBe(true);
   });
 
-  it('identifie un enseignant sans autre rôle', () => {
-    expect(isTeacherOnly(['TEACHER'])).toBe(true);
-    expect(isTeacherOnly(['TEACHER', 'CENSOR'])).toBe(false);
-    expect(isTeacherOnly([])).toBe(false);
+  it('limite un enseignant à ses classes, sauf si un autre rôle accorde la permission', () => {
+    expect(isClassScoped(['TEACHER'], 'grades.write')).toBe(true);
+    expect(isClassScoped(['TEACHER', 'CENSOR'], 'grades.write')).toBe(false);
+    // Un rôle cumulé qui n'accorde pas la permission ne lève pas la limite aux classes.
+    expect(isClassScoped(['TEACHER', 'SUPERVISOR'], 'grades.write')).toBe(true);
+    expect(isClassScoped(['TEACHER', 'SUPERVISOR'], 'attendance.write')).toBe(false);
+    expect(isClassScoped(['TEACHER', 'NURSE'], 'students.read')).toBe(false);
+    expect(isClassScoped(['SECRETARY'], 'students.read')).toBe(false);
+    expect(isClassScoped([], 'grades.read')).toBe(false);
   });
 });
 

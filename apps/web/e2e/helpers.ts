@@ -13,13 +13,24 @@ export async function loginStaff(page: Page, email: string): Promise<void> {
 
 /** Connexion parent : le code est lu via l'outil de développement du fournisseur SMS en mémoire. */
 export async function loginParent(page: Page, phone: string): Promise<void> {
+  const lastSms = async () => {
+    const res = await page.request.get(`${API_URL}/dev/sms/last?to=${encodeURIComponent(phone)}`);
+    return res.ok() ? ((await res.json()) as { body: string; count: number }) : null;
+  };
+  const before = (await lastSms())?.count ?? 0;
   await page.goto('/parent/connexion');
   await page.getByLabel('Votre numéro de téléphone').fill(phone);
   await page.getByRole('button', { name: 'Recevoir un code par SMS' }).click();
   await expect(page.getByRole('heading', { name: 'Entrez le code reçu' })).toBeVisible();
-  const res = await page.request.get(`${API_URL}/dev/sms/last?to=${encodeURIComponent(phone)}`);
-  expect(res.ok()).toBeTruthy();
-  const code = /(\d{6})/.exec(((await res.json()) as { body: string }).body)?.[1] ?? '';
+  // Le SMS part en arrière-plan : on attend le nouveau message.
+  let sms: { body: string; count: number } | null = null;
+  await expect
+    .poll(async () => {
+      sms = await lastSms();
+      return sms?.count ?? 0;
+    })
+    .toBeGreaterThan(before);
+  const code = /(\d{6})/.exec((sms as { body: string } | null)?.body ?? '')?.[1] ?? '';
   await page.getByLabel('Code à 6 chiffres').fill(code);
   await page.getByRole('button', { name: 'Se connecter' }).click();
   await page.waitForURL('**/portail');

@@ -55,17 +55,17 @@ Le site est sur http://localhost:3000 et la documentation de l'API sur http://lo
 
 Mot de passe commun : `Ecole2026!demo`
 
-| Rôle                                                     | Identifiant                                                |
-| -------------------------------------------------------- | ---------------------------------------------------------- |
-| Direction                                                | direction@demo.cm                                          |
-| Censeur                                                  | censeur@demo.cm                                            |
-| Surveillant général                                      | surveillant@demo.cm                                        |
-| Secrétariat                                              | secretariat@demo.cm                                        |
-| Comptabilité                                             | compta@demo.cm                                             |
-| Infirmerie                                               | infirmerie@demo.cm                                         |
-| Enseignant (mathématiques, professeur principal de 4e A) | prof.maths@demo.cm                                         |
-| Super-administrateur de la plateforme                    | admin@ecole.cm                                             |
-| Parent (Marie-Claire et Paul-Henri Ngono)                | 6 77 12 34 56, code SMS affiché dans les journaux de l'API |
+| Rôle                                                                                       | Identifiant                                                |
+| ------------------------------------------------------------------------------------------ | ---------------------------------------------------------- |
+| Direction                                                                                  | direction@demo.cm                                          |
+| Censeur                                                                                    | censeur@demo.cm                                            |
+| Surveillant général                                                                        | surveillant@demo.cm                                        |
+| Secrétariat                                                                                | secretariat@demo.cm                                        |
+| Comptabilité                                                                               | compta@demo.cm                                             |
+| Infirmerie                                                                                 | infirmerie@demo.cm                                         |
+| Enseignant (mathématiques, professeur principal de 4e A)                                   | prof.maths@demo.cm                                         |
+| Super-administrateur de la plateforme (double authentification à activer au premier accès) | admin@ecole.cm                                             |
+| Parent (Marie-Claire et Paul-Henri Ngono)                                                  | 6 77 12 34 56, code SMS affiché dans les journaux de l'API |
 
 ## Tests
 
@@ -74,7 +74,7 @@ Mot de passe commun : `Ecole2026!demo`
 | `pnpm --filter @ecole/shared test`                 | Calculs de notes (moyennes, rangs ex aequo, bulletins), finances, identité, permissions                                                                                          |
 | `pnpm --filter @ecole/api test`                    | Intégration sur une vraie base PostgreSQL (`TEST_DATABASE_URL`) : authentification, isolation des établissements, inscriptions, présences, notes, bulletins, paiements, webhooks |
 | `pnpm --filter @ecole/web test`                    | Navigation par rôle, formats                                                                                                                                                     |
-| `pnpm --filter @ecole/web test:e2e`                | Parcours Playwright sur téléphone (Pixel 7) et ordinateur, contre une base dédiée `ecole_e2e`                                                                                    |
+| `pnpm --filter @ecole/web test:e2e`                | Parcours Playwright sur téléphone (Pixel 7) et ordinateur, contrôle d'accessibilité axe-core (WCAG 2.1 AA), contre une base dédiée `ecole_e2e`                                   |
 | `pnpm lint`, `pnpm typecheck`, `pnpm format:check` | Qualité                                                                                                                                                                          |
 
 Les tests d'intégration et de bout en bout appliquent les migrations puis vident leur base de test : ne jamais les pointer vers une base de production.

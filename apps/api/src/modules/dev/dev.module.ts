@@ -19,8 +19,8 @@ export class DevController {
       throw new NotFoundException();
     const phone = normalizeCameroonPhone(to);
     const body = phone ? MemorySmsProvider.lastTo(phone) : undefined;
-    if (!body) throw new NotFoundException('Aucun SMS');
-    return { to: phone, body };
+    if (!phone || !body) throw new NotFoundException('Aucun SMS');
+    return { to: phone, body, count: MemorySmsProvider.countTo(phone) };
   }
 }
 

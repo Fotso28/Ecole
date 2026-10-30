@@ -56,15 +56,9 @@ export class StudentsService {
 
   async list(q: ListQuery) {
     const year = await this.scope.currentYear();
-    const teacherOnly = this.scope.isTeacherOnly();
-    const teacherClassIds = teacherOnly
-      ? (
-          await this.db.classSubject.findMany({
-            where: { teacherId: this.scope.userId(), class: { academicYearId: year.id } },
-            select: { classId: true },
-          })
-        ).map((c) => c.classId)
-      : null;
+    const teacherOnly = this.scope.isClassScoped('students.read');
+    const canSeeFinance = this.scope.can('finance.read');
+    const teacherClassIds = teacherOnly ? await this.scope.teacherClassIds() : null;
     const search = q.search?.trim();
     const phone = search ? normalizeCameroonPhone(search) : null;
     const where: Prisma.StudentWhereInput = {
@@ -121,7 +115,7 @@ export class StudentsService {
     ]);
     const ids = students.map((s) => s.id);
     const [lines, absences] = await Promise.all([
-      teacherOnly
+      !canSeeFinance
         ? Promise.resolve([])
         : this.finance.lineStates({ invoice: { studentId: { in: ids }, academicYearId: year.id } }),
       this.db.attendanceRecord.groupBy({
@@ -155,7 +149,7 @@ export class StudentsService {
           guardian: guardian
             ? { name: `${guardian.firstName} ${guardian.lastName}`, phone: guardian.phone }
             : null,
-          overdue: teacherOnly
+          overdue: !canSeeFinance
             ? null
             : mine.filter((l) => l.overdue).reduce((n, l) => n + l.outstanding, 0),
           absences: absences.find((a) => a.studentId === s.id)?._count._all ?? 0,
@@ -398,13 +392,7 @@ export class StudentsService {
       },
     });
     if (!student || student.deletedAt) throw new NotFoundException('Élève introuvable');
-    if (this.scope.isTeacherOnly()) {
-      const classIds = student.enrollments.map((e) => e.classId);
-      const teaches = await this.db.classSubject.count({
-        where: { classId: { in: classIds }, teacherId: this.scope.userId() },
-      });
-      if (teaches === 0) throw new NotFoundException('Élève introuvable');
-    }
+    await this.scope.assertStudentInScope(id, 'students.read');
     const year = await this.scope.currentYear();
     const [records, reportCards, incidents, guardianUsers] = await Promise.all([
       this.db.attendanceRecord.findMany({
@@ -439,7 +427,7 @@ export class StudentsService {
         select: { id: true, lastLoginAt: true },
       }),
     ]);
-    const canSeeFinance = !this.scope.isTeacherOnly();
+    const canSeeFinance = this.scope.can('finance.read');
     const account = canSeeFinance ? await this.finance.account(id) : null;
     return {
       id: student.id,

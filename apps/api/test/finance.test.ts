@@ -11,7 +11,7 @@ import {
 import { MemorySmsProvider } from '../src/modules/notifications/sms.provider';
 import { NotificationsService } from '../src/modules/notifications/notifications.service';
 import { enrollStudent, seedSchool, sessions, type SchoolFixture } from './fixtures';
-import { createTestApp, prisma, resetDb, toSession } from './helpers';
+import { createTestApp, prisma, requestOtp, resetDb, toSession } from './helpers';
 
 let app: INestApplication;
 let f: SchoolFixture;
@@ -112,6 +112,23 @@ describe('échéancier et relevé de compte', () => {
     });
   });
 
+  it('ne perd aucune remise accordée simultanément', async () => {
+    const a = await account();
+    const t3 = a.lines.find((l: { label: string }) => l.label === 'Tranche 3');
+    const results = await Promise.all(
+      [5000, 7000].map((amount) =>
+        http()
+          .post(`/finance/invoice-lines/${t3.id}/discounts`)
+          .set(s.compta.auth)
+          .send({ amount, reason: 'Bourse' }),
+      ),
+    );
+    expect(results.map((r) => r.status)).toEqual([201, 201]);
+    const line = await prisma.invoiceLine.findUniqueOrThrow({ where: { id: t3.id } });
+    expect(line.discount).toBe(12000);
+    expect((await account()).totals.balance).toBe(173000);
+  });
+
   it('refuse de recréer un échéancier existant', async () => {
     await http()
       .post('/finance/invoices')
@@ -161,6 +178,26 @@ describe('encaissement en espèces', () => {
     const t2 = a.lines.find((l: { label: string }) => l.label === 'Tranche 2');
     const res = await pay({ amount: 50000, method: 'CASH', lineIds: [t2.id] }).expect(201);
     expect(res.body.allocations).toEqual([{ lineId: t2.id, amount: 50000 }]);
+  });
+
+  it('impute l’avoir sur les échéances rouvertes par une annulation', async () => {
+    const bank = (amount: number) =>
+      pay({
+        amount,
+        method: 'BANK',
+        bankName: 'Banque',
+        bankReference: `VIR-${amount}-${randomUUID()}`.slice(0, 30),
+      }).expect(201);
+    const p1 = await bank(100000);
+    const p2 = await bank(100000);
+    expect(p2.body.unallocated).toBe(15000);
+    await http()
+      .post(`/finance/payments/${p1.body.id}/reverse`)
+      .set(s.compta.auth)
+      .send({ reason: 'Chèque impayé' })
+      .expect(201);
+    const a = await account();
+    expect(a.totals).toMatchObject({ outstanding: 85000, balance: 85000, credit: 0 });
   });
 
   it('garde le trop-perçu comme avoir', async () => {
@@ -218,14 +255,20 @@ describe('annulation (écriture de correction)', () => {
       .set(s.compta.auth)
       .send({ reason: 'non' })
       .expect(400);
+    // Le caissier ne peut pas annuler ses propres espèces : la direction s'en charge.
     await http()
       .post(`/finance/payments/${p.body.id}/reverse`)
       .set(s.compta.auth)
       .send({ reason: 'Erreur de saisie du montant' })
+      .expect(403);
+    await http()
+      .post(`/finance/payments/${p.body.id}/reverse`)
+      .set(s.direction.auth)
+      .send({ reason: 'Erreur de saisie du montant' })
       .expect(201);
     await http()
       .post(`/finance/payments/${p.body.id}/reverse`)
-      .set(s.compta.auth)
+      .set(s.direction.auth)
       .send({ reason: 'Erreur de saisie du montant' })
       .expect(409);
     const a = await account();
@@ -262,6 +305,14 @@ describe('annulation (écriture de correction)', () => {
     await expect(
       prisma.payment.update({ where: { id: p.body.id }, data: { status: 'FAILED' } }),
     ).rejects.toThrow(/statut final/);
+    await http()
+      .post(`/finance/payments/${p.body.id}/reverse`)
+      .set(s.direction.auth)
+      .send({ reason: 'Erreur de saisie du montant' })
+      .expect(201);
+    await expect(
+      prisma.payment.update({ where: { id: p.body.id }, data: { reversedAt: null } }),
+    ).rejects.toThrow(/définitive/);
   });
 });
 
@@ -332,19 +383,76 @@ describe('Mobile Money', () => {
       where: { template: 'paymentFailed' },
     });
     expect(sms.recipient).toBe('+237677123456');
+    // Un succès après un échec signalé par l'opérateur est contradictoire : il est signalé.
     await webhook({ reference: p.operatorReference, status: 'SUCCESS', amount: 35000 }).expect(200);
     expect((await prisma.payment.findUniqueOrThrow({ where: { id: p.id } })).status).toBe('FAILED');
+    expect(
+      await prisma.auditLog.count({ where: { action: 'finance.mobile_money_conflict' } }),
+    ).toBe(1);
   });
 
-  it("signale une erreur claire si l'opérateur ne répond pas", async () => {
+  it("signale une erreur claire si l'opérateur refuse la demande", async () => {
     SimulatorMobileMoneyProvider.failNextRequest = true;
     const res = await pay({
       amount: 35000,
       method: 'ORANGE_MONEY',
       payerPhone: '699887766',
     }).expect(502);
-    expect(res.body.message).toMatch(/ne répond pas/);
+    expect(res.body.message).toMatch(/a refusé la demande/);
     expect((await prisma.payment.findFirstOrThrow()).status).toBe('FAILED');
+  });
+
+  it("garde en attente un paiement dont l'opérateur n'a pas répondu, puis le retrouve", async () => {
+    SimulatorMobileMoneyProvider.timeoutNextRequest = true;
+    const res = await pay({ amount: 35000, method: 'MTN_MOMO', payerPhone: '677123456' }).expect(
+      201,
+    );
+    expect(res.body).toMatchObject({
+      status: 'PENDING',
+      unconfirmed: true,
+      operatorReference: null,
+    });
+    // Confirmation par webhook identifiée par notre identifiant (externalId).
+    await webhook({ externalId: res.body.id, status: 'SUCCESS' }).expect(400);
+    await webhook({
+      externalId: res.body.id,
+      reference: 'MTN-778899',
+      status: 'SUCCESS',
+      amount: 35000,
+    }).expect(200);
+    const row = await prisma.payment.findUniqueOrThrow({ where: { id: res.body.id } });
+    expect(row).toMatchObject({ status: 'SUCCESS', operatorReference: 'MTN-778899' });
+
+    // Sans webhook : la réconciliation interroge l'opérateur avec notre identifiant.
+    SimulatorMobileMoneyProvider.timeoutNextRequest = true;
+    const other = await pay({ amount: 10000, method: 'MTN_MOMO', payerPhone: '677123456' }).expect(
+      201,
+    );
+    await prisma.$executeRaw`UPDATE "Payment" SET "createdAt" = now() - interval '20 minutes' WHERE "id" = ${other.body.id}`;
+    SimulatorMobileMoneyProvider.statuses.set(other.body.id, 'SUCCESS');
+    expect(await app.get(FinanceService).reconcilePending()).toMatchObject({ settled: 1 });
+    expect((await prisma.payment.findUniqueOrThrow({ where: { id: other.body.id } })).status).toBe(
+      'SUCCESS',
+    );
+  });
+
+  it('encaisse une confirmation tardive après expiration et signale un succès contradictoire', async () => {
+    const p = await requestMomo();
+    await prisma.$executeRaw`UPDATE "Payment" SET "createdAt" = now() - interval '25 hours' WHERE "id" = ${p.id}`;
+    await app.get(FinanceService).reconcilePending();
+    expect((await prisma.payment.findUniqueOrThrow({ where: { id: p.id } })).status).toBe(
+      'CANCELLED',
+    );
+    const late = await webhook({
+      reference: p.operatorReference,
+      status: 'SUCCESS',
+      amount: 35000,
+    }).expect(200);
+    expect(late.body).toEqual({ status: 'SUCCESS', changed: true });
+    expect(
+      await prisma.auditLog.count({ where: { action: 'finance.mobile_money_late_success' } }),
+    ).toBe(1);
+    expect((await account()).totals.balance).toBe(150000);
   });
 
   it('réconcilie les paiements en attente et expire les plus anciens', async () => {
@@ -365,9 +473,22 @@ describe('Mobile Money', () => {
     expect(statuses.map((x) => x.status)).toEqual(['SUCCESS', 'FAILED', 'CANCELLED']);
   });
 
+  it("expire un paiement ancien même si l'opérateur ne répond pas", async () => {
+    const finance = app.get(FinanceService);
+    const p = await requestMomo();
+    await prisma.$executeRaw`UPDATE "Payment" SET "createdAt" = now() - interval '25 hours' WHERE "id" = ${p.id}`;
+    const provider = SimulatorMobileMoneyProvider.prototype;
+    const original = provider.checkStatus;
+    provider.checkStatus = () => Promise.reject(new Error('Passerelle indisponible'));
+    try {
+      expect(await finance.reconcilePending()).toEqual({ checked: 1, settled: 0, expired: 1 });
+    } finally {
+      provider.checkStatus = original;
+    }
+  });
+
   it('le parent paie depuis le portail et suit le statut', async () => {
-    await http().post('/auth/otp/request').send({ phone: '677123456' }).expect(202);
-    const code = /(\d{6})/.exec(MemorySmsProvider.lastTo('+237677123456') ?? '')?.[1];
+    const code = await requestOtp(app, '677123456');
     const parent = toSession(
       await http().post('/auth/otp/verify').send({ phone: '677123456', code }).expect(200),
     );
@@ -446,7 +567,7 @@ describe('caisse journalière', () => {
     }).expect(201);
     await http()
       .post(`/finance/payments/${p2.body.id}/reverse`)
-      .set(s.compta.auth)
+      .set(s.direction.auth)
       .send({ reason: 'Billet refusé par le parent' })
       .expect(201);
     const current = await http()
@@ -474,6 +595,24 @@ describe('caisse journalière', () => {
       .post(`/finance/cash-sessions/${session.body.id}/approve`)
       .set(s.direction.auth)
       .expect(201);
+  });
+
+  it('n’ouvre qu’une caisse à la fois et fait valider la caisse de la direction par un tiers', async () => {
+    const opened = await Promise.all(
+      [1, 2, 3].map(() => http().post('/finance/cash-sessions/open').set(s.direction.auth)),
+    );
+    expect(new Set(opened.map((r) => r.body.id)).size).toBe(1);
+    expect(await prisma.cashSession.count({ where: { status: 'OPEN' } })).toBe(1);
+    await http()
+      .post(`/finance/cash-sessions/${opened[0]!.body.id}/close`)
+      .set(s.direction.auth)
+      .send({ countedAmount: 0 })
+      .expect(201);
+    // La direction ne valide pas sa propre caisse.
+    await http()
+      .post(`/finance/cash-sessions/${opened[0]!.body.id}/approve`)
+      .set(s.direction.auth)
+      .expect(403);
   });
 });
 

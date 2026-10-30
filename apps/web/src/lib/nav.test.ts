@@ -1,6 +1,6 @@
 import { permissionsForRoles, type StaffRole } from '@ecole/shared';
 import { describe, expect, it } from 'vitest';
-import { activeHref, primaryNav, visibleNav } from './nav';
+import { activeHref, primaryNav, safeNextPath, visibleNav } from './nav';
 import type { Me } from './types';
 
 function me(
@@ -87,5 +87,28 @@ describe('navigation par rôle', () => {
     expect(activeHref('/caisse', items)).toBe('/caisse');
     expect(activeHref('/eleves/abc', items)).toBe('/eleves');
     expect(activeHref('/eleves/nouveau', items)).toBe('/eleves/nouveau');
+  });
+});
+
+describe('redirection après connexion', () => {
+  it('accepte un chemin interne', () => {
+    expect(safeNextPath('/eleves?statut=ENROLLED')).toBe('/eleves?statut=ENROLLED');
+    expect(safeNextPath('/caisse/journal')).toBe('/caisse/journal');
+    // La tabulation est ignorée par le navigateur : le chemin reste interne.
+    expect(safeNextPath('/\tnotes')).toBe('/notes');
+  });
+
+  it('refuse tout chemin qui mène hors du site', () => {
+    for (const next of [
+      null,
+      '',
+      'https://pirate.example',
+      '//pirate.example',
+      '/\\pirate.example',
+      '/\t/pirate.example',
+      'javascript:alert(1)',
+    ]) {
+      expect(safeNextPath(next)).toBeNull();
+    }
   });
 });

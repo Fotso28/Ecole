@@ -181,19 +181,24 @@ model School {
 }
 
 model User {
-  id              String     @id @default(cuid())
-  email           String?    @unique
-  phone           String?    @unique
-  passwordHash    String?
-  firstName       String
-  lastName        String
-  isPlatformAdmin Boolean    @default(false)
-  mfaSecret       String?
-  mfaEnabled      Boolean    @default(false)
-  status          UserStatus @default(ACTIVE)
-  lastLoginAt     DateTime?
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
+  id                String     @id @default(cuid())
+  email             String?    @unique
+  phone             String?    @unique
+  passwordHash      String?
+  firstName         String
+  lastName          String
+  isPlatformAdmin   Boolean    @default(false)
+  mfaSecret         String?
+  mfaEnabled        Boolean    @default(false)
+  /// Codes de double authentification erronés consécutifs ; verrouillage temporaire au-delà de 5.
+  mfaFailedAttempts Int        @default(0)
+  mfaLockedUntil    DateTime?
+  /// Dernier pas TOTP accepté : un code ne sert qu'une fois.
+  mfaLastStep       Int?
+  status            UserStatus @default(ACTIVE)
+  lastLoginAt       DateTime?
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
 
   memberships   Membership[]
   refreshTokens RefreshToken[]
@@ -257,7 +262,7 @@ model AcademicYear {
   status    AcademicYearStatus @default(OPEN)
   createdAt DateTime           @default(now())
 
-  school  School    @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  school  School  @relation(fields: [schoolId], references: [id], onDelete: Cascade)
   terms   Term[]
   classes Class[]
 
@@ -328,8 +333,8 @@ model Class {
   capacity       Int?
   mainTeacherId  String?
 
-  academicYear AcademicYear  @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
-  level        Level         @relation(fields: [levelId], references: [id], onDelete: Restrict)
+  academicYear AcademicYear   @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
+  level        Level          @relation(fields: [levelId], references: [id], onDelete: Restrict)
   subjects     ClassSubject[]
   enrollments  Enrollment[]
 
@@ -821,7 +826,7 @@ model Room {
 }
 
 model TimetableEntry {
-  id             String @id @default(cuid())
+  id             String  @id @default(cuid())
   schoolId       String
   academicYearId String
   classId        String

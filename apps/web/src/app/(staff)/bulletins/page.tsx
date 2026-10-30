@@ -1,7 +1,7 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { FileText, Lock } from 'lucide-react';
+import { FileText, Lock, TriangleAlert } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -46,6 +46,7 @@ export default function ReportCardsPage() {
   const [classId, setClassId] = useState('');
   const [termId, setTermId] = useState('');
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [overrideReason, setOverrideReason] = useState('');
   const [decisionFor, setDecisionFor] = useState<CardRow | null>(null);
 
   useEffect(() => {
@@ -58,6 +59,13 @@ export default function ReportCardsPage() {
     queryFn: () => api<CardRow[]>(`/report-cards?classId=${classId}&termId=${termId}`),
     enabled: !!classId && !!termId,
   });
+  const completeness = useQuery({
+    queryKey: ['report-cards-completeness', classId, termId],
+    queryFn: () =>
+      api<{ issues: string[] }>(`/report-cards/completeness?classId=${classId}&termId=${termId}`),
+    enabled: !!classId && !!termId,
+  });
+  const issues = completeness.data?.issues ?? [];
   const generate = useMutation({
     mutationFn: () =>
       api<{ generated: number }>('/report-cards/generate', {
@@ -67,6 +75,7 @@ export default function ReportCardsPage() {
     onSuccess: (r) => {
       toast(`${plural(r.generated, 'bulletin préparé', 'bulletins préparés')} en brouillon`);
       void queryClient.invalidateQueries({ queryKey: key });
+      void completeness.refetch();
     },
     onError: (e) => toast(e instanceof Error ? e.message : 'Erreur', 'error'),
   });
@@ -74,10 +83,11 @@ export default function ReportCardsPage() {
     mutationFn: () =>
       api<{ published: number }>('/report-cards/publish', {
         method: 'POST',
-        body: { classId, termId },
+        body: { classId, termId, overrideReason: issues.length > 0 ? overrideReason : undefined },
       }),
     onSuccess: (r) => {
       setConfirmOpen(false);
+      setOverrideReason('');
       toast(
         `${plural(r.published, 'bulletin publié', 'bulletins publiés')} · parents prévenus par SMS`,
       );
@@ -146,6 +156,30 @@ export default function ReportCardsPage() {
             </Button>
           ) : null}
         </div>
+      ) : null}
+
+      {classId && termId && issues.length > 0 ? (
+        <section className="flex flex-col gap-2 rounded-[16px] border border-[#f1d99a] bg-warn-soft p-4">
+          <div className="flex gap-2.5">
+            <TriangleAlert className="mt-0.5 size-5 shrink-0 text-warn" aria-hidden />
+            <div>
+              <h2 className="font-bold">
+                {plural(issues.length, 'saisie manquante', 'saisies manquantes')}
+              </h2>
+              <p className="text-sm text-muted">
+                Les matières concernées ne comptent pas dans la moyenne générale.
+              </p>
+            </div>
+          </div>
+          <ul className="flex list-disc flex-col gap-1 pl-12 text-sm">
+            {issues.slice(0, 8).map((issue) => (
+              <li key={issue} className="[overflow-wrap:anywhere]">
+                {issue}
+              </li>
+            ))}
+            {issues.length > 8 ? <li>et {issues.length - 8} autre(s)</li> : null}
+          </ul>
+        </section>
       ) : null}
 
       {!classId ? (
@@ -221,7 +255,11 @@ export default function ReportCardsPage() {
             <Button variant="secondary" onClick={() => setConfirmOpen(false)}>
               Annuler
             </Button>
-            <Button onClick={() => publish.mutate()} loading={publish.isPending}>
+            <Button
+              onClick={() => publish.mutate()}
+              loading={publish.isPending}
+              disabled={issues.length > 0 && overrideReason.trim().length < 10}
+            >
               Publier
             </Button>
           </div>
@@ -238,6 +276,18 @@ export default function ReportCardsPage() {
             version numérotée.
           </li>
         </ul>
+        {issues.length > 0 ? (
+          <TextareaField
+            containerClassName="mt-4"
+            label="Motif de publication malgré les saisies manquantes"
+            hint={`${plural(issues.length, 'saisie manquante', 'saisies manquantes')} · motif journalisé, 10 caractères minimum`}
+            value={overrideReason}
+            onChange={(e) => setOverrideReason(e.target.value)}
+            minLength={10}
+            maxLength={300}
+            required
+          />
+        ) : null}
       </Sheet>
 
       <Sheet

@@ -84,6 +84,13 @@ export class AuthGuard implements CanActivate {
 
     if (this.meta<boolean>(context, PLATFORM_ADMIN_KEY)) {
       if (!user.isPlatformAdmin) throw new ForbiddenException('Réservé au super-administrateur');
+      // Le super-administrateur accède à tous les établissements : double authentification exigée.
+      if (!user.mfaEnabled)
+        throw new ForbiddenException({
+          statusCode: 403,
+          code: 'MFA_SETUP_REQUIRED',
+          message: 'Activez la double authentification',
+        });
       setContext({ kind: 'system', reason: 'platform-admin', actorId: payload.sub, ip });
       return true;
     }
@@ -109,7 +116,7 @@ export class AuthGuard implements CanActivate {
     let roles: StaffRole[] = [];
     let permissions: ReadonlySet<Permission>;
     if (payload.bg) {
-      if (!user.isPlatformAdmin) throw new UnauthorizedException();
+      if (!user.isPlatformAdmin || !user.mfaEnabled) throw new UnauthorizedException();
       permissions = READ_ONLY;
     } else {
       const membership = await this.db.membership.findUnique({

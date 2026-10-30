@@ -43,7 +43,7 @@ export class GradesService {
   /** Matières de l'enseignant (ou toutes, pour le censeur), pour l'année en cours. */
   async myClassSubjects(classId?: string) {
     const year = await this.scope.currentYear();
-    const teacherOnly = this.scope.isTeacherOnly();
+    const teacherOnly = this.scope.isClassScoped('grades.read');
     const rows = await this.db.classSubject.findMany({
       where: {
         class: { academicYearId: year.id, ...(classId ? { id: classId } : {}) },
@@ -82,7 +82,7 @@ export class GradesService {
   }
 
   async createEvaluation(input: z.infer<typeof evaluationCreateSchema>) {
-    const cs = await this.scope.classSubjectForWrite(input.classSubjectId);
+    const cs = await this.scope.classSubject(input.classSubjectId, 'grades.write');
     const sequence = await this.db.sequence.findUnique({
       where: { id: input.sequenceId },
       include: { term: true },
@@ -116,7 +116,7 @@ export class GradesService {
   async deleteEvaluation(id: string) {
     const evaluation = await this.db.evaluation.findUnique({ where: { id } });
     if (!evaluation) throw new NotFoundException('Évaluation introuvable');
-    await this.scope.classSubjectForWrite(evaluation.classSubjectId);
+    await this.scope.classSubject(evaluation.classSubjectId, 'grades.write');
     if (evaluation.status !== 'DRAFT')
       throw new ConflictException('Seule une évaluation en brouillon peut être supprimée');
     await this.db.evaluation.delete({ where: { id } });
@@ -135,7 +135,7 @@ export class GradesService {
       include: { class: true, subject: true },
     });
     if (!cs) throw new NotFoundException('Matière de classe introuvable');
-    if (this.scope.isTeacherOnly() && cs.teacherId !== this.scope.userId()) {
+    if (this.scope.isClassScoped('grades.read') && cs.teacherId !== this.scope.userId()) {
       throw new ForbiddenException('Vous n’enseignez pas cette matière dans cette classe');
     }
     const sequence = await this.db.sequence.findUniqueOrThrow({
@@ -181,7 +181,7 @@ export class GradesService {
   async upsertGrades(evaluationId: string, rows: z.infer<typeof gradesUpsertSchema>['grades']) {
     const evaluation = await this.db.evaluation.findUnique({ where: { id: evaluationId } });
     if (!evaluation) throw new NotFoundException('Évaluation introuvable');
-    const cs = await this.scope.classSubjectForWrite(evaluation.classSubjectId);
+    const cs = await this.scope.classSubject(evaluation.classSubjectId, 'grades.write');
     const ctx = staffContext();
     if (evaluation.status === 'LOCKED')
       throw new ConflictException('Notes validées : demandez au censeur de rouvrir la grille');
@@ -256,7 +256,7 @@ export class GradesService {
 
   /** Soumission au censeur : refusée tant qu'une note manque. */
   async submit(classSubjectId: string, sequenceId: string) {
-    await this.scope.classSubjectForWrite(classSubjectId);
+    await this.scope.classSubject(classSubjectId, 'grades.write');
     const sheet = await this.sheet(classSubjectId, sequenceId);
     if (sheet.evaluations.length === 0)
       throw new ConflictException('Aucune évaluation à soumettre');

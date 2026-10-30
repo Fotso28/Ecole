@@ -5,7 +5,10 @@ import { PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/bootstrap';
+import { encrypt, totp } from '../src/common/crypto';
+import { env } from '../src/config/env';
 import { AuthService } from '../src/modules/auth/auth.service';
+import { normalizeCameroonPhone } from '@ecole/shared';
 import { MemorySmsProvider } from '../src/modules/notifications/sms.provider';
 
 export const prisma = new PrismaClient();
@@ -28,9 +31,13 @@ export async function resetDb(): Promise<void> {
   MemorySmsProvider.failNext = 0;
 }
 
+export const PLATFORM_ADMIN_TOTP_SECRET = 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP';
+
+/** Super-administrateur, double authentification activée (obligatoire pour ce rôle). */
 export async function createPlatformAdmin(
   email = 'admin@plateforme.cm',
   password = 'motdepasse-admin-1',
+  { mfa = true } = {},
 ) {
   return prisma.user.create({
     data: {
@@ -39,8 +46,30 @@ export async function createPlatformAdmin(
       lastName: 'Plateforme',
       isPlatformAdmin: true,
       passwordHash: await AuthService.hashPassword(password),
+      ...(mfa
+        ? {
+            mfaEnabled: true,
+            mfaSecret: encrypt(PLATFORM_ADMIN_TOTP_SECRET, env().DATA_ENCRYPTION_KEY),
+          }
+        : {}),
     },
   });
+}
+
+export async function loginPlatformAdmin(
+  app: INestApplication,
+  email = 'admin@plateforme.cm',
+  password = 'motdepasse-admin-1',
+): Promise<Session> {
+  const step1 = await request(app.getHttpServer())
+    .post('/auth/login')
+    .send({ email, password })
+    .expect(200);
+  const res = await request(app.getHttpServer())
+    .post('/auth/mfa/verify')
+    .send({ mfaToken: step1.body.mfaToken, code: totp(PLATFORM_ADMIN_TOTP_SECRET) })
+    .expect(200);
+  return toSession(res);
 }
 
 export async function createSchool(slug: string, prefix = 'CD') {
@@ -100,4 +129,12 @@ export function toSession(res: request.Response): Session {
   const cookie = (raw ?? []).find((c) => c.startsWith('ecole_rt='))?.split(';')[0] ?? '';
   const token = res.body.accessToken as string;
   return { token, cookie, auth: { Authorization: `Bearer ${token}` } };
+}
+
+/** Demande un code de connexion parent et renvoie le code reçu par SMS (envoi asynchrone). */
+export async function requestOtp(app: INestApplication, phone: string): Promise<string> {
+  const to = normalizeCameroonPhone(phone) ?? phone;
+  const before = MemorySmsProvider.countTo(to);
+  await request(app.getHttpServer()).post('/auth/otp/request').send({ phone }).expect(202);
+  return /(\d{6})/.exec(await MemorySmsProvider.waitFor(to, before))?.[1] ?? '';
 }

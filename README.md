@@ -9,7 +9,11 @@ Application de gestion scolaire multi-établissement pour le Cameroun : élèves
 
 ## Démarrage en local
 
-Prérequis : Node 22, pnpm 10, PostgreSQL 16 et Redis 7.
+Prérequis : Node 22, pnpm 10, PostgreSQL 16 et Redis 7. Deux rôles PostgreSQL : `ecole` (propriétaire, migrations : `MIGRATION_DATABASE_URL`) et `ecole_app` (application, soumis à la Row-Level Security : `DATABASE_URL`), à créer une fois :
+
+```bash
+psql -c "CREATE ROLE ecole_app WITH LOGIN PASSWORD 'ecole_app';"
+```
 
 ```bash
 pnpm install
@@ -82,7 +86,7 @@ Les tests d'intégration et de bout en bout appliquent les migrations puis viden
 
 ## Principes techniques
 
-- **Multi-établissement** : chaque table métier porte un `schoolId`. Une extension Prisma ajoute le filtre automatiquement et refuse toute écriture inter-établissement ; une requête sans contexte d'établissement échoue.
+- **Multi-établissement** : chaque table métier porte un `schoolId`. Une extension Prisma ajoute le filtre automatiquement et refuse toute écriture inter-établissement ; une requête sans contexte d'établissement échoue. En dessous, la Row-Level Security de PostgreSQL limite chaque transaction à l'établissement du contexte, même pour une requête SQL brute (voir `docs/exploitation.md`).
 - **Montants** en FCFA entiers, **notes** en centièmes de point (1342 = 13,42) : aucun calcul en virgule flottante.
 - **Écritures comptables en ajout seul**, paiements non modifiables et bulletins publiés figés : des déclencheurs PostgreSQL l'imposent en plus du code.
 - **Notifications fiables** : SMS écrits dans une table d'envoi (outbox) dans la même transaction que l'action, envoyés par le worker avec nouvelles tentatives.

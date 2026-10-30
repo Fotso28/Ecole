@@ -985,9 +985,11 @@ export class FinanceService {
         throw new ConflictException('Seul un paiement encaissé peut être annulé');
       if (payment.reversedAt) throw new ConflictException('Ce paiement a déjà été annulé');
       const actorId = this.actorId();
-      if (payment.method === 'CASH' && payment.receivedById === actorId)
+      // Quatre yeux quel que soit le mode : des espèces saisies comme virement puis annulées
+      // par la même personne échapperaient sinon au contrôle.
+      if (payment.receivedById === actorId)
         throw new ForbiddenException(
-          'Un encaissement en espèces doit être annulé par une autre personne que le caissier',
+          'Un paiement doit être annulé par une autre personne que celle qui l’a enregistré',
         );
       await tx.payment.update({
         where: { id },

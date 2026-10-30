@@ -28,7 +28,7 @@ test('encaissement en espèces, reçu, annulation et clôture de caisse', async 
   await expect(page.getByRole('heading', { name: /Reçu R-\d{4}-\d{6} émis/ })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Imprimer le reçu' })).toBeVisible();
 
-  // Le caissier ne peut pas annuler ses propres espèces : la direction le fait depuis le journal.
+  // Le caissier ne peut pas annuler ses propres encaissements : la direction le fait depuis le journal.
   await page.goto('/caisse/journal');
   const row = () =>
     page.locator('li').filter({ hasText: student }).filter({ hasText: 'Encaissé' }).first();

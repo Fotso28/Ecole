@@ -191,9 +191,15 @@ describe('encaissement en espèces', () => {
     const p1 = await bank(100000);
     const p2 = await bank(100000);
     expect(p2.body.unallocated).toBe(15000);
+    // Quatre yeux pour tous les modes : l'auteur du virement ne l'annule pas lui-même.
     await http()
       .post(`/finance/payments/${p1.body.id}/reverse`)
       .set(s.compta.auth)
+      .send({ reason: 'Chèque impayé' })
+      .expect(403);
+    await http()
+      .post(`/finance/payments/${p1.body.id}/reverse`)
+      .set(s.direction.auth)
       .send({ reason: 'Chèque impayé' })
       .expect(201);
     const a = await account();

@@ -509,6 +509,17 @@ describe('cahier de texte et supports de cours', () => {
       .expect(404);
     await http().get(`/portal/children/${st.id}/homework`).set(otherParent.auth).expect(404);
 
+    // L'élève quitte la 4e A (départ en cours d'année) : plus d'accès aux supports de la classe.
+    const enrollment = await prisma.enrollment.findFirstOrThrow({ where: { studentId: st.id } });
+    await prisma.enrollment.update({ where: { id: enrollment.id }, data: { status: 'LEFT' } });
+    await http().get(`/portal/materials/${material.body.id}/file`).set(parent.auth).expect(404);
+    const afterLeaving = await http()
+      .get(`/portal/children/${st.id}/homework`)
+      .set(parent.auth)
+      .expect(200);
+    expect(afterLeaving.body.materials).toEqual([]);
+    await prisma.enrollment.update({ where: { id: enrollment.id }, data: { status: 'ENROLLED' } });
+
     // Devoir passé : n'apparaît plus dans « à faire ».
     await http()
       .post('/lessons')

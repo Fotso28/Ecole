@@ -346,7 +346,11 @@ export class PortalService {
       'portal-homework',
       async () => {
         const enrollment = await this.db.enrollment.findFirst({
-          where: { studentId, class: { academicYear: { isCurrent: true } } },
+          where: {
+            studentId,
+            status: { in: ['ENROLLED', 'REPEATING'] },
+            class: { academicYear: { isCurrent: true } },
+          },
           orderBy: { createdAt: 'desc' },
           include: { class: { select: { name: true } } },
         });
@@ -360,7 +364,10 @@ export class PortalService {
     );
   }
 
-  /** Lien d'un support de cours, si l'un des enfants du parent est inscrit dans sa classe. */
+  /**
+   * Lien d'un support de cours, si l'un des enfants du parent est actuellement inscrit dans sa
+   * classe (année en cours, ni parti ni transféré).
+   */
   async materialFile(materialId: string) {
     const userId = parentContext().userId;
     const material = await runAsSystem('portal-material', () =>
@@ -373,7 +380,13 @@ export class PortalService {
           guardian: { userId },
           student: {
             ...VISIBLE_STUDENT,
-            enrollments: { some: { classId: material.classId } },
+            enrollments: {
+              some: {
+                classId: material.classId,
+                status: { in: ['ENROLLED', 'REPEATING'] },
+                class: { academicYear: { isCurrent: true } },
+              },
+            },
           },
         },
       }),

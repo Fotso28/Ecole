@@ -290,7 +290,8 @@ model OtpCode {
   sent       Boolean   @default(false)
 
   @@index([phone, createdAt])
-  @@index([sent, createdAt])
+  /// Budget global des codes anonymes envoyés sur 24 h (sent, trusted, createdAt).
+  @@index([sent, trusted, createdAt])
 }
 
 /// Code de connexion parent erroné : plafond d'essais par numéro, séparé pour les appareils de confiance.
@@ -488,6 +489,8 @@ model StudentGuardian {
 
   @@unique([studentId, guardianId])
   @@index([schoolId])
+  /// Enfants d'un parent (portail) : jointure depuis Guardian.
+  @@index([guardianId])
 }
 
 model Enrollment {
@@ -855,6 +858,9 @@ model NotificationOutbox {
   createdAt   DateTime            @default(now())
 
   @@index([status, availableAt])
+  /// Regroupement des notifications de messagerie : plafond par destinataire sur 24 h, envois d'un fil.
+  @@index([template, recipient, createdAt])
+  @@index([schoolId, template, status])
 }
 
 model Announcement {

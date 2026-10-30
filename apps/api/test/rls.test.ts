@@ -5,7 +5,13 @@ import {
   runInContext as runWithContext,
   type StaffContext,
 } from '../src/common/context';
-import { createDb, RLS_EXEMPT_MODELS, RLS_MODELS, TENANT_MODELS } from '../src/common/prisma';
+import {
+  createDb,
+  RLS_EXEMPT_MODELS,
+  RLS_MODELS,
+  SYSTEM_ROLE,
+  TENANT_MODELS,
+} from '../src/common/prisma';
 import { createSchool, prisma, resetDb } from './helpers';
 import { TEST_APP_URL } from './setup-env';
 
@@ -179,11 +185,13 @@ describe('Row-Level Security : filet sous le filtre applicatif', () => {
   it('le réglage ne fuit pas d’une requête à l’autre sur une même connexion', async () => {
     const asA = await runWithContext(staffOf(a), () => singleDb.student.count());
     expect(asA).toBe(2);
-    const setting = await single.$queryRaw<{ s: string | null; m: string | null }[]>`
-      SELECT current_setting('app.school_id', true) AS s, current_setting('app.rls_mode', true) AS m`;
+    const setting = await single.$queryRaw<{ s: string | null; role: string }[]>`
+      SELECT current_setting('app.school_id', true) AS s, current_user AS role`;
     expect(setting[0]?.s ?? '').toBe('');
-    expect(setting[0]?.m ?? '').toBe('');
+    expect(setting[0]?.role).toBe('ecole_app');
     await runAsSystem('test', () => singleDb.student.count());
+    const role = await single.$queryRaw<{ role: string }[]>`SELECT current_user AS role`;
+    expect(role[0]?.role).toBe('ecole_app');
     const after = await single.$queryRaw<{ n: number }[]>`SELECT count(*)::int AS n FROM "Student"`;
     expect(after[0]?.n).toBe(0);
     await expect(
@@ -250,6 +258,17 @@ describe('Row-Level Security : catalogue PostgreSQL', () => {
     for (const exempt of RLS_EXEMPT_MODELS) {
       expect(tables.map((t) => t.table)).toContain(exempt);
     }
+  });
+
+  it('le rôle système ne se connecte pas et ne sert qu’à travers le rôle applicatif', async () => {
+    const [role] = await prisma.$queryRaw<
+      { login: boolean; bypass: boolean; member: boolean; inherit: boolean }[]
+    >`
+      SELECT r.rolcanlogin AS login, r.rolbypassrls AS bypass,
+             pg_has_role('ecole_app', r.oid, 'MEMBER') AS member,
+             pg_has_role('ecole_app', r.oid, 'USAGE') AS inherit
+      FROM pg_roles r WHERE r.rolname = ${SYSTEM_ROLE}`;
+    expect(role).toEqual({ login: false, bypass: true, member: true, inherit: false });
   });
 
   it("le rôle applicatif n'est ni superutilisateur, ni BYPASSRLS, ni propriétaire des tables", async () => {

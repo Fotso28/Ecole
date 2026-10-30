@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Lance un scénario k6 contre la pile Docker locale et relève les ressources des conteneurs.
-#   loadtest/run.sh bulletins|notes|rentree [-e VAR=valeur ...]
+#   loadtest/run.sh bulletins|notes|rentree|portail [-e VAR=valeur ...]
 # Résultats dans loadtest/results/ : résumé k6 (JSON et texte) et relevé docker stats (CSV).
 set -euo pipefail
 cd "$(dirname "$0")"

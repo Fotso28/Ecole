@@ -9,10 +9,11 @@ Application de gestion scolaire multi-établissement pour le Cameroun : élèves
 
 ## Démarrage en local
 
-Prérequis : Node 22, pnpm 10, PostgreSQL 16 et Redis 7. Deux rôles PostgreSQL : `ecole` (propriétaire, migrations : `MIGRATION_DATABASE_URL`) et `ecole_app` (application, soumis à la Row-Level Security : `DATABASE_URL`), à créer une fois :
+Prérequis : Node 22, pnpm 10, PostgreSQL 16 et Redis 7. Rôles PostgreSQL : `ecole` (propriétaire, migrations : `MIGRATION_DATABASE_URL`), `ecole_app` (application, soumis à la Row-Level Security : `DATABASE_URL`) et `ecole_system` (mode système, sans connexion), à créer une fois :
 
 ```bash
 psql -c "CREATE ROLE ecole_app WITH LOGIN PASSWORD 'ecole_app';"
+psql -c "CREATE ROLE ecole_system WITH NOLOGIN BYPASSRLS; GRANT ecole_system TO ecole_app WITH INHERIT FALSE, SET TRUE;"
 ```
 
 ```bash

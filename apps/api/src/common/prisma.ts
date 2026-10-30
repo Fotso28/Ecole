@@ -115,7 +115,7 @@ export const RLS_EXEMPT_MODELS: ReadonlySet<string> = new Set<string>([
 
 /**
  * Portée appliquée par la base : établissement du contexte, ou mode système (toutes les
- * écoles) pour `runAsSystem` sans établissement. Sans contexte d'établissement (anonyme,
+ * écoles, rôle `ecole_system`) pour `runAsSystem` sans établissement. Sans contexte d'établissement (anonyme,
  * parent, compte), aucune ligne cloisonnée n'est visible.
  */
 export interface RlsScope {
@@ -143,9 +143,19 @@ function scopeKey(scope: RlsScope): string {
   return scope.system ? 'system' : (scope.schoolId ?? '');
 }
 
-/** Réglages lus par les politiques, limités à la transaction (`set_config(…, true)`). */
+/**
+ * Rôle PostgreSQL du mode système : sans connexion propre, BYPASSRLS, accordé au rôle applicatif.
+ * Pris dans la transaction (`SET LOCAL ROLE`) par `runAsSystem` sans établissement.
+ */
+export const SYSTEM_ROLE = 'ecole_system';
+
+/**
+ * Portée de la transaction : établissement lu par les politiques (`app.school_id`) et rôle
+ * courant (système ou rôle de connexion). `set_config(…, true)` s'annule à la fin de la
+ * transaction.
+ */
 function scopeSql(scope: RlsScope): Prisma.Sql {
-  return Prisma.sql`SELECT set_config('app.school_id', ${scope.schoolId ?? ''}, true), set_config('app.rls_mode', ${scope.system ? 'system' : ''}, true)`;
+  return Prisma.sql`SELECT set_config('app.school_id', ${scope.schoolId ?? ''}, true), set_config('role', ${scope.system ? SYSTEM_ROLE : 'none'}, true)`;
 }
 
 const READ_OPERATIONS = new Set([
@@ -265,8 +275,8 @@ export function scopeArgs(
  * Client cloisonné, en deux couches :
  * - filtre applicatif : `schoolId` ajouté aux requêtes sur `TENANT_MODELS`, écritures
  *   inter-établissements refusées ;
- * - Row-Level Security : la portée du contexte (`app.school_id`, `app.rls_mode`) est posée dans
- *   la transaction de chaque requête. Hors transaction, la requête est enveloppée dans une
+ * - Row-Level Security : la portée du contexte (`app.school_id`, ou le rôle `ecole_system` en
+ *   mode système) est posée dans la transaction de chaque requête. Hors transaction, la requête est enveloppée dans une
  *   transaction courte (réglage puis requête) ; dans une transaction interactive, le réglage est
  *   posé à l'ouverture et reposé si le contexte change en cours de route (`runAsSystem`).
  *   `set_config(…, true)` s'annule à la fin de la transaction : rien ne fuit d'une requête à

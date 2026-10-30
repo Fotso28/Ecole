@@ -87,7 +87,7 @@ export function currentRequestId(): string | undefined {
  * La fonction est attendue à l'intérieur du contexte : les requêtes Prisma, paresseuses,
  * s'exécutent ainsi bien avec ces droits.
  *
- * Sans `schoolId`, la base passe en mode système (`app.rls_mode = 'system'`) : la
+ * Sans `schoolId`, la transaction passe sur le rôle PostgreSQL `ecole_system` (BYPASSRLS) : la
  * Row-Level Security laisse voir toutes les écoles. Chaque entrée dans ce mode est journalisée
  * (niveau debug) avec sa raison.
  */

@@ -515,6 +515,8 @@ export class AuthService {
       recipient: phone,
       template: 'otp',
       body: templates.otp(code),
+      sensitive: true,
+      expiresAt: new Date(Date.now() + OTP_TTL_MS),
     });
     // Envoi sans attendre la passerelle SMS : le temps de réponse ne révèle pas si le numéro
     // est connu. En cas d'échec, le worker reprend le message de la table d'envoi.

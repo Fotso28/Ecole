@@ -16,6 +16,13 @@ export interface NotificationInput {
   payload?: Record<string, unknown>;
   /** Envoi différé (regroupement, rappel). */
   availableAt?: Date;
+  /**
+   * Message confidentiel (code de connexion) : son corps est effacé dès qu'il est envoyé,
+   * abandonné ou expiré, pour ne pas rester lisible en base.
+   */
+  sensitive?: boolean;
+  /** Au-delà, le message n'est plus envoyé (code expiré). */
+  expiresAt?: Date;
 }
 
 /** Notification adressée à une personne : le canal dépend de ses coordonnées et de l'école. */
@@ -33,6 +40,9 @@ export interface ContactNotificationInput extends Omit<NotificationInput, 'recip
 export type NotificationGuard = (n: NotificationOutbox) => Promise<boolean>;
 
 export const MAX_ATTEMPTS = 5;
+
+/** Corps conservé à la place d'un message confidentiel une fois traité. */
+export const MASKED_BODY = '[contenu confidentiel effacé]';
 
 /**
  * Notifications fiables (pattern outbox) : l'écriture en base se fait dans la même
@@ -68,7 +78,21 @@ export class NotificationsService {
         body: input.body,
         payload: payload as Prisma.InputJsonValue,
         ...(input.availableAt ? { availableAt: input.availableAt } : {}),
+        ...(input.sensitive ? { sensitive: true } : {}),
+        ...(input.expiresAt ? { expiresAt: input.expiresAt } : {}),
       },
+    });
+  }
+
+  /** Messages confidentiels expirés avant l'envoi : abandonnés et effacés. */
+  private async purgeExpired(): Promise<void> {
+    await this.db.notificationOutbox.updateMany({
+      where: { status: 'PENDING', expiresAt: { lt: new Date() } },
+      data: { status: 'CANCELLED', lastError: 'Expiré avant l’envoi' },
+    });
+    await this.db.notificationOutbox.updateMany({
+      where: { sensitive: true, status: { not: 'PENDING' }, body: { not: MASKED_BODY } },
+      data: { body: MASKED_BODY },
     });
   }
 
@@ -104,6 +128,7 @@ export class NotificationsService {
 
   /** Réserve puis envoie un lot de notifications en attente. Renvoie le nombre traité. */
   async dispatchPending(limit = 50, onlyId?: string): Promise<number> {
+    await this.purgeExpired();
     const leased = await this.db.$queryRaw<NotificationOutbox[]>`
       UPDATE "NotificationOutbox" SET "attempts" = "attempts" + 1, "availableAt" = now() + interval '2 minutes'
       WHERE "id" IN (
@@ -120,14 +145,14 @@ export class NotificationsService {
         if (guard && !(await guard(n))) {
           await this.db.notificationOutbox.update({
             where: { id: n.id },
-            data: { status: 'CANCELLED', lastError: null },
+            data: { status: 'CANCELLED', lastError: null, ...this.mask(n) },
           });
           continue;
         }
         await this.send(n);
         await this.db.notificationOutbox.update({
           where: { id: n.id },
-          data: { status: 'SENT', sentAt: new Date(), lastError: null },
+          data: { status: 'SENT', sentAt: new Date(), lastError: null, ...this.mask(n) },
         });
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
@@ -138,6 +163,7 @@ export class NotificationsService {
             status: final ? 'FAILED' : 'PENDING',
             lastError: message.slice(0, 500),
             availableAt: new Date(Date.now() + 2 ** n.attempts * 60_000),
+            ...(final ? this.mask(n) : {}),
           },
         });
         if (final)
@@ -147,6 +173,10 @@ export class NotificationsService {
       }
     }
     return leased.length;
+  }
+
+  private mask(n: NotificationOutbox): { body?: string } {
+    return n.sensitive ? { body: MASKED_BODY } : {};
   }
 
   /** Envoi immédiat (ex. code de connexion) ; le worker reprend en cas d'échec. */

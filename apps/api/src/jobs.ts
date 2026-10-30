@@ -4,6 +4,7 @@ import { CalendarService } from './modules/calendar/calendar.module';
 import { AlertsService } from './modules/alerts/alerts.service';
 import { AccountingService } from './modules/accounting/accounting.service';
 import { FinanceService } from './modules/finance/finance.service';
+import { LibraryService } from './modules/library/library.service';
 import { NotificationsService } from './modules/notifications/notifications.service';
 
 export const JOBS = {
@@ -19,6 +20,8 @@ export const JOBS = {
   alerts: { every: 60_000 },
   /** Écritures comptables des opérations de scolarité (idempotent, rattrape l'historique). */
   accounting: { every: 60_000 },
+  /** Rappels des prêts de bibliothèque en retard, chaque matin à 9 h (heure de Douala). */
+  libraryReminders: { pattern: '0 9 * * *', tz: 'Africa/Douala' },
 } as const;
 
 export type JobName = keyof typeof JOBS;
@@ -41,6 +44,10 @@ export async function runJob(app: INestApplicationContext, name: string): Promis
           .get(AccountingService)
           .syncAllSchools()
           .then((r) => r.posted),
+      );
+    case 'libraryReminders':
+      return runAsSystem('job:library-reminders', () =>
+        app.get(LibraryService).sendOverdueReminders(),
       );
     default:
       throw new Error(`Tâche inconnue : ${name}`);

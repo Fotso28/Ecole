@@ -238,6 +238,67 @@ export class FinanceService {
     return outerTx ? run(outerTx) : this.db.$transaction(run);
   }
 
+  /**
+   * Ajoute à l'échéancier de l'année d'un élève une ligne hors grille de frais (transport,
+   * pénalité de bibliothèque, vente de fournitures), avec son écriture de dette. Les règles de
+   * la scolarité s'appliquent ensuite comme pour toute échéance (paiements, remises, relances).
+   * À appeler dans la transaction de l'action métier, qui garantit une seule facturation.
+   */
+  async addExtraCharge(
+    input: {
+      studentId: string;
+      academicYearId: string;
+      label: string;
+      amount: number;
+      dueDate: string;
+    },
+    tx: Tx,
+  ) {
+    if (!Number.isInteger(input.amount) || input.amount <= 0)
+      throw new BadRequestException('Montant entier en FCFA attendu');
+    const invoice = await tx.invoice.findFirst({
+      where: { studentId: input.studentId, academicYearId: input.academicYearId },
+      include: { lines: { select: { order: true } } },
+    });
+    if (!invoice)
+      throw new ConflictException(
+        'L’échéancier de l’élève n’existe pas encore pour cette année : créez-le d’abord dans la scolarité',
+      );
+    const schoolId = currentSchoolId();
+    const line = await tx.invoiceLine.create({
+      data: {
+        schoolId,
+        invoiceId: invoice.id,
+        label: input.label,
+        amount: input.amount,
+        dueDate: toDbDate(input.dueDate),
+        order: Math.max(0, ...invoice.lines.map((l) => l.order)) + 1,
+      },
+    });
+    await tx.ledgerEntry.create({
+      data: {
+        schoolId,
+        studentId: input.studentId,
+        type: 'CHARGE',
+        amount: signedLedgerAmount('CHARGE', input.amount),
+        invoiceLineId: line.id,
+        description: input.label,
+        createdById: this.actorId(),
+      },
+    });
+    await this.audit.log(
+      {
+        action: 'finance.extra_charge',
+        entity: 'InvoiceLine',
+        entityId: line.id,
+        after: { ...input },
+      },
+      tx,
+    );
+    await this.applyCredit(tx, input.studentId);
+    return line;
+  }
+
   /** Remise ou bourse accordée sur une échéance. */
   async addDiscount(lineId: string, amount: number, reason: string) {
     return this.db.$transaction(async (tx) => {

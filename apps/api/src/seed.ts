@@ -102,6 +102,9 @@ async function main(): Promise<void> {
   const { FinanceService } = await import('./modules/finance/finance.service');
   const { GradesService } = await import('./modules/grades/grades.module');
   const { AttendanceService } = await import('./modules/attendance/attendance.module');
+  const { TransportService } = await import('./modules/transport/transport.service');
+  const { LibraryService } = await import('./modules/library/library.service');
+  const { StockService } = await import('./modules/library/stock.service');
   const app = await NestFactory.createApplicationContext(AppModule, { logger: ['error', 'warn'] });
   const students = app.get(StudentsService);
   const finance = app.get(FinanceService);
@@ -139,8 +142,15 @@ async function main(): Promise<void> {
         'exams',
         'accounting',
         'hr',
+        'transport',
+        'library',
       ],
-      settings: { absenceAlertThreshold: 3, reminderOffsets: [5, 15, 30] },
+      settings: {
+        absenceAlertThreshold: 3,
+        reminderOffsets: [5, 15, 30],
+        transport: { missedBoardingSms: true },
+        library: { lateFeePerDay: 100, lateFeeCap: 1000 },
+      },
     },
   });
   const schoolId = school.id;
@@ -157,6 +167,7 @@ async function main(): Promise<void> {
     ['prof.anglais@demo.cm', 'Thomas', 'Nkeng', ['TEACHER']],
     ['prof.sciences@demo.cm', 'Rose', 'Ateba', ['TEACHER', 'SUPERVISOR']],
     ['prof.histoire@demo.cm', 'Jean', 'Owona', ['TEACHER']],
+    ['chauffeur@demo.cm', 'Emmanuel', 'Ndzana', ['TRANSPORT']],
   ];
   const staff: Record<string, string> = {};
   for (const [email, firstName, lastName, roles] of staffDefs) {
@@ -709,6 +720,137 @@ async function main(): Promise<void> {
       reason: 'Frais de rentrée scolaire des enfants',
       requestedById: staff['compta@demo.cm'] ?? '',
     },
+  });
+
+  // Transport : un car de 30 places sur la ligne Bastos, Marie-Claire abonnée aller et retour.
+  const transport = app.get(TransportService);
+  const directionCtx = staffCtx('direction@demo.cm', ['DIRECTOR']);
+  await runInContext(directionCtx, async () => {
+    const bus = await transport.createVehicle({
+      plate: 'CE 482 AB',
+      capacity: 30,
+      driverName: 'Emmanuel Ndzana',
+      driverPhone: '+237699112233',
+      insuranceExpiresOn: addDays(today, 20),
+      inspectionExpiresOn: addDays(today, 200),
+    });
+    const line = await transport.createLine({
+      name: 'Ligne 1 – Bastos',
+      vehicleId: bus.id,
+      fee: 90000,
+      oneWayFee: 50000,
+      staffUserIds: [staff['chauffeur@demo.cm'] ?? ''],
+      active: true,
+    });
+    const stopDefs: [string, string, string][] = [
+      ['Carrefour Bastos', '06:40', '17:20'],
+      ['Ambassade de Chine', '06:50', '17:10'],
+      ['Montée Elig-Essono', '07:05', '16:55'],
+    ];
+    const stops = [];
+    for (const [i, [name, morningTime, eveningTime]] of stopDefs.entries())
+      stops.push(
+        await transport.addStop(line.id, { name, order: i + 1, morningTime, eveningTime }),
+      );
+    const riders = [ngono, ...(created['4e A'] ?? []).slice(1, 5)];
+    for (const [i, studentId] of riders.entries())
+      await transport.subscribe({
+        studentId,
+        lineId: line.id,
+        stopId: stops[i % stops.length]!.id,
+        direction: i === 3 ? 'OUTBOUND' : 'BOTH',
+      });
+  });
+
+  // Bibliothèque : quelques romans du programme, un prêt en cours et un prêt en retard.
+  const library = app.get(LibraryService);
+  const secretaryCtx = staffCtx('secretariat@demo.cm', ['SECRETARY']);
+  await runInContext(secretaryCtx, async () => {
+    const bookDefs: [string, string[], string | null, string, number][] = [
+      ['Une vie de boy', ['Ferdinand Oyono'], '9782266119498', 'R OYO', 3],
+      ['Ville cruelle', ['Eza Boto'], null, 'R BOT', 2],
+      ['Le Monde s’effondre', ['Chinua Achebe'], null, 'R ACH', 2],
+      ['L’Enfant noir', ['Camara Laye'], null, 'R LAY', 2],
+    ];
+    const books = [];
+    for (const [title, authors, isbn, callNumber, copies] of bookDefs)
+      books.push(await library.createBook({ title, authors, isbn, callNumber, copies }));
+    const copyOf = async (bookId: string) =>
+      (await base.libraryCopy.findFirstOrThrow({ where: { bookId, status: 'AVAILABLE' } })).id;
+    await library.lend({
+      copyId: await copyOf(books[0]!.id),
+      borrowerType: 'STUDENT',
+      studentId: ngono,
+    });
+    const late = await library.lend({
+      copyId: await copyOf(books[1]!.id),
+      borrowerType: 'STUDENT',
+      studentId: (created['4e A'] ?? [])[2] ?? ngono,
+    });
+    await base.libraryLoan.update({
+      where: { id: late.id },
+      data: {
+        dueDate: toDbDate(addDays(today, -4)),
+        loanedAt: new Date(Date.now() - 18 * 86_400_000),
+      },
+    });
+    await library.lend({
+      copyId: await copyOf(books[2]!.id),
+      borrowerType: 'STAFF',
+      staffUserId: staff['prof.francais@demo.cm'] ?? '',
+    });
+  });
+
+  // Stock : uniformes par taille et fournitures, quelques ventes facturées.
+  const stock = app.get(StockService);
+  const accountantCtx = staffCtx('compta@demo.cm', ['ACCOUNTANT']);
+  await runInContext(accountantCtx, async () => {
+    const shirt = await stock.createItem({
+      name: 'Chemise uniforme',
+      category: 'UNIFORM',
+      sizes: ['S', 'M', 'L'],
+      unitPrice: 4500,
+      alertThreshold: 5,
+    });
+    const notebook = await stock.createItem({
+      name: 'Cahier 200 pages',
+      category: 'SUPPLY',
+      sizes: [],
+      unitPrice: 800,
+      alertThreshold: 20,
+    });
+    for (const [size, quantity] of [
+      ['S', 20],
+      ['M', 25],
+      ['L', 4],
+    ] as const)
+      await stock.purchase({
+        itemId: shirt.id,
+        size,
+        quantity,
+        unitCost: 3000,
+        supplier: 'Couture du Mfoundi',
+      });
+    await stock.purchase({
+      itemId: notebook.id,
+      size: '',
+      quantity: 100,
+      unitCost: 550,
+      supplier: 'Librairie des Peuples',
+    });
+    await stock.sell({
+      itemId: shirt.id,
+      size: 'M',
+      quantity: 2,
+      studentId: ngono,
+      requestId: `seed-${randomUUID()}`,
+    });
+    await stock.allocate({
+      itemId: notebook.id,
+      size: '',
+      quantity: 10,
+      reason: 'Dotation de la salle des professeurs',
+    });
   });
 
   // Les SMS générés par le jeu de démonstration ne doivent pas partir.

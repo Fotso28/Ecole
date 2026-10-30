@@ -35,6 +35,25 @@ function me(
 const hrefs = (m: Me) => visibleNav(m).flatMap((g) => g.items.map((i) => i.href));
 
 describe('navigation par rôle', () => {
+  it('limite le chauffeur ou l’accompagnateur à l’appel du car', () => {
+    const modules = ['students', 'transport', 'library'];
+    const driver = me(['TRANSPORT'], modules);
+    expect(hrefs(driver)).toEqual(['/transport/appel']);
+    expect(primaryNav(driver).map((i) => i.href)).toEqual(['/transport/appel']);
+    expect(hrefs(me(['TRANSPORT']))).toEqual([]);
+  });
+
+  it('ouvre transport, bibliothèque et stock selon les modules et les rôles', () => {
+    const modules = ['students', 'finance', 'transport', 'library'];
+    expect(hrefs(me(['SECRETARY'], modules))).toEqual(
+      expect.arrayContaining(['/transport', '/bibliotheque', '/stock']),
+    );
+    expect(hrefs(me(['ACCOUNTANT'], modules))).toContain('/stock');
+    expect(hrefs(me(['ACCOUNTANT'], modules))).not.toContain('/bibliotheque');
+    expect(hrefs(me(['TEACHER'], modules))).not.toContain('/transport');
+    expect(hrefs(me(['SECRETARY']))).not.toContain('/bibliotheque');
+  });
+
   it('réserve la facturation des écoles au super-administrateur', () => {
     expect(hrefs(me(['DIRECTOR']))).not.toContain('/plateforme/facturation');
     const admin: Me = {

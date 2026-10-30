@@ -28,6 +28,7 @@ enum StaffRole {
   ACCOUNTANT
   TEACHER
   NURSE
+  TRANSPORT
 }
 
 enum TokenKind {
@@ -1697,4 +1698,290 @@ model Payslip {
 
   @@unique([runId, employeeId])
   @@index([schoolId])
+}
+
+enum TransportDirection {
+  OUTBOUND
+  RETURN
+  BOTH
+}
+
+enum TripDirection {
+  OUTBOUND
+  RETURN
+}
+
+enum TransportSubscriptionStatus {
+  ACTIVE
+  CANCELLED
+}
+
+/// Véhicule du transport scolaire ; les dates d'assurance et de visite technique déclenchent une alerte.
+model TransportVehicle {
+  id                  String    @id @default(cuid())
+  schoolId            String
+  plate               String
+  capacity            Int
+  driverName          String?
+  driverPhone         String?
+  insuranceExpiresOn  DateTime? @db.Date
+  inspectionExpiresOn DateTime? @db.Date
+  active              Boolean   @default(true)
+  createdAt           DateTime  @default(now())
+
+  lines TransportLine[]
+
+  @@unique([schoolId, plate])
+}
+
+/// Ligne de ramassage : tarif annuel facturé par la scolarité, personnel affecté (chauffeur, accompagnateur).
+model TransportLine {
+  id           String   @id @default(cuid())
+  schoolId     String
+  name         String
+  vehicleId    String?
+  /// Tarif annuel aller et retour (FCFA).
+  fee          Int
+  /// Tarif annuel pour un seul sens (FCFA).
+  oneWayFee    Int
+  /// Comptes du personnel (rôle TRANSPORT) autorisés à faire l'appel sur cette ligne.
+  staffUserIds String[] @default([])
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  vehicle       TransportVehicle?       @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  stops         TransportStop[]
+  subscriptions TransportSubscription[]
+
+  @@unique([schoolId, name])
+}
+
+/// Arrêt d'une ligne, dans l'ordre du trajet aller, avec ses horaires de passage.
+model TransportStop {
+  id          String  @id @default(cuid())
+  schoolId    String
+  lineId      String
+  name        String
+  order       Int
+  morningTime String?
+  eveningTime String?
+
+  line          TransportLine           @relation(fields: [lineId], references: [id], onDelete: Cascade)
+  subscriptions TransportSubscription[]
+
+  @@unique([lineId, order])
+  @@index([schoolId])
+}
+
+/// Abonnement d'un élève pour l'année ; la ligne de facture est créée une seule fois.
+model TransportSubscription {
+  id             String                      @id @default(cuid())
+  schoolId       String
+  studentId      String
+  academicYearId String
+  lineId         String
+  stopId         String
+  direction      TransportDirection
+  fee            Int
+  invoiceLineId  String?                     @unique
+  status         TransportSubscriptionStatus @default(ACTIVE)
+  createdById    String?
+  createdAt      DateTime                    @default(now())
+  cancelledAt    DateTime?
+  cancelledById  String?
+  cancelReason   String?
+
+  line TransportLine @relation(fields: [lineId], references: [id], onDelete: Restrict)
+  stop TransportStop @relation(fields: [stopId], references: [id], onDelete: Restrict)
+
+  @@index([schoolId, lineId, status])
+  @@index([schoolId, studentId])
+}
+
+/// Trajet d'une ligne pour un jour et un sens : appel à la montée et à la descente.
+model TransportTrip {
+  id        String        @id @default(cuid())
+  schoolId  String
+  lineId    String
+  date      DateTime      @db.Date
+  direction TripDirection
+  takenById String
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  records TransportTripRecord[]
+
+  @@unique([lineId, date, direction])
+  @@index([schoolId, date])
+}
+
+model TransportTripRecord {
+  id         String    @id @default(cuid())
+  schoolId   String
+  tripId     String
+  studentId  String
+  /// Vrai : monté ; faux : absent à l'arrêt ; vide : pas encore pointé.
+  boarded    Boolean?
+  alighted   Boolean?
+  boardedAt  DateTime?
+  alightedAt DateTime?
+  notifiedAt DateTime?
+
+  trip TransportTrip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@unique([tripId, studentId])
+  @@index([schoolId, studentId])
+}
+
+enum BorrowerType {
+  STUDENT
+  STAFF
+}
+
+enum LibraryCopyStatus {
+  AVAILABLE
+  LOANED
+  LOST
+  WITHDRAWN
+}
+
+/// Notice du catalogue de la bibliothèque.
+model LibraryBook {
+  id         String   @id @default(cuid())
+  schoolId   String
+  title      String
+  authors    String[] @default([])
+  isbn       String?
+  /// Cote de rangement.
+  callNumber String?
+  publisher  String?
+  createdAt  DateTime @default(now())
+
+  copies LibraryCopy[]
+
+  @@index([schoolId, title])
+  @@index([schoolId, isbn])
+}
+
+/// Exemplaire physique, identifié par un code (étiquette).
+model LibraryCopy {
+  id        String            @id @default(cuid())
+  schoolId  String
+  bookId    String
+  code      String
+  status    LibraryCopyStatus @default(AVAILABLE)
+  createdAt DateTime          @default(now())
+
+  book  LibraryBook   @relation(fields: [bookId], references: [id], onDelete: Restrict)
+  loans LibraryLoan[]
+
+  @@unique([schoolId, code])
+  @@index([bookId])
+}
+
+/// Prêt d'un exemplaire à un élève ou à un membre du personnel ; conservé pour l'historique.
+model LibraryLoan {
+  id                   String       @id @default(cuid())
+  schoolId             String
+  copyId               String
+  borrowerType         BorrowerType
+  studentId            String?
+  staffUserId          String?
+  loanedAt             DateTime     @default(now())
+  dueDate              DateTime     @db.Date
+  renewals             Int          @default(0)
+  returnedAt           DateTime?
+  lost                 Boolean      @default(false)
+  lastReminderOn       DateTime?    @db.Date
+  /// Pénalité de retard facturée par la scolarité (une seule ligne de facture par prêt).
+  penaltyAmount        Int?
+  penaltyInvoiceLineId String?      @unique
+  loanedById           String?
+  returnedById         String?
+
+  copy LibraryCopy @relation(fields: [copyId], references: [id], onDelete: Restrict)
+
+  @@index([schoolId, returnedAt, dueDate])
+  @@index([schoolId, studentId])
+  @@index([schoolId, staffUserId])
+}
+
+enum StockCategory {
+  SUPPLY
+  UNIFORM
+}
+
+enum StockMovementType {
+  PURCHASE
+  SALE
+  ALLOCATION
+  ADJUSTMENT
+  REVERSAL
+}
+
+/// Article de fournitures ou d'uniforme ; les tailles déclinent un même article.
+model StockItem {
+  id             String        @id @default(cuid())
+  schoolId       String
+  name           String
+  category       StockCategory
+  sizes          String[]      @default([])
+  /// Prix de vente unitaire aux familles (FCFA).
+  unitPrice      Int
+  alertThreshold Int           @default(0)
+  active         Boolean       @default(true)
+  createdAt      DateTime      @default(now())
+
+  movements StockMovement[]
+
+  @@unique([schoolId, name])
+}
+
+/// Mouvement de stock en ajout seul : un déclencheur interdit UPDATE et DELETE ; une correction
+/// est un mouvement inverse.
+model StockMovement {
+  id            String            @id @default(cuid())
+  schoolId      String
+  itemId        String
+  size          String            @default("")
+  type          StockMovementType
+  /// Quantité signée : positive pour une entrée, négative pour une sortie.
+  quantity      Int
+  /// Coût d'achat unitaire (entrées), base de la valorisation.
+  unitCost      Int?
+  /// Prix de vente unitaire (ventes).
+  unitPrice     Int?
+  supplier      String?
+  reference     String?
+  studentId     String?
+  reason        String?
+  /// Clé d'idempotence d'une vente : un nouvel envoi ne crée ni mouvement ni facture en double.
+  requestId     String?
+  reversesId    String?           @unique
+  invoiceLineId String?           @unique
+  inventoryId   String?
+  createdById   String?
+  createdAt     DateTime          @default(now())
+
+  item      StockItem       @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  inventory StockInventory? @relation(fields: [inventoryId], references: [id], onDelete: Restrict)
+
+  @@unique([schoolId, requestId])
+  @@index([schoolId, itemId])
+  @@index([schoolId, createdAt])
+}
+
+/// Inventaire physique : les écarts justifiés deviennent des mouvements d'ajustement.
+model StockInventory {
+  id          String   @id @default(cuid())
+  schoolId    String
+  note        String?
+  /// Détail des comptages : [{ itemId, size, expected, counted, gap, reason }].
+  lines       Json
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  movements StockMovement[]
+
+  @@index([schoolId, createdAt])
 }

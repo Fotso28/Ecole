@@ -8,6 +8,7 @@ export const STAFF_ROLES = [
   'ACCOUNTANT',
   'TEACHER',
   'NURSE',
+  'TRANSPORT',
 ] as const;
 export type StaffRole = (typeof STAFF_ROLES)[number];
 
@@ -19,6 +20,7 @@ export const ROLE_LABELS: Record<StaffRole, string> = {
   ACCOUNTANT: 'Comptabilité',
   TEACHER: 'Enseignant',
   NURSE: 'Infirmerie',
+  TRANSPORT: 'Chauffeur ou accompagnateur',
 };
 
 export const PERMISSIONS = [
@@ -72,6 +74,15 @@ export const PERMISSIONS = [
   'hr.write',
   'hr.payroll.prepare',
   'hr.payroll.validate',
+  'transport.read',
+  'transport.manage',
+  'transport.rollcall',
+  'library.read',
+  'library.manage',
+  'library.loans',
+  'stock.read',
+  'stock.write',
+  'stock.inventory',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -98,6 +109,7 @@ export const ROLE_PERMISSIONS: Record<StaffRole, readonly Permission[]> = {
     'exams.manage',
     'exams.grade',
     'exams.anonymity.reveal',
+    'library.read',
   ],
   SUPERVISOR: [
     'dashboard.read',
@@ -111,6 +123,8 @@ export const ROLE_PERMISSIONS: Record<StaffRole, readonly Permission[]> = {
     'discipline.read',
     'messaging.use',
     'exams.read',
+    'transport.read',
+    'transport.rollcall',
   ],
   SECRETARY: [
     'dashboard.read',
@@ -126,6 +140,13 @@ export const ROLE_PERMISSIONS: Record<StaffRole, readonly Permission[]> = {
     'documents.issue',
     'students.documents',
     'exams.read',
+    'transport.read',
+    'transport.manage',
+    'library.read',
+    'library.manage',
+    'library.loans',
+    'stock.read',
+    'stock.write',
   ],
   ACCOUNTANT: [
     'dashboard.read',
@@ -143,6 +164,10 @@ export const ROLE_PERMISSIONS: Record<StaffRole, readonly Permission[]> = {
     'hr.read',
     'hr.write',
     'hr.payroll.prepare',
+    'transport.read',
+    'stock.read',
+    'stock.write',
+    'stock.inventory',
   ],
   TEACHER: [
     'academic.read',
@@ -158,6 +183,7 @@ export const ROLE_PERMISSIONS: Record<StaffRole, readonly Permission[]> = {
     'exams.grade',
   ],
   NURSE: ['students.read', 'health.read'],
+  TRANSPORT: ['transport.rollcall'],
 };
 
 /** Union des permissions des rôles cumulés. */
@@ -185,6 +211,19 @@ export function isClassScoped(roles: readonly StaffRole[], permission: Permissio
   );
 }
 
+/**
+ * Vrai si l'appel du transport ne vient que du rôle chauffeur ou accompagnateur : il est alors
+ * limité aux lignes auxquelles la personne est affectée.
+ */
+export function isLineScoped(roles: readonly StaffRole[]): boolean {
+  return (
+    roles.includes('TRANSPORT') &&
+    !roles.some(
+      (r) => r !== 'TRANSPORT' && (ROLE_PERMISSIONS[r] ?? []).includes('transport.rollcall'),
+    )
+  );
+}
+
 /** Modules activables par abonnement. */
 export const MODULES = [
   'students',
@@ -198,5 +237,7 @@ export const MODULES = [
   'documents',
   'accounting',
   'hr',
+  'transport',
+  'library',
 ] as const;
 export type Module = (typeof MODULES)[number];

@@ -123,6 +123,8 @@ const MODULE_LABELS: Record<string, string> = {
   exams: 'Examens',
   documents: 'Documents',
   accounting: 'Comptabilité',
+  transport: 'Transport scolaire',
+  library: 'Bibliothèque et stock',
 };
 
 export default function SettingsPage() {

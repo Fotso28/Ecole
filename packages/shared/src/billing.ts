@@ -24,6 +24,8 @@ export const SUBSCRIPTION_MODULE_LABELS: Record<Module, string> = {
   documents: 'Documents',
   accounting: 'Comptabilité',
   hr: 'RH et paie',
+  transport: 'Transport scolaire',
+  library: 'Bibliothèque et stock',
 };
 
 export const SUBSCRIPTION_PAYMENT_METHODS = [

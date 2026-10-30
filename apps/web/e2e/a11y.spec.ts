@@ -66,6 +66,10 @@ test('écrans de la direction', async ({ page }) => {
     '/rh/paie',
     '/rh/avances',
     '/rh/baremes',
+    '/transport',
+    '/transport/appel',
+    '/bibliotheque',
+    '/stock',
   ]) {
     await page.goto(path);
     await expect(page.locator('main h1').first()).toBeVisible();
@@ -209,6 +213,49 @@ test('appel et notes de l’enseignant', async ({ page }) => {
   await expectAccessible(page, '/calendrier (mois)');
 });
 
+test('transport, bibliothèque et stock', async ({ page }) => {
+  await loginStaff(page, 'direction@demo.cm');
+  await page.goto('/transport');
+  for (const [button, dialog] of [
+    ['Abonner un élève', 'Abonner un élève'],
+    ['Nouvelle ligne', 'Nouvelle ligne'],
+    ['Nouveau véhicule', 'Nouveau véhicule'],
+  ] as const) {
+    await page.getByRole('button', { name: button }).click();
+    await expect(page.getByRole('dialog', { name: dialog })).toBeVisible();
+    await expectAccessible(page, `/transport (${dialog})`);
+    await page.keyboard.press('Escape');
+  }
+  for (const tab of ['Abonnés', 'Véhicules', 'Réglages']) {
+    await page.getByRole('tab', { name: tab }).click();
+    await expectAccessible(page, `/transport (${tab})`);
+  }
+  await page.goto('/bibliotheque');
+  await page.getByRole('button', { name: 'Nouveau prêt' }).click();
+  await expect(page.getByRole('dialog', { name: 'Nouveau prêt' })).toBeVisible();
+  await expectAccessible(page, '/bibliotheque (nouveau prêt)');
+  await page.keyboard.press('Escape');
+  for (const tab of ['En retard', 'Catalogue', 'Réglages']) {
+    await page.getByRole('tab', { name: tab }).click();
+    await expectAccessible(page, `/bibliotheque (${tab})`);
+  }
+  await page.goto('/stock');
+  await page.getByRole('button', { name: 'Vendre à un élève' }).click();
+  await expect(page.getByRole('dialog', { name: 'Vente à un élève' })).toBeVisible();
+  await expectAccessible(page, '/stock (vente)');
+  await page.keyboard.press('Escape');
+  for (const tab of ['Mouvements', 'Inventaire']) {
+    await page.getByRole('tab', { name: tab }).click();
+    await expectAccessible(page, `/stock (${tab})`);
+  }
+  // Appel du car par le chauffeur, sur téléphone ou ordinateur.
+  await page.evaluate(() => fetch('/api/auth/logout', { method: 'POST' }));
+  await loginStaff(page, 'chauffeur@demo.cm');
+  await expect(page.getByRole('heading', { name: 'Appel du car' })).toBeVisible();
+  await expect(page.getByRole('list', { name: 'Élèves du trajet' })).toBeVisible();
+  await expectAccessible(page, '/transport/appel (chauffeur)');
+});
+
 test('portail des parents', async ({ page, request }, info) => {
   // Un parent différent par projet, pour ne pas dépasser la limite de codes SMS par numéro.
   const login = await request.post(`${API_URL}/auth/login`, {
@@ -235,6 +282,7 @@ test('portail des parents', async ({ page, request }, info) => {
     '/portail/devoirs',
     '/portail/messages',
     '/portail/calendrier',
+    '/portail/transport',
   ]) {
     await page.goto(path);
     await expect(page.locator('main').first()).toBeVisible();

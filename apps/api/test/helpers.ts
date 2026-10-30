@@ -92,6 +92,7 @@ export async function createStaff(
     | 'ACCOUNTANT'
     | 'TEACHER'
     | 'NURSE'
+    | 'TRANSPORT'
   )[],
   password = 'motdepasse-test-1',
 ) {

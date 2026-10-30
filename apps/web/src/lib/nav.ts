@@ -3,6 +3,7 @@ import {
   Banknote,
   BookOpen,
   Briefcase,
+  Bus,
   Calculator,
   CalendarDays,
   CalendarRange,
@@ -16,12 +17,15 @@ import {
   HandCoins,
   Landmark,
   LayoutGrid,
+  Library,
   ListTree,
   Megaphone,
   MessagesSquare,
   NotebookPen,
+  Package,
   PenLine,
   Receipt,
+  Route,
   ScrollText,
   Settings,
   ShieldCheck,
@@ -282,6 +286,42 @@ export const NAV: NavGroup[] = [
     ],
   },
   {
+    label: 'Services',
+    items: [
+      {
+        href: '/transport',
+        label: 'Transport scolaire',
+        short: 'Transport',
+        icon: Bus,
+        permission: 'transport.read',
+        module: 'transport',
+      },
+      {
+        href: '/transport/appel',
+        label: 'Appel du car',
+        short: 'Appel car',
+        icon: Route,
+        permission: 'transport.rollcall',
+        module: 'transport',
+      },
+      {
+        href: '/bibliotheque',
+        label: 'Bibliothèque',
+        icon: Library,
+        permission: 'library.read',
+        module: 'library',
+      },
+      {
+        href: '/stock',
+        label: 'Stock et uniformes',
+        short: 'Stock',
+        icon: Package,
+        permission: 'stock.read',
+        module: 'library',
+      },
+    ],
+  },
+  {
     label: 'École',
     items: [
       {
@@ -340,6 +380,7 @@ const PRIMARY: Record<StaffRole, string[]> = {
   ACCOUNTANT: ['/tableau-de-bord', '/caisse', '/impayes', '/caisse/journal'],
   TEACHER: ['/enseignant', '/presences', '/notes', '/eleves'],
   NURSE: ['/eleves'],
+  TRANSPORT: ['/transport/appel'],
 };
 const ROLE_ORDER: StaffRole[] = [
   'DIRECTOR',
@@ -349,6 +390,7 @@ const ROLE_ORDER: StaffRole[] = [
   'SUPERVISOR',
   'TEACHER',
   'NURSE',
+  'TRANSPORT',
 ];
 
 export function visibleNav(me: Me | null): NavGroup[] {

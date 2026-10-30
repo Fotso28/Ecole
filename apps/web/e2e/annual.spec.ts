@@ -144,7 +144,10 @@ test('le tableau de bord affiche les taux de réussite et exporte les indicateur
   await page.goto('/tableau-de-bord');
   await expect(page.getByRole('heading', { name: 'Taux de réussite' })).toBeVisible();
   const line = isMobile(info)
-    ? page.getByRole('listitem').filter({ has: page.getByText('4e A', { exact: true }) })
+    ? page
+        .getByRole('listitem')
+        .filter({ has: page.getByText('4e A', { exact: true }) })
+        .filter({ hasText: 'trimestre' })
     : page.getByRole('row', { name: /4e A/ });
   await expect(line).toContainText(/\d+,\d %/);
   await expectNoHorizontalOverflow(page);

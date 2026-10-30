@@ -1,7 +1,7 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CircleAlert } from 'lucide-react';
+import { Bus, CircleAlert } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
 import { Button, ButtonLink } from '@/components/ui/button';
@@ -124,6 +124,17 @@ export default function PortalHome() {
               </ul>
             )}
           </Card>
+
+          <Link
+            href="/portail/transport"
+            className="flex min-h-14 items-center gap-3 rounded-[14px] border border-line bg-white px-4 py-3"
+          >
+            <Bus className="size-5 shrink-0 text-primary" aria-hidden />
+            <span className="flex flex-1 flex-col">
+              <strong className="text-[15px]">Transport scolaire</strong>
+              <span className="text-[13px] text-muted">Ligne, arrêt et horaires du car</span>
+            </span>
+          </Link>
 
           {q.data.announcements.map((a) => (
             <Card key={a.id} className="flex flex-col gap-1.5">

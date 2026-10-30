@@ -311,6 +311,24 @@ export class ExamsService {
   // Salles et places
   // -------------------------------------------------------------------------
 
+  /** Salles de l'établissement (partagées avec l'emploi du temps). */
+  rooms() {
+    return this.db.room.findMany({ orderBy: { name: 'asc' } });
+  }
+
+  async createRoom(input: { name: string; capacity?: number }) {
+    const exists = await this.db.room.findFirst({ where: { name: input.name } });
+    if (exists) throw new ConflictException('Une salle porte déjà ce nom');
+    const room = await this.db.room.create({ data: { schoolId: currentSchoolId(), ...input } });
+    await this.audit.log({
+      action: 'exams.room_created',
+      entity: 'Room',
+      entityId: room.id,
+      after: input,
+    });
+    return room;
+  }
+
   async addRoom(sessionId: string, input: z.infer<typeof examRoomAddSchema>) {
     const session = await this.session(sessionId);
     this.assertNotPublished(session);

@@ -1,10 +1,11 @@
 'use client';
 
-import { FileText, ScrollText } from 'lucide-react';
+import { FileText, GraduationCap, ScrollText } from 'lucide-react';
 import { Card, CardHeader, ErrorBlock, LoadingBlock } from '@/components/ui/card';
 import { useToast } from '@/components/ui/toast';
 import { ChildSwitcher, useChildren } from '@/components/shell/parent-shell';
 import { openPdf } from '@/lib/api';
+import { useChildExams } from '@/lib/exams';
 import { formatGrade, formatShortDate } from '@/lib/format';
 import { useChildOverview } from '@/lib/portal';
 
@@ -12,6 +13,7 @@ export default function PortalGrades() {
   const { selected } = useChildren();
   const toast = useToast();
   const q = useChildOverview(selected?.id);
+  const exams = useChildExams(selected?.id);
   if (!selected || q.isPending) return <LoadingBlock />;
   if (q.isError) return <ErrorBlock error={q.error} />;
   const tr = q.data.transcripts;
@@ -73,6 +75,45 @@ export default function PortalGrades() {
           </ul>
         )}
       </Card>
+      {exams.data && exams.data.length > 0 ? (
+        <Card>
+          <CardHeader title="Résultats d’examens" />
+          <ul className="flex flex-col gap-3">
+            {exams.data.map((x) => (
+              <li
+                key={x.sessionId}
+                className="border-t border-line pt-3 first:border-t-0 first:pt-0"
+              >
+                <div className="flex items-start gap-3">
+                  <GraduationCap className="mt-0.5 size-5 shrink-0 text-primary" aria-hidden />
+                  <span className="flex flex-1 flex-col">
+                    <strong className="text-[15px]">{x.name}</strong>
+                    <span className="text-[13px] text-muted">
+                      {x.kindLabel} · moyenne {formatGrade(x.averageCenti)}
+                      {x.rank ? ` · rang ${x.rank}` : ''}
+                      {x.appreciation ? ` · ${x.appreciation}` : ''}
+                    </span>
+                  </span>
+                </div>
+                <ul className="mt-2 flex flex-col pl-8">
+                  {x.papers.map((p) => (
+                    <li
+                      key={p.paperId}
+                      className="flex items-center justify-between gap-3 py-1 text-sm"
+                    >
+                      <span>{p.subjectName}</span>
+                      <strong className="tabular">
+                        {p.value}
+                        <span className="text-[13px] font-medium text-muted"> /{p.maxScore}</span>
+                      </strong>
+                    </li>
+                  ))}
+                </ul>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      ) : null}
       <Card>
         <CardHeader
           title="Relevés de notes"

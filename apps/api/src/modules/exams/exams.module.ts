@@ -34,6 +34,10 @@ import { renderAttendanceSheets, renderConvocations } from './exams.pdf';
 import { ExamsService } from './exams.service';
 
 const seatingSchema = z.object({ mixClasses: z.boolean().optional() });
+const roomCreateSchema = z.object({
+  name: z.string().trim().min(1).max(40),
+  capacity: z.number().int().min(1).max(500).optional(),
+});
 const convocationQuerySchema = z.object({
   classId: z.string().min(1).optional(),
   studentId: z.string().min(1).optional(),
@@ -90,6 +94,18 @@ export class ExamsController {
   @Delete('papers/:id')
   deletePaper(@Param('id') id: string) {
     return this.exams.deletePaper(id);
+  }
+
+  @RequirePermissions('exams.read')
+  @Get('rooms')
+  rooms() {
+    return this.exams.rooms();
+  }
+
+  @RequirePermissions('exams.manage')
+  @Post('rooms')
+  createRoom(@Body(new ZodPipe(roomCreateSchema)) body: z.infer<typeof roomCreateSchema>) {
+    return this.exams.createRoom(body);
   }
 
   @RequirePermissions('exams.manage')

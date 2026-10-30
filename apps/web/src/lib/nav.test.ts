@@ -118,4 +118,16 @@ describe('redirection après connexion', () => {
       expect(safeNextPath(next)).toBeNull();
     }
   });
+
+  it('affiche les examens seulement si le module est activé', () => {
+    const modules = ['students', 'grades', 'exams'];
+    expect(hrefs(me(['CENSOR'], modules))).toEqual(
+      expect.arrayContaining(['/examens', '/examens/copies']),
+    );
+    expect(hrefs(me(['TEACHER'], modules))).toContain('/examens/copies');
+    expect(hrefs(me(['SECRETARY'], modules))).toContain('/examens');
+    expect(hrefs(me(['SECRETARY'], modules))).not.toContain('/examens/copies');
+    expect(hrefs(me(['ACCOUNTANT'], modules))).not.toContain('/examens');
+    expect(hrefs(me(['CENSOR']))).not.toContain('/examens');
+  });
 });

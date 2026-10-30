@@ -2,7 +2,7 @@ import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { enrollStudent, seedSchool, sessions, type SchoolFixture } from './fixtures';
-import { createTestApp, prisma, resetDb, type Session } from './helpers';
+import { createTestApp, login, prisma, resetDb, type Session } from './helpers';
 
 let app: INestApplication;
 let f: SchoolFixture;
@@ -153,6 +153,105 @@ describe('personnel', () => {
         roles: ['TEACHER'],
       })
       .expect(403);
+  });
+
+  it('invite le compte d’une autre école sans rien révéler, rattaché après acceptation', async () => {
+    // Une enseignante du collège « autre » a déjà un compte.
+    const other = await seedSchool('autre', 'AU');
+    await prisma.user.update({
+      where: { id: other.users.teacher },
+      data: { firstName: 'Béatrice', lastName: 'Essomba', phone: '+237699112233' },
+    });
+    const res = await http()
+      .post('/staff')
+      .set(s.direction.auth)
+      .send({
+        firstName: 'Nom',
+        lastName: 'Inventé',
+        email: 'prof@autre.cm',
+        password: 'motdepasse-ignore',
+        roles: ['TEACHER'],
+      })
+      .expect(201);
+    // Ni nom, ni téléphone, ni identifiant du compte existant.
+    expect(res.body).toEqual({
+      status: 'INVITED',
+      email: 'prof@autre.cm',
+      roles: ['TEACHER'],
+      customRoleIds: [],
+    });
+    expect(JSON.stringify(res.body)).not.toMatch(/Essomba|699112233/);
+    const staff = await http().get('/staff').set(s.direction.auth).expect(200);
+    expect(staff.body.map((u: { email: string }) => u.email)).not.toContain('prof@autre.cm');
+    expect(
+      await prisma.membership.count({
+        where: { userId: other.users.teacher, schoolId: f.schoolId },
+      }),
+    ).toBe(0);
+    const pending = await http().get('/staff/invitations').set(s.direction.auth).expect(200);
+    expect(pending.body).toEqual([expect.objectContaining({ email: 'prof@autre.cm' })]);
+    expect(JSON.stringify(pending.body)).not.toMatch(/Essomba|699112233/);
+    // Une seconde demande ne crée pas de doublon.
+    await http()
+      .post('/staff')
+      .set(s.direction.auth)
+      .send({
+        firstName: 'Nom',
+        lastName: 'Inventé',
+        email: 'prof@autre.cm',
+        password: 'motdepasse-ignore',
+        roles: ['TEACHER'],
+      })
+      .expect(201);
+    expect(await prisma.staffInvitation.count()).toBe(1);
+
+    // L'école d'origine ne peut ni annuler ni consulter l'invitation d'une autre école.
+    const otherDirection = await login(app, 'direction@autre.cm');
+    await http()
+      .post(`/staff/invitations/${pending.body[0].id}/cancel`)
+      .set(otherDirection.auth)
+      .expect(404);
+
+    // À sa connexion, l'enseignante voit l'invitation et l'accepte.
+    const prof = await login(app, 'prof@autre.cm');
+    const me = await http().get('/auth/me').set(prof.auth).expect(200);
+    expect(me.body.invitations).toEqual([
+      expect.objectContaining({
+        school: expect.objectContaining({ name: 'Collège demo' }),
+        roles: ['TEACHER'],
+      }),
+    ]);
+    // Une autre personne ne peut pas y répondre.
+    await http()
+      .post(`/auth/invitations/${me.body.invitations[0].id}/accept`)
+      .set(s.prof.auth)
+      .expect(404);
+    await http()
+      .post(`/auth/invitations/${me.body.invitations[0].id}/accept`)
+      .set(prof.auth)
+      .expect(201);
+    expect(
+      await prisma.membership.count({
+        where: { userId: other.users.teacher, schoolId: f.schoolId },
+      }),
+    ).toBe(1);
+    const after = await http().get('/staff').set(s.direction.auth).expect(200);
+    expect(after.body.map((u: { email: string }) => u.email)).toContain('prof@autre.cm');
+    expect(await prisma.auditLog.count({ where: { action: 'staff.invitation_accepted' } })).toBe(1);
+    // L'école d'origine ne voit pas les invitations des autres écoles.
+    const otherPending = await http()
+      .get('/staff/invitations')
+      .set(otherDirection.auth)
+      .expect(200);
+    expect(otherPending.body).toEqual([]);
+  });
+
+  it('ne donne aux enseignants que le nom de leurs collègues', async () => {
+    const res = await http().get('/staff/teachers').set(s.prof.auth).expect(200);
+    expect(res.body.length).toBeGreaterThan(0);
+    for (const t of res.body) {
+      expect(Object.keys(t).sort()).toEqual(['firstName', 'id', 'lastName', 'maxWeeklyHours']);
+    }
   });
 
   it('empêche le dernier directeur de retirer son propre rôle', async () => {

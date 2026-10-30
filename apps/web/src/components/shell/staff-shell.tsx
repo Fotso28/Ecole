@@ -6,6 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { ROLE_LABELS } from '@ecole/shared';
 import { OfflineBanner } from '@/components/offline-banner';
+import { InvitationsBanner } from '@/components/shell/invitations-banner';
 import { Sheet } from '@/components/ui/sheet';
 import { homeFor, useAuth } from '@/lib/auth';
 import { useStaffUnread } from '@/lib/communication';
@@ -237,6 +238,8 @@ export function StaffShell({ children }: { children: ReactNode }) {
             </Link>
           </div>
         ) : null}
+
+        <InvitationsBanner />
 
         <main id="contenu" className="flex-1 px-4 pt-4 pb-28 lg:px-8 lg:pt-6 lg:pb-12">
           <div className="mx-auto flex w-full max-w-6xl flex-col gap-5">{children}</div>

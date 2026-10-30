@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { hasPermission } from './permissions';
+import { YEAR_END_DECISIONS, type YearEndDecision } from './results';
 import {
   documentCounterKey,
   documentTemplateSchema,
@@ -54,6 +55,17 @@ describe('suggestReenrollment', () => {
     expect(suggestReenrollment('EXCLUDED')).toBe('LEFT');
     expect(suggestReenrollment('Exclusion définitive')).toBe('LEFT');
     expect(suggestReenrollment('TRANSFERRED')).toBe('LEFT');
+  });
+
+  it('traduit chaque décision de fin d’année du conseil', () => {
+    const expected: Record<YearEndDecision, string> = {
+      PROMOTED: 'PROMOTED',
+      PROMOTED_BY_COUNCIL: 'PROMOTED',
+      REPEAT: 'REPEATING',
+      EXCLUDED_WORK: 'LEFT',
+      EXCLUDED_CONDUCT: 'LEFT',
+    };
+    for (const d of YEAR_END_DECISIONS) expect(suggestReenrollment(d)).toBe(expected[d]);
   });
 
   it('ne propose rien pour une décision inconnue ou trimestrielle', () => {

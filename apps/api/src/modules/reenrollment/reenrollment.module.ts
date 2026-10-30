@@ -87,16 +87,26 @@ export class ReenrollmentService {
     });
     const studentIds = enrollments.map((e) => e.studentId);
     // Lecture brute : d'autres types de décision peuvent exister sans que ce module les connaisse.
+    // La décision de fin d'année (dernier trimestre) prime sur la mention trimestrielle.
     const decisions = await this.db.councilDecision.findMany({
       where: { studentId: { in: studentIds }, termId: { in: from.terms.map((t) => t.id) } },
-      select: { studentId: true, termId: true, decision: true, comment: true },
+      select: {
+        studentId: true,
+        termId: true,
+        decision: true,
+        yearEndDecision: true,
+        comment: true,
+      },
     });
     const termOrder = new Map(from.terms.map((t) => [t.id, t.order]));
     const latest = new Map<string, { decision: string; comment: string | null }>();
     for (const d of [...decisions].sort(
       (a, b) => (termOrder.get(a.termId) ?? 0) - (termOrder.get(b.termId) ?? 0),
     ))
-      latest.set(d.studentId, { decision: String(d.decision), comment: d.comment });
+      latest.set(d.studentId, {
+        decision: String(d.yearEndDecision ?? d.decision),
+        comment: d.comment,
+      });
     const already = await this.db.enrollment.findMany({
       where: { academicYearId: to.id, studentId: { in: studentIds } },
       select: { studentId: true, status: true, classId: true },

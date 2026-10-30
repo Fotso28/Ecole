@@ -1,0 +1,318 @@
+'use client';
+
+import { useQuery } from '@tanstack/react-query';
+import { ChevronRight, FileText, Receipt, ShieldCheck, Wallet } from 'lucide-react';
+import Link from 'next/link';
+import { useState } from 'react';
+import { ButtonLink } from '@/components/ui/button';
+import { Card, CardHeader, ErrorBlock, LoadingBlock, PageHeader, Stat } from '@/components/ui/card';
+import { api } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
+import { formatFcfa, formatTime, formatWeekday, plural } from '@/lib/format';
+
+interface Dashboard {
+  year: { id: string; name: string };
+  today: string;
+  enrollment: { total: number; girls: number; boys: number; changeFromPreviousYear: number | null };
+  attendance: { unjustifiedThisWeek: number; studentsAboveThreshold: number };
+  finance: null | {
+    expected: number;
+    collected: number;
+    recoveryRate: number;
+    overdue: number;
+    overdueStudents: number;
+    items: { name: string; dueDate: string; due: number; paid: number; rate: number }[];
+    weekly: { weekStart: string; amount: number }[];
+    worstClasses: {
+      classId: string;
+      className: string;
+      students: number;
+      overdue: number;
+      rate: number;
+    }[];
+  };
+  todo: {
+    pendingJustifications: number;
+    pendingMobileMoney: number;
+    cashSessionsToApprove: number;
+    gradeSheetsToValidate: number;
+    reportCardBatchesToPublish: number;
+  };
+  activity: { id: string; at: string; actor: string; label: string }[];
+}
+
+const shortDay = new Intl.DateTimeFormat('fr-FR', {
+  day: 'numeric',
+  month: 'short',
+  timeZone: 'UTC',
+});
+
+type Weekly = NonNullable<Dashboard['finance']>['weekly'];
+
+function WeeklyChart({ weeks }: { weeks: Weekly }) {
+  const [asTable, setAsTable] = useState(false);
+  const max = Math.max(1, ...weeks.map((w) => w.amount));
+  return (
+    <Card>
+      <CardHeader
+        title="Encaissements par semaine"
+        subtitle="Toutes méthodes confondues, en FCFA"
+        action={
+          <button
+            type="button"
+            onClick={() => setAsTable((v) => !v)}
+            className="min-h-11 rounded-[9px] border border-line-strong px-3 text-[13px] font-semibold lg:min-h-9"
+          >
+            {asTable ? 'Graphique' : 'Tableau'}
+          </button>
+        }
+      />
+      {asTable ? (
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs text-muted">
+              <th className="py-2 font-semibold">Semaine du</th>
+              <th className="py-2 text-right font-semibold">Encaissé</th>
+            </tr>
+          </thead>
+          <tbody>
+            {weeks.map((w) => (
+              <tr key={w.weekStart} className="border-t border-line">
+                <td className="py-2">{shortDay.format(new Date(`${w.weekStart}T00:00:00Z`))}</td>
+                <td className="py-2 text-right tabular">{formatFcfa(w.amount)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <figure className="m-0">
+          <div
+            className="flex h-44 items-end gap-1 border-b border-[#8a928d] lg:h-52"
+            role="img"
+            aria-label="Histogramme des encaissements hebdomadaires ; utilisez le bouton Tableau pour les montants exacts."
+          >
+            {weeks.map((w, i) => {
+              const last = i === weeks.length - 1;
+              return (
+                <div
+                  key={w.weekStart}
+                  className="group relative flex h-full flex-1 items-end justify-center"
+                  title={`${shortDay.format(new Date(`${w.weekStart}T00:00:00Z`))} : ${formatFcfa(w.amount)}`}
+                >
+                  <div
+                    className="w-[70%] max-w-12 rounded-t-[4px] bg-primary group-hover:bg-primary-hover"
+                    style={{ height: `${Math.max(2, (w.amount / max) * 100)}%` }}
+                  />
+                  {last || w.amount === max ? (
+                    <span
+                      className="absolute text-[11px] font-semibold whitespace-nowrap tabular"
+                      style={{ bottom: `${Math.max(2, (w.amount / max) * 100) + 2}%` }}
+                    >
+                      {(w.amount / 1_000_000).toFixed(1).replace('.', ',')} M
+                    </span>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+          <div className="mt-1.5 flex gap-1 text-center text-[11px] text-muted">
+            {weeks.map((w, i) => (
+              <span key={w.weekStart} className="flex-1 truncate">
+                {i % 2 === weeks.length % 2
+                  ? shortDay.format(new Date(`${w.weekStart}T00:00:00Z`))
+                  : ''}
+              </span>
+            ))}
+          </div>
+        </figure>
+      )}
+    </Card>
+  );
+}
+
+export default function DashboardPage() {
+  const { me } = useAuth();
+  const q = useQuery({ queryKey: ['dashboard'], queryFn: () => api<Dashboard>('/dashboard') });
+  if (q.isPending) return <LoadingBlock />;
+  if (q.isError) return <ErrorBlock error={q.error} onRetry={() => q.refetch()} />;
+  const d = q.data;
+  const todos = [
+    {
+      n: d.todo.gradeSheetsToValidate,
+      label: 'grilles de notes à valider',
+      href: '/notes',
+      icon: FileText,
+    },
+    {
+      n: d.todo.reportCardBatchesToPublish,
+      label: 'lots de bulletins à publier',
+      href: '/bulletins',
+      icon: FileText,
+    },
+    {
+      n: d.todo.pendingJustifications,
+      label: 'justificatifs d’absence',
+      href: '/presences/justificatifs',
+      icon: ShieldCheck,
+    },
+    {
+      n: d.todo.pendingMobileMoney,
+      label: 'paiements Mobile Money en attente depuis plus de 2 h',
+      href: '/caisse/journal',
+      icon: Receipt,
+    },
+    {
+      n: d.todo.cashSessionsToApprove,
+      label: 'clôtures de caisse à approuver',
+      href: '/caisse',
+      icon: Wallet,
+    },
+  ].filter((t) => t.n > 0);
+
+  return (
+    <>
+      <PageHeader
+        title={`Bonjour, ${me?.user.firstName ?? ''}`}
+        subtitle={`${formatWeekday(d.today).replace(/^./, (c) => c.toUpperCase())} · ${d.year.name}`}
+        actions={
+          <>
+            {me?.permissions.includes('students.write') ? (
+              <ButtonLink href="/eleves/nouveau" variant="secondary">
+                Nouvelle inscription
+              </ButtonLink>
+            ) : null}
+            {me?.permissions.includes('finance.payments.create') ? (
+              <ButtonLink href="/caisse">Encaisser</ButtonLink>
+            ) : null}
+          </>
+        }
+      />
+
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
+        <Stat
+          label="Effectif"
+          value={d.enrollment.total.toLocaleString('fr-FR')}
+          hint={`${d.enrollment.girls} filles · ${d.enrollment.boys} garçons`}
+        />
+        {d.finance ? (
+          <>
+            <Stat
+              label="Recouvrement"
+              value={`${d.finance.recoveryRate} %`}
+              hint={`${formatFcfa(d.finance.collected, false)} / ${formatFcfa(d.finance.expected)}`}
+            />
+            <Stat
+              label="Impayés échus"
+              value={formatFcfa(d.finance.overdue, false)}
+              tone="danger"
+              hint={`FCFA · ${plural(d.finance.overdueStudents, 'élève', 'élèves')}`}
+            />
+          </>
+        ) : null}
+        <Stat
+          label="Absences non justifiées · semaine"
+          value={d.attendance.unjustifiedThisWeek}
+          hint={`${plural(d.attendance.studentsAboveThreshold, 'élève', 'élèves')} au-dessus du seuil`}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[2fr_1fr]">
+        {d.finance ? <WeeklyChart weeks={d.finance.weekly} /> : null}
+        <Card className={d.finance ? '' : 'lg:col-span-2'}>
+          <CardHeader title="À traiter" />
+          {todos.length === 0 ? (
+            <p className="text-sm text-muted">Rien en attente. Tout est à jour.</p>
+          ) : (
+            <ul className="flex flex-col">
+              {todos.map((t) => (
+                <li key={t.href + t.label} className="border-t border-line first:border-t-0">
+                  <Link href={t.href} className="flex min-h-14 items-center gap-3 py-2">
+                    <span className="flex size-9 shrink-0 items-center justify-center rounded-[9px] bg-primary-soft text-primary">
+                      <t.icon className="size-4" aria-hidden />
+                    </span>
+                    <span className="flex-1 text-[15px] lg:text-sm">
+                      <strong className="tabular">{t.n}</strong> {t.label}
+                    </span>
+                    <ChevronRight className="size-4 text-muted" aria-hidden />
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      </div>
+
+      {d.finance ? (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Card>
+            <CardHeader title="Recouvrement par échéance" />
+            <ul className="flex flex-col gap-3">
+              {d.finance.items.map((i) => (
+                <li key={i.name} className="flex flex-col gap-1.5">
+                  <div className="flex justify-between gap-2 text-sm">
+                    <span className="font-semibold">{i.name}</span>
+                    <span className="tabular">{i.rate} %</span>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full bg-neutral-soft">
+                    <div className="h-2 bg-primary" style={{ width: `${i.rate}%` }} />
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </Card>
+          <Card>
+            <CardHeader
+              title="Classes les moins à jour"
+              action={
+                <Link href="/impayes" className="text-sm font-semibold text-primary">
+                  Tous les impayés
+                </Link>
+              }
+            />
+            <ul className="flex flex-col">
+              {d.finance.worstClasses.map((c) => (
+                <li
+                  key={c.classId}
+                  className="flex items-center gap-3 border-t border-line py-2.5 first:border-t-0"
+                >
+                  <span className="w-16 font-semibold">{c.className}</span>
+                  <div className="h-2 flex-1 overflow-hidden rounded-full bg-neutral-soft">
+                    <div className="h-2 bg-primary" style={{ width: `${c.rate}%` }} />
+                  </div>
+                  <span className="w-12 text-right text-sm tabular">{c.rate} %</span>
+                </li>
+              ))}
+            </ul>
+          </Card>
+        </div>
+      ) : null}
+
+      <Card>
+        <CardHeader
+          title="Activité récente"
+          action={
+            me?.permissions.includes('audit.read') ? (
+              <Link href="/parametres#audit" className="text-sm font-semibold text-primary">
+                Journal d’audit
+              </Link>
+            ) : undefined
+          }
+        />
+        {d.activity.length === 0 ? (
+          <p className="text-sm text-muted">Aucune activité pour l’instant.</p>
+        ) : (
+          <ol className="flex flex-col gap-3">
+            {d.activity.map((a) => (
+              <li key={a.id} className="flex gap-3 text-sm">
+                <span className="w-12 shrink-0 text-muted tabular">{formatTime(a.at)}</span>
+                <span>
+                  <strong className="font-semibold">{a.actor}</strong> {a.label}
+                </span>
+              </li>
+            ))}
+          </ol>
+        )}
+      </Card>
+    </>
+  );
+}

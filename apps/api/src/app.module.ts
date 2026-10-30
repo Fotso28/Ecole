@@ -13,6 +13,7 @@ import { AuditModule } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { CommunicationModule } from './modules/communication/communication.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { DevModule } from './modules/dev/dev.module';
 import { FinanceModule } from './modules/finance/finance.module';
 import { GradesModule } from './modules/grades/grades.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
@@ -54,6 +55,7 @@ import { VerifyModule } from './modules/verify/verify.module';
     SettingsModule,
     TimetableModule,
     VerifyModule,
+    DevModule,
   ],
   controllers: [HealthController],
   providers: [

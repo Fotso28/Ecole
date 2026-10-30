@@ -275,6 +275,17 @@ export class AuthService {
     });
     const active = memberships.find((m) => m.schoolId === activeSchoolId);
     const roles = (active?.roles ?? []) as StaffRole[];
+    const currentYear = active
+      ? await runAsSystem(
+          'me-year',
+          () =>
+            this.db.academicYear.findFirst({
+              where: { isCurrent: true },
+              select: { id: true, name: true },
+            }),
+          active.schoolId,
+        )
+      : null;
     return {
       user,
       kind,
@@ -291,6 +302,7 @@ export class AuthService {
             city: active.school.city,
             modules: active.school.modules,
             mfaRequired: !!(active.school.settings as { mfaRequired?: boolean }).mfaRequired,
+            currentYear,
           }
         : null,
       roles,

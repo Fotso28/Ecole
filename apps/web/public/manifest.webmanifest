@@ -1,0 +1,13 @@
+{
+  "name": "Ecole",
+  "short_name": "Ecole",
+  "description": "Gestion scolaire et portail des parents",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F6F5F0",
+  "theme_color": "#0E2A20",
+  "lang": "fr",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

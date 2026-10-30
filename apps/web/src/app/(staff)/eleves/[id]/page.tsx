@@ -1,16 +1,18 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronRight, FileText, Lock, Phone, Wallet } from 'lucide-react';
+import { formatFileSize } from '@ecole/shared';
+import { ChevronRight, Eye, FileText, Lock, Phone, Upload, Wallet } from 'lucide-react';
 import Link from 'next/link';
 import { use, useState } from 'react';
 import { Badge, ENROLLMENT_BADGE, LINE_BADGE } from '@/components/ui/badge';
 import { Button, ButtonLink } from '@/components/ui/button';
 import { Card, CardHeader, ErrorBlock, LoadingBlock } from '@/components/ui/card';
 import { InputField, TextareaField } from '@/components/ui/field';
+import { FilePicker } from '@/components/ui/file-picker';
 import { Sheet } from '@/components/ui/sheet';
 import { useToast } from '@/components/ui/toast';
-import { api, ApiError, openPdf } from '@/lib/api';
+import { api, ApiError, openFile, openPdf, uploadFile } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import {
   formatCameroonPhone,
@@ -53,7 +55,7 @@ interface Overview {
     isCurrent: boolean;
     class: { id: string; name: string; level: string };
   }[];
-  documents: { id: string; type: string; status: 'RECEIVED' | 'MISSING' }[];
+  documents: StudentDocument[];
   attendance: {
     absences: number;
     unjustified: number;
@@ -80,6 +82,73 @@ interface Overview {
     totals: AccountTotals;
     nextDue: { label: string; dueDate: string; amount: number } | null;
   } | null;
+}
+
+interface StudentDocument {
+  id: string;
+  type: string;
+  status: 'RECEIVED' | 'MISSING';
+  hasFile: boolean;
+  file: { id: string; name: string; mimeType: string; size: number; createdAt: string } | null;
+}
+
+/** Dépôt ou remplacement du fichier d'une pièce (photo prise au téléphone ou fichier). */
+function DocumentUploadSheet({
+  studentId,
+  doc,
+  onClose,
+}: {
+  studentId: string;
+  doc: StudentDocument | null;
+  onClose: () => void;
+}) {
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const [file, setFile] = useState<File | null>(null);
+  const upload = useMutation({
+    mutationFn: () => uploadFile(`/students/${studentId}/documents/${doc?.id}/file`, file!),
+    onSuccess: () => {
+      toast(doc?.file ? 'Pièce remplacée' : 'Pièce déposée');
+      setFile(null);
+      void queryClient.invalidateQueries({ queryKey: ['student', studentId] });
+      onClose();
+    },
+    onError: (e) => toast(e instanceof Error ? e.message : 'Erreur', 'error'),
+  });
+  return (
+    <Sheet
+      open={!!doc}
+      onClose={() => {
+        setFile(null);
+        onClose();
+      }}
+      title={doc ? `${doc.file ? 'Remplacer' : 'Déposer'} : ${doc.type}` : ''}
+      footer={
+        <Button
+          block
+          size="lg"
+          disabled={!file}
+          loading={upload.isPending}
+          onClick={() => upload.mutate()}
+        >
+          Enregistrer la pièce
+        </Button>
+      }
+    >
+      <div className="flex flex-col gap-3">
+        {doc?.file ? (
+          <p className="text-sm text-muted">
+            Le fichier actuel ({doc.file.name}) sera remplacé ; il reste consultable dans
+            l’historique d’audit.
+          </p>
+        ) : null}
+        <FilePicker label="Fichier de la pièce" value={file} onChange={setFile} />
+        <p className="text-[13px] text-muted">
+          Le fichier est chiffré et n’est visible que du secrétariat et de la direction.
+        </p>
+      </div>
+    </Sheet>
+  );
 }
 
 const RELATION: Record<Overview['guardians'][number]['relationship'], string> = {
@@ -181,6 +250,7 @@ export default function StudentPage({ params }: { params: Promise<{ id: string }
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<'overview' | 'payments' | 'attendance'>('overview');
   const [healthOpen, setHealthOpen] = useState(false);
+  const [uploadDoc, setUploadDoc] = useState<StudentDocument | null>(null);
   const q = useQuery({
     queryKey: ['student', id],
     queryFn: () => api<Overview>(`/students/${id}`),
@@ -270,6 +340,7 @@ export default function StudentPage({ params }: { params: Promise<{ id: string }
         ) : null}
       </Card>
 
+      <DocumentUploadSheet studentId={id} doc={uploadDoc} onClose={() => setUploadDoc(null)} />
       {can('health.read') ? (
         <div className="flex flex-wrap items-center gap-3 rounded-[12px] border border-line bg-white p-3">
           <Lock className="size-5 text-muted" aria-hidden />
@@ -424,31 +495,73 @@ export default function StudentPage({ params }: { params: Promise<{ id: string }
 
           <Card>
             <CardHeader title="Pièces du dossier" />
-            <ul className="flex flex-col gap-1">
+            <ul className="flex flex-col">
               {s.documents.map((d) => (
-                <li key={d.id} className="flex min-h-11 items-center justify-between gap-2 text-sm">
-                  <span>{d.type}</span>
-                  {can('students.write') ? (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        toggleDoc.mutate({
-                          docId: d.id,
-                          status: d.status === 'RECEIVED' ? 'MISSING' : 'RECEIVED',
-                        })
-                      }
-                      aria-label={`${d.type} : ${d.status === 'RECEIVED' ? 'reçu, marquer manquant' : 'manquant, marquer reçu'}`}
-                      className="min-h-11"
-                    >
+                <li
+                  key={d.id}
+                  className="flex flex-col gap-1 border-t border-line py-1.5 text-sm first:border-t-0"
+                >
+                  <div className="flex min-h-11 items-center justify-between gap-2">
+                    <span className="flex min-w-0 flex-col">
+                      <span>{d.type}</span>
+                      {d.file ? (
+                        <span className="truncate text-[13px] text-muted">
+                          {d.file.name} · {formatFileSize(d.file.size)}
+                        </span>
+                      ) : d.hasFile ? (
+                        <span className="text-[13px] text-muted">Fichier déposé</span>
+                      ) : null}
+                    </span>
+                    {can('students.write') ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          toggleDoc.mutate({
+                            docId: d.id,
+                            status: d.status === 'RECEIVED' ? 'MISSING' : 'RECEIVED',
+                          })
+                        }
+                        aria-label={`${d.type} : ${d.status === 'RECEIVED' ? 'reçu, marquer manquant' : 'manquant, marquer reçu'}`}
+                        className="min-h-11 shrink-0"
+                      >
+                        <Badge tone={d.status === 'RECEIVED' ? 'success' : 'danger'}>
+                          {d.status === 'RECEIVED' ? 'Reçu' : 'Manquant'}
+                        </Badge>
+                      </button>
+                    ) : (
                       <Badge tone={d.status === 'RECEIVED' ? 'success' : 'danger'}>
                         {d.status === 'RECEIVED' ? 'Reçu' : 'Manquant'}
                       </Badge>
-                    </button>
-                  ) : (
-                    <Badge tone={d.status === 'RECEIVED' ? 'success' : 'danger'}>
-                      {d.status === 'RECEIVED' ? 'Reçu' : 'Manquant'}
-                    </Badge>
-                  )}
+                    )}
+                  </div>
+                  {can('students.documents') ? (
+                    <div className="flex flex-wrap gap-2 pb-1">
+                      {d.file ? (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          aria-label={`Voir le fichier : ${d.type}`}
+                          onClick={() =>
+                            openFile(`/students/${id}/documents/${d.id}/file`).catch((e) =>
+                              toast(e instanceof Error ? e.message : 'Erreur', 'error'),
+                            )
+                          }
+                        >
+                          <Eye className="size-4" aria-hidden />
+                          Voir
+                        </Button>
+                      ) : null}
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        aria-label={`${d.file ? 'Remplacer' : 'Déposer'} le fichier : ${d.type}`}
+                        onClick={() => setUploadDoc(d)}
+                      >
+                        <Upload className="size-4" aria-hidden />
+                        {d.file ? 'Remplacer' : 'Déposer le fichier'}
+                      </Button>
+                    </div>
+                  ) : null}
                 </li>
               ))}
             </ul>

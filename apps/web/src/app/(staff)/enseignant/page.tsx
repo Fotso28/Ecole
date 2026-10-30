@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { ClipboardCheck, PenLine } from 'lucide-react';
+import { ClipboardCheck, NotebookPen, PenLine } from 'lucide-react';
 import Link from 'next/link';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -103,7 +103,7 @@ export default function TeacherPage() {
                       {c.subjectName} · coef. {c.coefficient} · {c.students} élèves
                     </p>
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-3 gap-2">
                     <Link
                       href={`/presences?classe=${c.classId}&cs=${c.id}`}
                       className="flex min-h-12 items-center justify-center gap-1.5 rounded-[10px] border border-line-strong text-sm font-semibold lg:min-h-10"
@@ -117,6 +117,13 @@ export default function TeacherPage() {
                     >
                       <PenLine className="size-4" aria-hidden />
                       Notes
+                    </Link>
+                    <Link
+                      href={`/cahier-de-texte?cs=${c.id}`}
+                      className="flex min-h-12 items-center justify-center gap-1.5 rounded-[10px] border border-line-strong text-sm font-semibold lg:min-h-10"
+                    >
+                      <NotebookPen className="size-4" aria-hidden />
+                      Cahier
                     </Link>
                   </div>
                 </Card>

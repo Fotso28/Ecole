@@ -10,3 +10,5 @@ process.env.MOBILE_MONEY_PROVIDER = 'simulator';
 process.env.MOBILE_MONEY_WEBHOOK_SECRET = 'test-webhook-secret-0123456789';
 process.env.QUEUES_ENABLED = 'false';
 process.env.WEB_ORIGIN = 'http://localhost:3000';
+process.env.STORAGE_PROVIDER = 'local';
+process.env.STORAGE_LOCAL_DIR = `${process.env.TMPDIR ?? '/tmp'}/ecole-test-storage`;

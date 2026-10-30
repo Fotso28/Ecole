@@ -1,3 +1,4 @@
+import { MAX_FILE_BYTES } from '@ecole/shared';
 import { z } from 'zod';
 
 const envSchema = z.object({
@@ -45,6 +46,29 @@ const envSchema = z.object({
   PAYMENT_RATE_CALLBACK: z.string().default('120/60'),
   // Codes SMS de connexion des parents.
   OTP_DAILY_SMS_BUDGET: z.coerce.number().int().positive().default(2000),
+  STORAGE_PROVIDER: z.enum(['local', 's3']).default('local'),
+  STORAGE_LOCAL_DIR: z.string().default('storage'),
+  S3_ENDPOINT: z.string().optional(),
+  S3_REGION: z.string().default('us-east-1'),
+  S3_BUCKET: z.string().optional(),
+  S3_ACCESS_KEY_ID: z.string().optional(),
+  S3_SECRET_ACCESS_KEY: z.string().optional(),
+  S3_FORCE_PATH_STYLE: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
+  /**
+   * Liens présignés directs vers le stockage S3 (fichiers non chiffrés). À désactiver quand le
+   * stockage n'est pas joignable par les navigateurs (MinIO interne) : l'API sert alors les fichiers.
+   */
+  S3_PRESIGNED_DOWNLOADS: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
+  FILE_MAX_BYTES: z.coerce.number().int().positive().default(MAX_FILE_BYTES),
+  FILE_URL_TTL_SECONDS: z.coerce.number().int().min(30).max(3600).default(300),
+  /** Préfixe public de l'API, pour les liens de téléchargement signés du stockage local. */
+  API_PUBLIC_URL: z.string().default('/api'),
   QUEUES_ENABLED: z
     .enum(['true', 'false'])
     .default('true')
@@ -68,6 +92,12 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     if (/^0+$/.test(parsed.data.DATA_ENCRYPTION_KEY)) {
       throw new Error('Clé de chiffrement par défaut interdite en production');
     }
+  }
+  if (parsed.data.STORAGE_PROVIDER === 's3') {
+    const missing = (['S3_BUCKET', 'S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY'] as const).filter(
+      (k) => !parsed.data[k],
+    );
+    if (missing.length > 0) throw new Error(`Stockage S3 : renseigner ${missing.join(', ')}`);
   }
   return parsed.data;
 }

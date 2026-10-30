@@ -1,12 +1,14 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { formatFileSize } from '@ecole/shared';
+import { Paperclip } from 'lucide-react';
 import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, EmptyState, ErrorBlock, LoadingBlock, PageHeader } from '@/components/ui/card';
 import { useToast } from '@/components/ui/toast';
-import { api } from '@/lib/api';
+import { api, openFile } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { formatDateTime, formatShortDate } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -16,6 +18,8 @@ interface Justification {
   status: 'PENDING' | 'ACCEPTED' | 'REJECTED';
   reason: string;
   createdAt: string;
+  attachment: { id: string; name: string; mimeType: string; size: number } | null;
+  hasAttachment: boolean;
   student: { id: string; firstName: string; lastName: string; matricule: string } | null;
   records: {
     id: string;
@@ -119,6 +123,29 @@ export default function JustificationsPage() {
                     </li>
                   ))}
                 </ul>
+                {j.hasAttachment ? (
+                  j.attachment ? (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="self-start"
+                      aria-label={`Voir la pièce jointe de ${j.student?.firstName ?? 'l’élève'} (${formatFileSize(j.attachment.size)})`}
+                      onClick={() =>
+                        openFile(`/attendance/justifications/${j.id}/attachment`).catch((e) =>
+                          toast(e instanceof Error ? e.message : 'Erreur', 'error'),
+                        )
+                      }
+                    >
+                      <Paperclip className="size-4" aria-hidden />
+                      Voir la pièce jointe · {formatFileSize(j.attachment.size)}
+                    </Button>
+                  ) : (
+                    <p className="flex items-center gap-1.5 text-sm text-muted">
+                      <Paperclip className="size-4" aria-hidden />
+                      Pièce jointe fournie
+                    </p>
+                  )
+                ) : null}
                 {j.status === 'PENDING' && can('attendance.justify') ? (
                   <div className="grid grid-cols-2 gap-2">
                     <Button

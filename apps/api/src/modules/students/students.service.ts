@@ -27,6 +27,7 @@ import { Db, InjectDb, Tx } from '../../common/prisma';
 import { ScopeService } from '../../common/scope.service';
 import { FinanceService } from '../finance/finance.service';
 import { normalizeImportHeader, readStudentSheet } from './xlsx';
+import { FilesService, presentFile, type UploadedFile } from '../files/files.service';
 
 export const DEFAULT_DOCUMENTS = [
   'Acte de naissance',
@@ -53,6 +54,7 @@ export class StudentsService {
     private readonly counters: CountersService,
     private readonly audit: AuditService,
     private readonly finance: FinanceService,
+    private readonly files: FilesService,
   ) {}
 
   async list(q: ListQuery) {
@@ -389,7 +391,7 @@ export class StudentsService {
           orderBy: { createdAt: 'desc' },
           include: { class: { include: { academicYear: true, level: true } } },
         },
-        documents: { orderBy: { type: 'asc' } },
+        documents: { orderBy: { type: 'asc' }, include: { file: true } },
       },
     });
     if (!student || student.deletedAt) throw new NotFoundException('Élève introuvable');
@@ -462,7 +464,13 @@ export class StudentsService {
         isCurrent: e.academicYearId === year.id,
         class: { id: e.class.id, name: e.class.name, level: e.class.level.name },
       })),
-      documents: student.documents.map((d) => ({ id: d.id, type: d.type, status: d.status })),
+      documents: student.documents.map((d) => ({
+        id: d.id,
+        type: d.type,
+        status: d.status,
+        hasFile: !!presentFile(d.file),
+        file: this.scope.can('students.documents') ? presentFile(d.file) : null,
+      })),
       attendance: {
         absences: records.filter((r) => r.status === 'ABSENT').length,
         unjustified: records.filter(
@@ -528,6 +536,50 @@ export class StudentsService {
       after: status,
     });
     return updated;
+  }
+
+  /**
+   * Dépôt (ou remplacement) du fichier d'une pièce d'inscription : la pièce passe à « fournie »,
+   * l'ancien fichier est supprimé logiquement.
+   */
+  async uploadDocument(studentId: string, documentId: string, upload: UploadedFile | undefined) {
+    await this.ensureStudent(studentId);
+    const doc = await this.db.studentDocument.findFirst({ where: { id: documentId, studentId } });
+    if (!doc) throw new NotFoundException('Pièce introuvable');
+    this.files.validate(upload);
+    return this.db.$transaction(async (tx) => {
+      const file = await this.files.store(upload, 'STUDENT_DOCUMENT', tx);
+      if (doc.fileId) await this.files.softDelete(doc.fileId, 'Pièce remplacée', tx);
+      const updated = await tx.studentDocument.update({
+        where: { id: documentId },
+        data: { fileId: file.id, status: 'RECEIVED' },
+      });
+      await this.audit.log(
+        {
+          action: doc.fileId ? 'students.document_replaced' : 'students.document_uploaded',
+          entity: 'StudentDocument',
+          entityId: documentId,
+          before: { status: doc.status, fileId: doc.fileId },
+          after: { status: updated.status, fileId: file.id },
+        },
+        tx,
+      );
+      return {
+        id: updated.id,
+        type: updated.type,
+        status: updated.status,
+        hasFile: true,
+        file: presentFile(file),
+      };
+    });
+  }
+
+  /** Lien de consultation du fichier d'une pièce, journalisé (donnée personnelle). */
+  async documentLink(studentId: string, documentId: string) {
+    await this.ensureStudent(studentId);
+    const doc = await this.db.studentDocument.findFirst({ where: { id: documentId, studentId } });
+    if (!doc) throw new NotFoundException('Pièce introuvable');
+    return this.files.link(doc.fileId, true);
   }
 
   /** Inscription pour l'année en cours (nouvelle classe, redoublement). */

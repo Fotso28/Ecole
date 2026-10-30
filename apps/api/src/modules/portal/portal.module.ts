@@ -10,8 +10,10 @@ import {
   Post,
   Query,
   Res,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { RateLimit } from '../../common/rate-limit';
 import {
@@ -31,6 +33,9 @@ import { ZodPipe } from '../../common/zod.pipe';
 import { AttendanceModule, AttendanceService } from '../attendance/attendance.module';
 import { FinanceModule } from '../finance/finance.module';
 import { FinanceService } from '../finance/finance.service';
+import { FileUpload } from '../files/files.module';
+import type { UploadedFile as Upload } from '../files/files.service';
+import { LessonsModule, LessonsService } from '../lessons/lessons.module';
 import { toParsed } from '../grades/grades.compute';
 import { PdfModule } from '../pdf/pdf.module';
 import { PdfService } from '../pdf/pdf.service';
@@ -58,6 +63,7 @@ export class PortalService {
     private readonly attendance: AttendanceService,
     private readonly pdf: PdfService,
     private readonly transcripts: TranscriptsService,
+    private readonly lessons: LessonsService,
   ) {}
 
   private async childLink(studentId: string) {
@@ -139,7 +145,10 @@ export class PortalService {
             }),
             this.db.attendanceRecord.findMany({
               where: { studentId, status: { in: ['ABSENT', 'LATE'] } },
-              include: { session: true, justification: { select: { status: true } } },
+              include: {
+                session: true,
+                justification: { select: { id: true, status: true, fileId: true } },
+              },
               orderBy: { session: { date: 'desc' } },
               take: 20,
             }),
@@ -236,6 +245,8 @@ export class PortalService {
             endTime: r.session.endTime,
             status: r.status,
             justification: r.justification?.status ?? null,
+            justificationId: r.justification?.id ?? null,
+            hasAttachment: !!r.justification?.fileId,
           })),
           reportCards: reportCards.map((r) => {
             const data = r.data as unknown as ReportCardData;
@@ -285,6 +296,67 @@ export class PortalService {
       'portal-justify',
       () => this.attendance.createJustification(input, userId),
       link.schoolId,
+    );
+  }
+
+  /** Pièce jointe d'un justificatif (photo d'un certificat médical…), déposée par le parent. */
+  async attach(justificationId: string, upload: Upload | undefined) {
+    const j = await runAsSystem('portal-justification', () =>
+      this.db.justification.findUnique({ where: { id: justificationId } }),
+    );
+    if (!j) throw new NotFoundException('Justificatif introuvable');
+    await this.childLink(j.studentId);
+    return runAsSystem(
+      'portal-justification-attachment',
+      () => this.attendance.attach(j.id, upload),
+      j.schoolId,
+    );
+  }
+
+  /** Devoirs à faire et supports de cours de la classe actuelle de l'enfant. */
+  async homework(studentId: string) {
+    const link = await this.childLink(studentId);
+    return runAsSystem(
+      'portal-homework',
+      async () => {
+        const enrollment = await this.db.enrollment.findFirst({
+          where: { studentId, class: { academicYear: { isCurrent: true } } },
+          orderBy: { createdAt: 'desc' },
+          include: { class: { select: { name: true } } },
+        });
+        if (!enrollment) return { className: null, homework: [], materials: [] };
+        return {
+          className: enrollment.class.name,
+          ...(await this.lessons.forParents(enrollment.classId)),
+        };
+      },
+      link.schoolId,
+    );
+  }
+
+  /** Lien d'un support de cours, si l'un des enfants du parent est inscrit dans sa classe. */
+  async materialFile(materialId: string) {
+    const userId = parentContext().userId;
+    const material = await runAsSystem('portal-material', () =>
+      this.db.courseMaterial.findUnique({ where: { id: materialId } }),
+    );
+    if (!material || material.deletedAt) throw new NotFoundException('Support introuvable');
+    const link = await runAsSystem('portal-material-link', () =>
+      this.db.studentGuardian.findFirst({
+        where: {
+          guardian: { userId },
+          student: {
+            ...VISIBLE_STUDENT,
+            enrollments: { some: { classId: material.classId } },
+          },
+        },
+      }),
+    );
+    if (!link) throw new NotFoundException('Support introuvable');
+    return runAsSystem(
+      'portal-material-file',
+      () => this.lessons.materialFile(material.id),
+      material.schoolId,
     );
   }
 
@@ -405,6 +477,26 @@ export class PortalController {
   }
 
   @ParentRoute()
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(FileUpload)
+  @Post('justifications/:id/attachment')
+  attach(@Param('id') id: string, @UploadedFile() file: Upload | undefined) {
+    return this.portal.attach(id, file);
+  }
+
+  @ParentRoute()
+  @Get('children/:id/homework')
+  homework(@Param('id') id: string) {
+    return this.portal.homework(id);
+  }
+
+  @ParentRoute()
+  @Get('materials/:id/file')
+  materialFile(@Param('id') id: string) {
+    return this.portal.materialFile(id);
+  }
+
+  @ParentRoute()
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @RateLimit('portal-payment')
   @Post('payments')
@@ -445,7 +537,7 @@ export class PortalController {
 }
 
 @Module({
-  imports: [FinanceModule, AttendanceModule, PdfModule, TranscriptsModule],
+  imports: [FinanceModule, AttendanceModule, PdfModule, TranscriptsModule, LessonsModule],
   controllers: [PortalController],
   providers: [PortalService],
 })

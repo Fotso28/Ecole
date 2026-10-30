@@ -479,9 +479,12 @@ model StudentDocument {
   type      String
   status    DocumentStatus @default(MISSING)
   fileKey   String?
+  /// Fichier déposé (le statut reste réglable à la main, avec ou sans fichier).
+  fileId    String?
   createdAt DateTime       @default(now())
 
-  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  student Student     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  file    StoredFile? @relation(fields: [fileId], references: [id], onDelete: SetNull)
 
   @@unique([studentId, type])
 }
@@ -541,8 +544,11 @@ model Justification {
   reviewedById  String?
   reviewedAt    DateTime?
   createdAt     DateTime            @default(now())
+  /// Pièce jointe (certificat médical, convocation…), déposée par le parent ou l'école.
+  fileId        String?
 
   records AttendanceRecord[]
+  file    StoredFile?        @relation(fields: [fileId], references: [id], onDelete: SetNull)
 
   @@index([schoolId, status])
 }
@@ -1044,4 +1050,80 @@ model AdminDocument {
   @@unique([schoolId, type, academicYearId, sequence])
   @@index([schoolId, issuedAt])
   @@index([schoolId, studentId])
+}
+
+enum FileCategory {
+  STUDENT_DOCUMENT
+  JUSTIFICATION
+  COURSE_MATERIAL
+}
+
+/// Fichier stocké (disque local ou stockage compatible S3). Jamais supprimé physiquement par
+/// l'application : la suppression est logique (`deletedAt`).
+model StoredFile {
+  id           String       @id @default(cuid())
+  schoolId     String
+  category     FileCategory
+  /// Clé dans le stockage, générée par l'API (aucune partie fournie par l'utilisateur).
+  storageKey   String       @unique
+  originalName String
+  /// Type vérifié sur le contenu réel du fichier.
+  mimeType     String
+  size         Int
+  sha256       String
+  /// Contenu chiffré au repos (AES-256-GCM) : pièces d'identité et justificatifs.
+  encrypted    Boolean      @default(false)
+  uploadedById String?
+  createdAt    DateTime     @default(now())
+  deletedAt    DateTime?
+  deletedById  String?
+
+  studentDocuments StudentDocument[]
+  justifications   Justification[]
+  courseMaterials  CourseMaterial[]
+
+  @@index([schoolId, category])
+}
+
+/// Cahier de texte : une séance (classe, matière, date), son contenu et le travail à faire.
+model LessonLog {
+  id              String    @id @default(cuid())
+  schoolId        String
+  classId         String
+  classSubjectId  String
+  date            DateTime  @db.Date
+  startTime       String?
+  content         String
+  homework        String?
+  homeworkDueDate DateTime? @db.Date
+  authorId        String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
+
+  materials CourseMaterial[]
+
+  @@index([schoolId, classId, date])
+  @@index([schoolId, classId, homeworkDueDate])
+  @@index([classSubjectId, date])
+}
+
+/// Support de cours rattaché à une classe et une matière, éventuellement à une séance.
+model CourseMaterial {
+  id             String    @id @default(cuid())
+  schoolId       String
+  classId        String
+  classSubjectId String
+  lessonLogId    String?
+  title          String
+  fileId         String
+  uploadedById   String
+  createdAt      DateTime  @default(now())
+  deletedAt      DateTime?
+
+  lessonLog LessonLog? @relation(fields: [lessonLogId], references: [id], onDelete: SetNull)
+  file      StoredFile @relation(fields: [fileId], references: [id], onDelete: Restrict)
+
+  @@index([schoolId, classId])
+  @@index([classSubjectId])
 }

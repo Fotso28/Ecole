@@ -62,6 +62,14 @@ describe('navigation par rôle', () => {
     expect(accountant).not.toContain('/notes');
   });
 
+  it('ouvre le cahier de texte aux enseignants, au censeur et à la direction', () => {
+    expect(hrefs(me(['TEACHER']))).toContain('/cahier-de-texte');
+    expect(hrefs(me(['CENSOR']))).toContain('/cahier-de-texte');
+    expect(hrefs(me(['DIRECTOR']))).toContain('/cahier-de-texte');
+    expect(hrefs(me(['ACCOUNTANT']))).not.toContain('/cahier-de-texte');
+    expect(hrefs(me(['SECRETARY']))).not.toContain('/cahier-de-texte');
+  });
+
   it('cumule les menus de rôles multiples', () => {
     const both = hrefs(me(['TEACHER', 'SUPERVISOR']));
     expect(both).toEqual(

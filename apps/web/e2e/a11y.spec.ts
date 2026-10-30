@@ -43,6 +43,7 @@ test('écrans de la direction', async ({ page }) => {
     '/caisse',
     '/impayes',
     '/emploi-du-temps',
+    '/cahier-de-texte',
     '/parametres',
     '/eleves/import',
     '/documents',
@@ -54,6 +55,16 @@ test('écrans de la direction', async ({ page }) => {
     await expect(page.locator('main h1').first()).toBeVisible();
     await expectAccessible(page, path);
   }
+  // Fiche élève et dépôt d'une pièce d'inscription.
+  await page.goto('/eleves?q=Ngono');
+  await page.getByRole('link', { name: /Ngono Marie-Claire/ }).click();
+  await expect(page.getByRole('heading', { name: 'Pièces du dossier' })).toBeVisible();
+  await expectAccessible(page, '/eleves/[id]');
+  await page
+    .getByRole('button', { name: /(Déposer|Remplacer) le fichier : Certificat médical/ })
+    .click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await expectAccessible(page, '/eleves/[id] (dépôt de pièce)');
 });
 
 test('fenêtres du secrétariat et de la surveillance', async ({ page }) => {
@@ -92,6 +103,12 @@ test('appel et notes de l’enseignant', async ({ page }) => {
       .first(),
   ).toBeVisible();
   await expectAccessible(page, '/notes (saisie)');
+  await page.goto('/cahier-de-texte');
+  await expect(page.getByText(/Théorème de Pythagore/).first()).toBeVisible();
+  await expectAccessible(page, '/cahier-de-texte (enseignant)');
+  await page.getByRole('button', { name: 'Nouvelle séance' }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await expectAccessible(page, '/cahier-de-texte (nouvelle séance)');
 });
 
 test('portail des parents', async ({ page, request }, info) => {
@@ -113,7 +130,12 @@ test('portail des parents', async ({ page, request }, info) => {
   await loginParent(page, phones[info.project.name === 'mobile' ? 0 : 1]!.replace('+237', ''));
   await expect(page.getByRole('heading', { name: /^Bonjour/ })).toBeVisible();
   await expectAccessible(page, '/portail');
-  for (const path of ['/portail/paiement', '/portail/notes', '/portail/absences']) {
+  for (const path of [
+    '/portail/paiement',
+    '/portail/notes',
+    '/portail/absences',
+    '/portail/devoirs',
+  ]) {
     await page.goto(path);
     await expect(page.locator('main').first()).toBeVisible();
     await expectAccessible(page, path);

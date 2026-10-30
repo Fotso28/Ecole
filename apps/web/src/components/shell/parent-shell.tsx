@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { CalendarDays, FileText, Home, LogOut, Wallet } from 'lucide-react';
+import { BookOpen, CalendarDays, FileText, Home, LogOut, Wallet } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
@@ -38,6 +38,7 @@ const NAV = [
   { href: '/portail', label: 'Accueil', icon: Home },
   { href: '/portail/notes', label: 'Notes', icon: FileText },
   { href: '/portail/absences', label: 'Absences', icon: CalendarDays },
+  { href: '/portail/devoirs', label: 'Devoirs', icon: BookOpen },
   { href: '/portail/paiement', label: 'Payer', icon: Wallet },
 ];
 
@@ -113,7 +114,7 @@ export function ParentShell({ children }: { children: ReactNode }) {
         <main className="flex flex-1 flex-col gap-4 px-4 pt-2 pb-28">{children}</main>
         <nav
           aria-label="Navigation"
-          className="fixed inset-x-0 bottom-0 z-30 mx-auto grid w-full max-w-md grid-cols-4 border-t border-line bg-white px-1 pt-1 pb-safe"
+          className="fixed inset-x-0 bottom-0 z-30 mx-auto grid w-full max-w-md grid-cols-5 border-t border-line bg-white px-1 pt-1 pb-safe"
         >
           {NAV.map((item) => {
             const active =

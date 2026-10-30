@@ -2,13 +2,18 @@ import { defineConfig, devices } from '@playwright/test';
 
 const API_PORT = 4100;
 const WEB_PORT = 3100;
+/** Rôle propriétaire : migrations, remise à zéro et préparation des données des parcours. */
 export const E2E_DATABASE_URL =
   process.env.E2E_DATABASE_URL ?? 'postgresql://ecole:ecole@localhost:5432/ecole_e2e';
+/** Rôle applicatif ecole_app : l'API des parcours subit la Row-Level Security. */
+export const E2E_APP_DATABASE_URL =
+  process.env.E2E_APP_DATABASE_URL ?? 'postgresql://ecole_app:ecole_app@localhost:5432/ecole_e2e';
 
 export const apiEnv = {
   NODE_ENV: 'test' as const,
   PORT: String(API_PORT),
-  DATABASE_URL: E2E_DATABASE_URL,
+  DATABASE_URL: E2E_APP_DATABASE_URL,
+  MIGRATION_DATABASE_URL: E2E_DATABASE_URL,
   JWT_SECRET: 'e2e-jwt-secret-with-enough-length-0123456789',
   OTP_SECRET: 'e2e-otp-secret-with-enough-length-0123456789',
   DATA_ENCRYPTION_KEY: 'b'.repeat(64),

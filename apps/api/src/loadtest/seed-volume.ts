@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { NestFactory } from '@nestjs/core';
 import { permissionsForRoles, type StaffRole } from '@ecole/shared';
 import { PrismaClient } from '@prisma/client';
+import { createDb } from '../common/prisma';
 import { loadDotEnv } from '../config/env';
 import { runAsSystem, runInContext, type StaffContext } from '../common/context';
 import { toDbDate } from '../common/dates';
@@ -73,6 +74,8 @@ async function pool<T>(items: T[], concurrency: number, fn: (item: T, i: number)
   );
 }
 
+const SEED_REASON = 'seed:charge';
+
 async function main(): Promise<void> {
   loadDotEnv();
   if (process.env.LOADTEST_SEED !== 'oui') {
@@ -81,7 +84,8 @@ async function main(): Promise<void> {
   const schoolCount = Number(process.argv[2] ?? 5);
   const studentsPerSchool = Number(process.argv[3] ?? 1500);
   const output = process.argv[4] ?? 'loadtest-fixtures.json';
-  const base = new PrismaClient();
+  // Accès direct en mode système journalisé : la Row-Level Security s'applique au rôle applicatif.
+  const base = createDb(new PrismaClient());
   const { AppModule } = await import('../app.module');
   const { AuthService } = await import('../modules/auth/auth.service');
   const { StudentsService } = await import('../modules/students/students.service');
@@ -371,7 +375,7 @@ async function main(): Promise<void> {
   await base.$disconnect();
 }
 
-main().catch((e) => {
+runAsSystem(SEED_REASON, main).catch((e) => {
   console.error(e);
   process.exit(1);
 });

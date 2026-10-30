@@ -5,9 +5,12 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// DATABASE_URL : rôle applicatif ecole_app, soumis à la Row-Level Security.
+// MIGRATION_DATABASE_URL : rôle propriétaire des tables, utilisé par prisma migrate.
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("MIGRATION_DATABASE_URL")
 }
 
 enum SchoolStatus {
@@ -316,7 +319,8 @@ model OtpCode {
   sent       Boolean   @default(false)
 
   @@index([phone, createdAt])
-  @@index([sent, createdAt])
+  /// Budget global des codes anonymes envoyés sur 24 h (sent, trusted, createdAt).
+  @@index([sent, trusted, createdAt])
 }
 
 /// Code de connexion parent erroné : plafond d'essais par numéro, séparé pour les appareils de confiance.
@@ -514,6 +518,8 @@ model StudentGuardian {
 
   @@unique([studentId, guardianId])
   @@index([schoolId])
+  /// Enfants d'un parent (portail) : jointure depuis Guardian.
+  @@index([guardianId])
 }
 
 model Enrollment {
@@ -888,6 +894,9 @@ model NotificationOutbox {
   expiresAt   DateTime?
 
   @@index([status, availableAt])
+  /// Regroupement des notifications de messagerie : plafond par destinataire sur 24 h, envois d'un fil.
+  @@index([template, recipient, createdAt])
+  @@index([schoolId, template, status])
 }
 
 model Announcement {

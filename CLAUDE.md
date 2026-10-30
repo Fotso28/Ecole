@@ -13,6 +13,8 @@ PostgreSQL 16 et Redis sont installés mais arrêtés au démarrage du conteneur
 ```bash
 pg_ctlcluster 16 main start
 su postgres -c "psql -c \"CREATE ROLE ecole WITH LOGIN SUPERUSER PASSWORD 'ecole';\""
+su postgres -c "psql -c \"CREATE ROLE ecole_app WITH LOGIN PASSWORD 'ecole_app';\""
+su postgres -c "psql -c \"CREATE ROLE ecole_system WITH NOLOGIN BYPASSRLS; GRANT ecole_system TO ecole_app WITH INHERIT FALSE, SET TRUE;\""
 for db in ecole ecole_test ecole_e2e; do su postgres -c "createdb -O ecole $db"; done
 redis-server --daemonize yes --port 6379
 cp apps/api/.env.example apps/api/.env
@@ -35,6 +37,7 @@ Chromium et Playwright sont préinstallés : ne pas lancer `playwright install`.
 ## Règles métier non négociables
 
 - **Multi-établissement** : toute table métier porte `schoolId` et son modèle est ajouté à `TENANT_MODELS` dans `apps/api/src/common/prisma.ts`. Un test doit prouver qu'une école ne voit ni ne modifie les données d'une autre.
+- **Row-Level Security** : la migration qui crée une table cloisonnée active aussi la RLS (`ENABLE` et `FORCE ROW LEVEL SECURITY`, politique `ecole_isolation` sur `"schoolId" = app_rls_school()`, voir `20261031130000_row_level_security` et `20261031130100_rls_role_systeme`) ; `test/rls.test.ts` échoue sinon. L'API se connecte avec le rôle `ecole_app` (`DATABASE_URL`), les migrations avec le propriétaire (`MIGRATION_DATABASE_URL`). Accès toutes écoles uniquement par `runAsSystem` sans `schoolId` (mode système journalisé : rôle `ecole_system`, BYPASSRLS, pris par `SET LOCAL ROLE`).
 - **Montants** en FCFA entiers, **notes** en centièmes (1342 = 13,42) : jamais de virgule flottante.
 - **Écritures comptables en ajout seul** : un paiement ne se modifie jamais, une correction crée une nouvelle écriture. Un bulletin publié est figé ; une correction crée une nouvelle version.
 - **Permissions** : chaque route déclare sa permission ; un enseignant reste limité à ses classes. Les nouvelles permissions vont dans `packages/shared/src/permissions.ts`.

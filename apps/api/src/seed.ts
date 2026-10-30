@@ -3,6 +3,7 @@ import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { permissionsForRoles, type StaffRole } from '@ecole/shared';
 import { PrismaClient } from '@prisma/client';
+import { createDb } from './common/prisma';
 import { randomUUID } from 'node:crypto';
 import { env, loadDotEnv } from './config/env';
 import { encrypt } from './common/crypto';
@@ -87,10 +88,13 @@ const LAST = [
   'Onana',
 ];
 
+const SEED_REASON = 'seed';
+
 async function main(): Promise<void> {
   loadDotEnv();
   const logger = new Logger('Seed');
-  const base = new PrismaClient();
+  // Accès direct en mode système journalisé : la Row-Level Security s'applique au rôle applicatif.
+  const base = createDb(new PrismaClient());
   if (await base.school.findUnique({ where: { slug: 'college-demo' } })) {
     logger.log('Données de démonstration déjà présentes : rien à faire.');
     await base.$disconnect();
@@ -913,7 +917,7 @@ async function main(): Promise<void> {
   await base.$disconnect();
 }
 
-main().catch((e) => {
+runAsSystem(SEED_REASON, main).catch((e) => {
   console.error(e);
   process.exit(1);
 });

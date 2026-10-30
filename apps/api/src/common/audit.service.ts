@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { currentActorId, currentContext } from './context';
-import { Db, InjectDb, Tx } from './prisma';
+import { currentActorId, currentContext, runAsSystem } from './context';
+import { Db, InjectDb, rlsCovers, Tx } from './prisma';
 
 export interface AuditEntry {
   action: string;
@@ -33,18 +33,21 @@ export class AuditService {
           : ctx?.kind === 'system'
             ? (ctx.schoolId ?? null)
             : null;
-    await (tx ?? this.db).auditLog.create({
-      data: {
-        schoolId,
-        actorId: currentActorId() ?? null,
-        action: entry.action,
-        entity: entry.entity,
-        entityId: entry.entityId ?? null,
-        before: toJson(entry.before),
-        after: toJson(entry.after),
-        reason: entry.reason ?? null,
-        ip: ctx?.ip ?? null,
-      },
-    });
+    const data = {
+      schoolId,
+      actorId: currentActorId() ?? null,
+      action: entry.action,
+      entity: entry.entity,
+      entityId: entry.entityId ?? null,
+      before: toJson(entry.before),
+      after: toJson(entry.after),
+      reason: entry.reason ?? null,
+      ip: ctx?.ip ?? null,
+    };
+    const write = () => (tx ?? this.db).auditLog.create({ data });
+    // Entrée hors de la portée de la base (connexion, portail parent, événement de plateforme) :
+    // écrite en mode système, la Row-Level Security refuserait sinon la ligne.
+    if (rlsCovers(schoolId)) await write();
+    else await runAsSystem(`audit:${entry.action}`, write);
   }
 }

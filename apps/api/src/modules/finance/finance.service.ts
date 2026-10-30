@@ -1057,6 +1057,59 @@ export class FinanceService {
     }));
   }
 
+  /**
+   * Journal paginé par curseur (du plus récent au plus ancien) : une page de `limit` paiements et
+   * le curseur de la suivante. Index `Payment(schoolId, createdAt)`.
+   */
+  async journalPage(filters: {
+    from?: string;
+    to?: string;
+    method?: PaymentMethod;
+    status?: Payment['status'];
+    cursor?: string;
+    limit: number;
+  }) {
+    const where: Prisma.PaymentWhereInput = {
+      method: filters.method,
+      status: filters.status,
+      createdAt: {
+        gte: filters.from ? toDbDate(filters.from) : undefined,
+        lt: filters.to ? toDbDate(addDays(filters.to, 1)) : undefined,
+      },
+    };
+    // Total encaissé sur toute la période (pas seulement la page), calculé à la première page.
+    const collected = filters.cursor
+      ? null
+      : await this.db.payment.aggregate({
+          where: { ...where, status: filters.status ?? 'SUCCESS', reversedAt: null },
+          _sum: { amount: true },
+        });
+    const payments = await this.db.payment.findMany({
+      where,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: filters.limit + 1,
+      ...(filters.cursor ? { cursor: { id: filters.cursor }, skip: 1 } : {}),
+      include: { receipt: true },
+    });
+    const page = payments.slice(0, filters.limit);
+    const students = await this.db.student.findMany({
+      where: { id: { in: [...new Set(page.map((p) => p.studentId))] } },
+      select: { id: true, firstName: true, lastName: true, matricule: true },
+    });
+    const byId = new Map(students.map((s) => [s.id, s]));
+    return {
+      items: page.map((p) => ({
+        ...this.presentPayment(p),
+        student: byId.get(p.studentId) ?? null,
+      })),
+      nextCursor: payments.length > filters.limit ? (page.at(-1)?.id ?? null) : null,
+      collected:
+        collected && (filters.status ?? 'SUCCESS') === 'SUCCESS'
+          ? (collected._sum.amount ?? 0)
+          : null,
+    };
+  }
+
   async exportCsv(from: string, to: string): Promise<string> {
     const rows = await this.journal({ from, to, status: 'SUCCESS' });
     const header = 'date;recu;matricule;eleve;moyen;montant;annule;reference';
@@ -1222,7 +1275,11 @@ export class FinanceService {
     };
   }
 
-  async unpaid(academicYearId: string, classId?: string) {
+  async unpaid(
+    academicYearId: string,
+    classId?: string,
+    paging: { page: number; pageSize: number } = { page: 1, pageSize: 50 },
+  ) {
     const enrollments = await this.db.enrollment.findMany({
       where: { academicYearId, ...(classId ? { classId } : {}), student: { deletedAt: null } },
       include: {
@@ -1267,7 +1324,16 @@ export class FinanceService {
           oldestDueDate: v.oldest,
         };
       })
-      .sort((a, b) => b.overdue - a.overdue);
+      // Ordre total : les pages successives ne se recouvrent pas.
+      .sort(
+        (a, b) =>
+          b.overdue - a.overdue ||
+          `${a.student?.lastName} ${a.student?.firstName}`.localeCompare(
+            `${b.student?.lastName} ${b.student?.firstName}`,
+            'fr',
+          ) ||
+          (a.student?.id ?? '').localeCompare(b.student?.id ?? ''),
+      );
     const perClass = new Map<
       string,
       {
@@ -1296,8 +1362,12 @@ export class FinanceService {
       cur.paid += v.paid;
       perClass.set(e.class.id, cur);
     }
+    const start = (paging.page - 1) * paging.pageSize;
     return {
-      students,
+      total: students.length,
+      page: paging.page,
+      pageSize: paging.pageSize,
+      students: students.slice(start, start + paging.pageSize),
       classes: [...perClass.values()]
         .map((c) => ({ ...c, rate: recoveryRate(c.paid, c.due) }))
         .sort((a, b) => a.rate - b.rate),

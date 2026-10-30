@@ -110,6 +110,26 @@ test('dossier du personnel et fenêtres du module RH', async ({ page }) => {
   await expectAccessible(page, '/rh/baremes (nouvelle version)');
 });
 
+test('journal des paiements et déplacement d’un cours', async ({ page }) => {
+  await loginStaff(page, 'direction@demo.cm');
+  await page.goto('/caisse/journal');
+  await expect(page.locator('main h1').first()).toBeVisible();
+  await expectAccessible(page, '/caisse/journal');
+  // Emploi du temps : choix d'un créneau au clavier (alternative au glisser-déposer).
+  await page.goto('/emploi-du-temps');
+  await page.getByLabel('Classe').selectOption({ label: '4e A' });
+  // Sur téléphone, un jour à la fois : le lundi a des cours dans le jeu de démonstration.
+  const monday = page.getByRole('tab', { name: 'Lundi' });
+  if (await monday.isVisible()) await monday.click();
+  await page
+    .getByRole('button', { name: /^Déplacer / })
+    .filter({ visible: true })
+    .first()
+    .click();
+  await expect(page.getByRole('dialog', { name: /^Déplacer / })).toBeVisible();
+  await expectAccessible(page, '/emploi-du-temps (déplacer un cours)');
+});
+
 test('fenêtres du secrétariat et de la surveillance', async ({ page }) => {
   await loginStaff(page, 'secretariat@demo.cm');
   await page.goto('/documents');
@@ -288,6 +308,21 @@ test('portail des parents', async ({ page, request }, info) => {
     await expect(page.locator('main').first()).toBeVisible();
     await expectAccessible(page, path);
   }
+  // Menu « Plus » de la barre du bas, et bandeau hors connexion.
+  await page
+    .getByRole('navigation', { name: 'Navigation' })
+    .getByRole('button', { name: /^Plus/ })
+    .click();
+  await expect(page.getByRole('dialog', { name: 'Plus' })).toBeVisible();
+  await expectAccessible(page, '/portail (menu Plus)');
+  await page.keyboard.press('Escape');
+  await page.context().setOffline(true);
+  await expect(page.getByText(/^Hors connexion/)).toBeVisible();
+  const { violations } = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+    .analyze();
+  expect(violations.filter((v) => v.impact === 'serious' || v.impact === 'critical')).toEqual([]);
+  await page.context().setOffline(false);
 });
 
 test('facturation de la plateforme', async ({ page, request }) => {

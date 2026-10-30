@@ -1,23 +1,17 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import {
-  BookOpen,
-  CalendarDays,
-  CalendarRange,
-  FileText,
-  Home,
-  LogOut,
-  MessagesSquare,
-  Wallet,
-} from 'lucide-react';
+import { Ellipsis, LogOut } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { useParentUnread } from '@/lib/communication';
+import { isPortalActive, PORTAL_MESSAGES, PORTAL_NAV, splitPortalNav } from '@/lib/portal-nav';
 import { cn } from '@/lib/utils';
+import { OfflineBanner } from '@/components/offline-banner';
+import { Sheet } from '@/components/ui/sheet';
 
 export interface Child {
   id: string;
@@ -44,22 +38,16 @@ const ChildrenContext = createContext<ChildrenValue>({
 });
 export const useChildren = () => useContext(ChildrenContext);
 
-const NAV = [
-  { href: '/portail', label: 'Accueil', icon: Home },
-  { href: '/portail/notes', label: 'Notes', icon: FileText },
-  { href: '/portail/absences', label: 'Absences', icon: CalendarDays },
-  { href: '/portail/devoirs', label: 'Devoirs', icon: BookOpen },
-  { href: '/portail/paiement', label: 'Payer', icon: Wallet },
-  { href: '/portail/messages', label: 'Messages', icon: MessagesSquare },
-  { href: '/portail/calendrier', label: 'Agenda', icon: CalendarRange },
-];
-
 export function ParentShell({ children }: { children: ReactNode }) {
   const { status, me, logout } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const unread = useParentUnread().data?.count ?? 0;
+  const [moreOpen, setMoreOpen] = useState(false);
+  const nav = splitPortalNav(PORTAL_NAV, pathname, unread);
+
+  useEffect(() => setMoreOpen(false), [pathname]);
 
   useEffect(() => {
     if (status === 'anonymous') router.replace('/parent/connexion');
@@ -107,6 +95,7 @@ export function ParentShell({ children }: { children: ReactNode }) {
   return (
     <ChildrenContext.Provider value={value}>
       <div className="mx-auto flex min-h-dvh w-full max-w-md flex-col bg-paper sm:border-x sm:border-line">
+        <OfflineBanner />
         <header className="flex items-center justify-between gap-3 px-4 pt-5 pb-2">
           <div className="flex flex-col">
             <h1 className="font-display text-2xl font-bold">Bonjour {me.user.firstName}</h1>
@@ -127,19 +116,18 @@ export function ParentShell({ children }: { children: ReactNode }) {
         <main className="flex flex-1 flex-col gap-4 px-4 pt-2 pb-28">{children}</main>
         <nav
           aria-label="Navigation"
-          className="fixed inset-x-0 bottom-0 z-30 mx-auto grid w-full max-w-md grid-cols-7 border-t border-line bg-white px-1 pt-1 pb-safe"
+          className="fixed inset-x-0 bottom-0 z-30 mx-auto grid w-full max-w-md grid-cols-5 border-t border-line bg-white px-1 pt-1 pb-safe"
         >
-          {NAV.map((item) => {
-            const active =
-              item.href === '/portail' ? pathname === '/portail' : pathname.startsWith(item.href);
-            const badge = item.href === '/portail/messages' && unread > 0;
+          {nav.primary.map((item) => {
+            const active = isPortalActive(item.href, pathname);
+            const badge = item.href === PORTAL_MESSAGES && unread > 0;
             return (
               <Link
                 key={item.href}
                 href={item.href}
                 aria-current={active ? 'page' : undefined}
                 className={cn(
-                  'flex min-h-14 flex-col items-center justify-center gap-0.5 text-[11px]',
+                  'flex min-h-14 min-w-0 flex-col items-center justify-center gap-0.5 text-[11px]',
                   active ? 'font-bold text-primary' : 'font-semibold text-muted',
                 )}
               >
@@ -161,7 +149,63 @@ export function ParentShell({ children }: { children: ReactNode }) {
               </Link>
             );
           })}
+          {nav.more.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => setMoreOpen(true)}
+              aria-haspopup="dialog"
+              aria-current={nav.moreActive ? 'page' : undefined}
+              className={cn(
+                'flex min-h-14 min-w-0 flex-col items-center justify-center gap-0.5 text-[11px]',
+                nav.moreActive ? 'font-bold text-primary' : 'font-semibold text-muted',
+              )}
+            >
+              <span className="relative">
+                <Ellipsis className="size-[22px]" aria-hidden />
+                {nav.moreBadge ? (
+                  <span
+                    aria-hidden
+                    className="absolute -top-1.5 -right-2.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-bold text-white"
+                  >
+                    {unread}
+                  </span>
+                ) : null}
+              </span>
+              Plus
+              {nav.moreBadge ? (
+                <span className="sr-only">{`(${unread} ${unread > 1 ? 'messages non lus' : 'message non lu'})`}</span>
+              ) : null}
+            </button>
+          ) : null}
         </nav>
+        <Sheet open={moreOpen} onClose={() => setMoreOpen(false)} title="Plus">
+          <ul className="flex flex-col gap-1">
+            {nav.more.map((item) => {
+              const active = isPortalActive(item.href, pathname);
+              return (
+                <li key={item.href}>
+                  <Link
+                    href={item.href}
+                    aria-current={active ? 'page' : undefined}
+                    className={cn(
+                      'flex min-h-12 items-center gap-3 rounded-[10px] px-3 text-[15px]',
+                      active ? 'bg-primary-soft font-bold text-primary' : 'font-semibold',
+                    )}
+                  >
+                    <item.icon className="size-5" aria-hidden />
+                    {item.label}
+                    {item.href === PORTAL_MESSAGES && unread > 0 ? (
+                      <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-danger px-1.5 text-xs font-bold text-white">
+                        {unread}
+                        <span className="sr-only"> {unread > 1 ? 'non lus' : 'non lu'}</span>
+                      </span>
+                    ) : null}
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </Sheet>
       </div>
     </ChildrenContext.Provider>
   );

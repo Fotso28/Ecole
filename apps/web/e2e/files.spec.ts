@@ -1,6 +1,13 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { API_URL } from '../playwright.config';
-import { expectNoHorizontalOverflow, loginParent, loginStaff, navigate, PASSWORD } from './helpers';
+import {
+  expectNoHorizontalOverflow,
+  loginParent,
+  loginStaff,
+  navigate,
+  openPortalTab,
+  PASSWORD,
+} from './helpers';
 
 // Image PNG valide de 1 × 1 pixel et en-tête JPEG : le type est vérifié sur le contenu.
 const PNG = Buffer.from(
@@ -176,10 +183,7 @@ test.describe('fichiers et pédagogie', () => {
     const list = await studentsOf(request, '4e A');
     const child = list[list.length - (mobile ? 1 : 2)]!;
     await loginParent(page, child.guardian!.phone.replace('+237', ''));
-    await page
-      .getByRole('navigation', { name: 'Navigation' })
-      .getByRole('link', { name: 'Devoirs' })
-      .click();
+    await openPortalTab(page, 'Devoirs');
     await expect(page.getByRole('heading', { name: 'Devoirs à faire' })).toBeVisible();
     await expect(page.getByText(homework)).toBeVisible();
     await expect(page.getByText('Exercices 3 à 6 page 112.')).toBeVisible();

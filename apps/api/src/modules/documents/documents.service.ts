@@ -37,7 +37,7 @@ export interface AdminDocumentData {
     birthDate: string;
     birthPlace: string | null;
     nationality: string;
-    /** Clé de la photo d'identité (carte d'élève), quand le stockage de fichiers la fournira. */
+    /** Fichier de la photo d'identité (carte d'élève), si l'élève y a consenti à la délivrance. */
     photoKey: string | null;
   };
   class: { name: string; level: string };
@@ -157,7 +157,8 @@ export class DocumentsService {
         birthDate: fromDbDate(student.birthDate),
         birthPlace: student.birthPlace,
         nationality: student.nationality,
-        photoKey: null,
+        photoKey:
+          type === 'STUDENT_CARD' && student.photoConsent ? (student.photoFileId ?? null) : null,
       },
       class: { name: enrollment.class.name, level: enrollment.class.level.name },
       year: {
@@ -302,7 +303,7 @@ export class DocumentsService {
       this.db.adminDocument.count({ where }),
       this.db.adminDocument.findMany({
         where,
-        orderBy: { issuedAt: 'desc' },
+        orderBy: [{ issuedAt: 'desc' }, { id: 'desc' }],
         skip: (q.page - 1) * q.pageSize,
         take: q.pageSize,
       }),

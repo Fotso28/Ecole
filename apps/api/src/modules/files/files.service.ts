@@ -36,11 +36,19 @@ export interface FileLink {
   size: number;
 }
 
-/** Catégories chiffrées au repos : pièces d'identité de l'élève et justificatifs (souvent médicaux). */
-const ENCRYPTED: ReadonlySet<FileCategory> = new Set(['STUDENT_DOCUMENT', 'JUSTIFICATION']);
+/**
+ * Catégories chiffrées au repos : pièces d'identité et photo de l'élève, justificatifs (souvent
+ * médicaux).
+ */
+const ENCRYPTED: ReadonlySet<FileCategory> = new Set([
+  'STUDENT_DOCUMENT',
+  'STUDENT_PHOTO',
+  'JUSTIFICATION',
+]);
 
 const FOLDERS: Record<FileCategory, string> = {
   STUDENT_DOCUMENT: 'eleves',
+  STUDENT_PHOTO: 'photos',
   JUSTIFICATION: 'justificatifs',
   COURSE_MATERIAL: 'supports',
 };
@@ -163,6 +171,17 @@ export class FilesService {
       mimeType: file.mimeType,
       size: file.size,
     };
+  }
+
+  /**
+   * Contenu en clair d'un fichier non supprimé, ou null (impression d'un document par l'API). À
+   * n'appeler qu'après le contrôle des droits sur l'objet auquel le fichier est rattaché.
+   */
+  async content(fileId: string | null | undefined): Promise<Buffer | null> {
+    const file = fileId ? await this.db.storedFile.findUnique({ where: { id: fileId } }) : null;
+    if (!file || file.deletedAt) return null;
+    const raw = await this.storage.get(file.storageKey);
+    return file.encrypted ? decryptBuffer(raw, env().DATA_ENCRYPTION_KEY) : raw;
   }
 
   private sign(file: StoredFile, expiresAt: Date): string {

@@ -1,5 +1,7 @@
 /** Client HTTP de l'API : jeton d'accès en mémoire, jeton de rafraîchissement en cookie httpOnly. */
 
+import { CACHED_AT_HEADER, isOffline, noteCachedResponse } from './offline';
+
 export interface FieldError {
   path: string;
   message: string;
@@ -26,6 +28,12 @@ export class ApiError extends Error {
 let accessToken: string | null = null;
 let refreshing: Promise<boolean> | null = null;
 let onSessionLost: (() => void) | null = null;
+let refreshFailure: 'network' | 'denied' | null = null;
+
+/** Cause du dernier échec de rafraîchissement : réseau absent ou session refusée. */
+export function lastRefreshFailure(): 'network' | 'denied' | null {
+  return refreshFailure;
+}
 
 export function setAccessToken(token: string | null): void {
   accessToken = token;
@@ -46,12 +54,15 @@ export function refreshSession(): Promise<boolean> {
       const res = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'same-origin' });
       if (!res.ok) {
         accessToken = null;
+        refreshFailure = 'denied';
         return false;
       }
       const body = (await res.json()) as { accessToken: string };
       accessToken = body.accessToken;
+      refreshFailure = null;
       return true;
     } catch {
+      refreshFailure = 'network';
       return false;
     } finally {
       setTimeout(() => {
@@ -104,6 +115,9 @@ async function toError(res: Response): Promise<ApiError> {
 }
 
 async function request(path: string, options: RequestOptions = {}): Promise<Response> {
+  // Hors connexion, lecture seule : aucune saisie n'est tentée ni mise en attente.
+  if ((options.method ?? 'GET') !== 'GET' && isOffline())
+    throw new ApiError(0, 'Hors connexion : la saisie reprendra au retour du réseau.');
   let res: Response;
   try {
     res = await send(path, options);
@@ -119,6 +133,7 @@ async function request(path: string, options: RequestOptions = {}): Promise<Resp
     }
   }
   if (!res.ok) throw await toError(res);
+  noteCachedResponse(res.headers.get(CACHED_AT_HEADER));
   return res;
 }
 

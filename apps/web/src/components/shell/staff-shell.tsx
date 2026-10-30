@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { ROLE_LABELS } from '@ecole/shared';
+import { OfflineBanner } from '@/components/offline-banner';
 import { Sheet } from '@/components/ui/sheet';
 import { homeFor, useAuth } from '@/lib/auth';
 import { useStaffUnread } from '@/lib/communication';
@@ -216,6 +217,8 @@ export function StaffShell({ children }: { children: ReactNode }) {
             </span>
           ) : null}
         </header>
+
+        <OfflineBanner className="lg:px-8" />
 
         {mfaMissing ? (
           <div

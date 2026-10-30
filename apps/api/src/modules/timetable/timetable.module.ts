@@ -7,12 +7,20 @@ import {
   Get,
   Injectable,
   Module,
+  NotFoundException,
   Param,
+  Patch,
   Post,
   Query,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { findConflicts, timeOfDay, toMinutes, weeklyMinutesByTeacher } from '@ecole/shared';
+import {
+  checkMove,
+  findConflicts,
+  timeOfDay,
+  toMinutes,
+  weeklyMinutesByTeacher,
+} from '@ecole/shared';
 import { z } from 'zod';
 import { AuditService } from '../../common/audit.service';
 import { currentSchoolId } from '../../common/context';
@@ -27,6 +35,10 @@ const entrySchema = z.object({
   startTime: timeOfDay,
   endTime: timeOfDay,
   roomId: z.string().min(1).optional(),
+});
+const moveSchema = z.object({
+  dayOfWeek: z.number().int().min(1).max(6),
+  startTime: timeOfDay,
 });
 const roomSchema = z.object({
   name: z.string().trim().min(1).max(40),
@@ -52,6 +64,78 @@ export class TimetableService {
       },
       orderBy: [{ dayOfWeek: 'asc' }, { startTime: 'asc' }],
     });
+  }
+
+  /** Charge hebdomadaire maximale des enseignants de l'école, en minutes. */
+  private async maxWeeklyMinutes(): Promise<Record<string, number>> {
+    const memberships = await this.db.membership.findMany({
+      where: { schoolId: currentSchoolId(), maxWeeklyHours: { not: null } },
+      select: { userId: true, maxWeeklyHours: true },
+    });
+    return Object.fromEntries(memberships.map((m) => [m.userId, (m.maxWeeklyHours ?? 0) * 60]));
+  }
+
+  /**
+   * Tous les cours de l'année (toutes classes) et les charges maximales : le site calcule les
+   * conflits pendant le glisser-déposer sans interroger l'API à chaque survol.
+   */
+  async planning() {
+    const year = await this.scope.currentYear();
+    const [entries, maxWeeklyMinutes] = await Promise.all([
+      this.db.timetableEntry.findMany({
+        where: { academicYearId: year.id },
+        orderBy: [{ dayOfWeek: 'asc' }, { startTime: 'asc' }],
+      }),
+      this.maxWeeklyMinutes(),
+    ]);
+    return { entries, maxWeeklyMinutes };
+  }
+
+  /** Déplace un cours (même durée) en refusant les mêmes conflits qu'à l'ajout. */
+  async move(id: string, target: z.infer<typeof moveSchema>) {
+    const year = await this.scope.currentYear();
+    const entry = await this.db.timetableEntry.findUnique({ where: { id } });
+    if (!entry || entry.academicYearId !== year.id)
+      throw new NotFoundException('Cours introuvable pour l’année en cours');
+    const [existing, limits] = await Promise.all([
+      this.db.timetableEntry.findMany({ where: { academicYearId: year.id } }),
+      this.maxWeeklyMinutes(),
+    ]);
+    let check: ReturnType<typeof checkMove>;
+    try {
+      check = checkMove(existing, id, target, limits);
+    } catch (e) {
+      throw new BadRequestException(e instanceof Error ? e.message : 'Créneau invalide');
+    }
+    if (check.conflicts.length > 0) {
+      throw new ConflictException({
+        statusCode: 409,
+        message: check.conflicts.some((c) => c.kind === 'load')
+          ? 'Charge horaire dépassée'
+          : 'Conflit d’emploi du temps',
+        conflicts: check.conflicts.map((c) => ({ kind: c.kind, entryId: c.slotId })),
+      });
+    }
+    const updated = await this.db.timetableEntry.update({
+      where: { id },
+      data: {
+        dayOfWeek: check.slot.dayOfWeek,
+        startTime: check.slot.startTime,
+        endTime: check.slot.endTime,
+      },
+    });
+    await this.audit.log({
+      action: 'timetable.entry_moved',
+      entity: 'TimetableEntry',
+      entityId: id,
+      before: { dayOfWeek: entry.dayOfWeek, startTime: entry.startTime, endTime: entry.endTime },
+      after: {
+        dayOfWeek: updated.dayOfWeek,
+        startTime: updated.startTime,
+        endTime: updated.endTime,
+      },
+    });
+    return updated;
   }
 
   /** Ajoute un cours en refusant tout conflit (enseignant, salle, classe) et tout dépassement de charge. */
@@ -162,6 +246,18 @@ export class TimetableController {
   @Post('entries')
   add(@Body(new ZodPipe(entrySchema)) body: z.infer<typeof entrySchema>) {
     return this.timetable.add(body);
+  }
+
+  @RequirePermissions('academic.read')
+  @Get('planning')
+  planning() {
+    return this.timetable.planning();
+  }
+
+  @RequirePermissions('academic.write')
+  @Patch('entries/:id')
+  move(@Param('id') id: string, @Body(new ZodPipe(moveSchema)) body: z.infer<typeof moveSchema>) {
+    return this.timetable.move(id, body);
   }
 
   @RequirePermissions('academic.write')

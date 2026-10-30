@@ -1,17 +1,14 @@
 'use client';
 
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ADMIN_DOCUMENT_LABELS, ADMIN_DOCUMENT_TYPES, type AdminDocumentType } from '@ecole/shared';
 import {
-  Ban,
-  ChevronLeft,
-  ChevronRight,
-  Copy,
-  FilePlus2,
-  Printer,
-  Search,
-  Settings2,
-} from 'lucide-react';
+  keepPreviousData,
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
+import { ADMIN_DOCUMENT_LABELS, ADMIN_DOCUMENT_TYPES, type AdminDocumentType } from '@ecole/shared';
+import { Ban, Copy, FilePlus2, Printer, Search, Settings2 } from 'lucide-react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState } from 'react';
@@ -19,12 +16,13 @@ import { Badge } from '@/components/ui/badge';
 import { Button, ButtonLink } from '@/components/ui/button';
 import { EmptyState, ErrorBlock, LoadingBlock, PageHeader } from '@/components/ui/card';
 import { controlClass, TextareaField } from '@/components/ui/field';
+import { LoadMore } from '@/components/ui/load-more';
 import { Sheet } from '@/components/ui/sheet';
 import { StudentPicker, type PickedStudent } from '@/components/ui/student-picker';
 import { useToast } from '@/components/ui/toast';
 import { api, openPdf } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import { formatDateTime, formatShortDate, plural } from '@/lib/format';
+import { formatDateTime, formatShortDate } from '@/lib/format';
 import type { Paged } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
@@ -243,7 +241,6 @@ function DocumentsContent() {
   const [term, setTerm] = useState('');
   const [type, setType] = useState('');
   const [status, setStatus] = useState('');
-  const [page, setPage] = useState(1);
   const [issuing, setIssuing] = useState(false);
   const [cancelling, setCancelling] = useState<IssuedDocument | null>(null);
   const preselected = params.get('eleve');
@@ -270,20 +267,24 @@ function DocumentsContent() {
   useEffect(() => {
     const t = setTimeout(() => {
       setTerm(search.trim());
-      setPage(1);
     }, 300);
     return () => clearTimeout(t);
   }, [search]);
 
-  const query = new URLSearchParams({ page: String(page), pageSize: '20' });
+  const query = new URLSearchParams({ pageSize: '30' });
   if (term) query.set('search', term);
   if (type) query.set('type', type);
   if (status) query.set('status', status);
-  const q = useQuery({
+  const q = useInfiniteQuery({
     queryKey: ['documents', query.toString()],
-    queryFn: () => api<Paged<IssuedDocument>>(`/documents?${query.toString()}`),
+    queryFn: ({ pageParam }) =>
+      api<Paged<IssuedDocument>>(`/documents?${query.toString()}&page=${pageParam}`),
+    initialPageParam: 1,
+    getNextPageParam: (last) =>
+      last.page * last.pageSize < last.total ? last.page + 1 : undefined,
     placeholderData: keepPreviousData,
   });
+  const items = q.data?.pages.flatMap((p) => p.items) ?? [];
   const duplicate = useMutation({
     mutationFn: (doc: IssuedDocument) =>
       api<IssuedDocument>(`/documents/${doc.id}/duplicate`, { method: 'POST' }),
@@ -297,7 +298,6 @@ function DocumentsContent() {
     openPdf(`/documents/${doc.id}/pdf`).catch((e: unknown) =>
       toast(e instanceof Error ? e.message : 'Erreur', 'error'),
     );
-  const pages = q.data ? Math.max(1, Math.ceil(q.data.total / q.data.pageSize)) : 1;
   const initialStudent: PickedStudent | null = student.data
     ? {
         id: student.data.id,
@@ -376,7 +376,6 @@ function DocumentsContent() {
             value={type}
             onChange={(e) => {
               setType(e.target.value);
-              setPage(1);
             }}
           >
             <option value="">Tous les documents</option>
@@ -394,7 +393,6 @@ function DocumentsContent() {
             value={status}
             onChange={(e) => {
               setStatus(e.target.value);
-              setPage(1);
             }}
           >
             <option value="">Tous les statuts</option>
@@ -408,7 +406,7 @@ function DocumentsContent() {
         <LoadingBlock />
       ) : q.isError ? (
         <ErrorBlock error={q.error} onRetry={() => q.refetch()} />
-      ) : q.data.items.length === 0 ? (
+      ) : items.length === 0 ? (
         <EmptyState title="Aucun document au registre">
           {can('documents.issue')
             ? 'Délivrez un premier document : il apparaîtra ici avec son numéro.'
@@ -417,7 +415,7 @@ function DocumentsContent() {
       ) : (
         <>
           <ul className="flex flex-col gap-2 md:hidden" aria-label="Registre des documents">
-            {q.data.items.map((doc) => (
+            {items.map((doc) => (
               <li
                 key={doc.id}
                 className={cn(
@@ -465,7 +463,7 @@ function DocumentsContent() {
                 </tr>
               </thead>
               <tbody>
-                {q.data.items.map((doc) => (
+                {items.map((doc) => (
                   <tr key={doc.id} className="border-t border-line align-top">
                     <td className="px-4 py-2.5">
                       <div className="flex flex-col">
@@ -509,31 +507,14 @@ function DocumentsContent() {
             </table>
           </div>
 
-          <nav aria-label="Pagination" className="flex items-center justify-between gap-3">
-            <span className="text-sm text-muted tabular">
-              Page {page} sur {pages} · {plural(q.data.total, 'document', 'documents')}
-            </span>
-            <div className="flex gap-2">
-              <Button
-                variant="secondary"
-                size="icon"
-                aria-label="Page précédente"
-                disabled={page <= 1}
-                onClick={() => setPage(page - 1)}
-              >
-                <ChevronLeft className="size-5" aria-hidden />
-              </Button>
-              <Button
-                variant="secondary"
-                size="icon"
-                aria-label="Page suivante"
-                disabled={page >= pages}
-                onClick={() => setPage(page + 1)}
-              >
-                <ChevronRight className="size-5" aria-hidden />
-              </Button>
-            </div>
-          </nav>
+          <LoadMore
+            shown={items.length}
+            total={q.data?.pages[0]?.total}
+            hasMore={!!q.hasNextPage}
+            loading={q.isFetchingNextPage}
+            onMore={() => void q.fetchNextPage()}
+            noun="documents"
+          />
         </>
       )}
       <IssueSheet

@@ -11,6 +11,7 @@ import { Card, CardHeader, ErrorBlock, LoadingBlock } from '@/components/ui/card
 import { InputField, TextareaField } from '@/components/ui/field';
 import { FilePicker } from '@/components/ui/file-picker';
 import { Sheet } from '@/components/ui/sheet';
+import { PhotoCard, StudentAvatar, type PhotoState } from '@/components/student-photo';
 import { useToast } from '@/components/ui/toast';
 import { api, ApiError, openFile, openPdf, uploadFile } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -21,7 +22,6 @@ import {
   formatFcfa,
   formatGrade,
   formatShortDate,
-  initials,
 } from '@/lib/format';
 import type { Account, AccountTotals } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -36,6 +36,7 @@ interface Overview {
   birthPlace: string | null;
   nationality: string;
   photoConsent: boolean;
+  photo: PhotoState;
   previousSchool: string | null;
   guardians: {
     linkId: string;
@@ -291,9 +292,11 @@ export default function StudentPage({ params }: { params: Promise<{ id: string }
 
       <Card className="flex flex-col gap-4 sm:flex-row sm:items-center">
         <div className="flex items-center gap-4">
-          <span className="flex size-16 shrink-0 items-center justify-center rounded-[18px] bg-primary-soft font-display text-2xl font-bold text-primary lg:size-20">
-            {initials(`${s.lastName} ${s.firstName}`)}
-          </span>
+          <StudentAvatar
+            studentId={s.id}
+            name={`${s.lastName} ${s.firstName}`}
+            hasPhoto={s.photo.hasPhoto}
+          />
           <div className="flex min-w-0 flex-col gap-1.5">
             <h1 className="font-display text-2xl leading-tight font-bold lg:text-3xl">
               {s.lastName} {s.firstName}
@@ -499,6 +502,8 @@ export default function StudentPage({ params }: { params: Promise<{ id: string }
               ))}
             </ol>
           </Card>
+
+          <PhotoCard studentId={s.id} photo={s.photo} />
 
           <Card>
             <CardHeader title="Pièces du dossier" />

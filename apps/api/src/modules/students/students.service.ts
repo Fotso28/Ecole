@@ -19,7 +19,7 @@ import Papa from 'papaparse';
 import { z } from 'zod';
 import { env } from '../../config/env';
 import { AuditService } from '../../common/audit.service';
-import { currentSchoolId } from '../../common/context';
+import { currentActorId, currentSchoolId } from '../../common/context';
 import { CountersService } from '../../common/counters.service';
 import { decrypt, encrypt } from '../../common/crypto';
 import { fromDbDate, todayInCameroon, toDbDate } from '../../common/dates';
@@ -95,7 +95,7 @@ export class StudentsService {
       this.db.student.count({ where }),
       this.db.student.findMany({
         where,
-        orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
+        orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }, { id: 'asc' }],
         skip: (q.page - 1) * q.pageSize,
         take: q.pageSize,
         include: {
@@ -279,6 +279,9 @@ export class StudentsService {
         birthPlace: input.birthPlace,
         nationality: input.nationality,
         photoConsent: input.photoConsent,
+        ...(input.photoConsent
+          ? { photoConsentAt: new Date(), photoConsentById: currentActorId() ?? null }
+          : {}),
         previousSchool: input.previousSchool,
       },
     });
@@ -410,10 +413,17 @@ export class StudentsService {
           include: { class: { include: { academicYear: true, level: true } } },
         },
         documents: { orderBy: { type: 'asc' }, include: { file: true } },
+        photoFile: true,
       },
     });
     if (!student || student.deletedAt) throw new NotFoundException('Élève introuvable');
     await this.scope.assertStudentInScope(id, 'students.read');
+    const consentBy = student.photoConsentById
+      ? await this.db.user.findUnique({
+          where: { id: student.photoConsentById },
+          select: { firstName: true, lastName: true },
+        })
+      : null;
     const year = await this.scope.currentYear();
     const [records, reportCards, incidents, guardianUsers] = await Promise.all([
       this.db.attendanceRecord.findMany({
@@ -460,6 +470,12 @@ export class StudentsService {
       birthPlace: student.birthPlace,
       nationality: student.nationality,
       photoConsent: student.photoConsent,
+      photo: {
+        consent: student.photoConsent,
+        consentAt: student.photoConsentAt,
+        consentBy: consentBy ? `${consentBy.firstName} ${consentBy.lastName}` : null,
+        hasPhoto: student.photoConsent && !!presentFile(student.photoFile),
+      },
       previousSchool: student.previousSchool,
       guardians: student.guardians.map((l) => ({
         linkId: l.id,
@@ -517,9 +533,13 @@ export class StudentsService {
 
   async update(id: string, input: z.infer<typeof studentUpdateSchema>) {
     const before = await this.ensureStudent(id);
+    const { photoConsent, ...rest } = input;
+    // Le consentement à la photo passe par son propre circuit (date, auteur, retrait de la photo).
+    if (photoConsent !== undefined && photoConsent !== before.photoConsent)
+      await this.setPhotoConsent(id, photoConsent);
     const after = await this.db.student.update({
       where: { id },
-      data: { ...input, birthDate: input.birthDate ? toDbDate(input.birthDate) : undefined },
+      data: { ...rest, birthDate: rest.birthDate ? toDbDate(rest.birthDate) : undefined },
     });
     await this.audit.log({
       action: 'students.updated',
@@ -598,6 +618,98 @@ export class StudentsService {
     const doc = await this.db.studentDocument.findFirst({ where: { id: documentId, studentId } });
     if (!doc) throw new NotFoundException('Pièce introuvable');
     return this.files.link(doc.fileId, true);
+  }
+
+  /**
+   * Consentement à la photo (loi sur les données personnelles) : date et auteur enregistrés,
+   * changement journalisé. Le retrait supprime logiquement la photo, qui n'apparaît plus nulle part.
+   */
+  async setPhotoConsent(studentId: string, consent: boolean) {
+    const before = await this.ensureStudent(studentId);
+    return this.db.$transaction(async (tx) => {
+      if (!consent && before.photoFileId)
+        await this.files.softDelete(before.photoFileId, 'Retrait du consentement à la photo', tx);
+      const after = await tx.student.update({
+        where: { id: studentId },
+        data: {
+          photoConsent: consent,
+          photoConsentAt: new Date(),
+          photoConsentById: currentActorId() ?? null,
+          ...(consent ? {} : { photoFileId: null }),
+        },
+      });
+      await this.audit.log(
+        {
+          action: consent ? 'students.photo_consent_given' : 'students.photo_consent_withdrawn',
+          entity: 'Student',
+          entityId: studentId,
+          before: { photoConsent: before.photoConsent, photoFileId: before.photoFileId },
+          after: { photoConsent: after.photoConsent, photoFileId: after.photoFileId },
+        },
+        tx,
+      );
+      return {
+        consent: after.photoConsent,
+        consentAt: after.photoConsentAt,
+        hasPhoto: !!after.photoFileId,
+      };
+    });
+  }
+
+  /** Dépôt (ou remplacement) de la photo d'identité, chiffrée, seulement avec le consentement. */
+  async uploadPhoto(studentId: string, upload: UploadedFile | undefined) {
+    const student = await this.ensureStudent(studentId);
+    if (!student.photoConsent)
+      throw new ConflictException(
+        'Consentement à la photo requis : enregistrez-le avant de déposer une photo',
+      );
+    if (this.files.validate(upload) === 'application/pdf')
+      throw new BadRequestException('La photo doit être une image JPEG ou PNG');
+    return this.db.$transaction(async (tx) => {
+      const file = await this.files.store(upload, 'STUDENT_PHOTO', tx);
+      if (student.photoFileId)
+        await this.files.softDelete(student.photoFileId, 'Photo remplacée', tx);
+      await tx.student.update({ where: { id: studentId }, data: { photoFileId: file.id } });
+      await this.audit.log(
+        {
+          action: student.photoFileId ? 'students.photo_replaced' : 'students.photo_uploaded',
+          entity: 'Student',
+          entityId: studentId,
+          before: { photoFileId: student.photoFileId },
+          after: { photoFileId: file.id },
+        },
+        tx,
+      );
+      return { consent: true, hasPhoto: true };
+    });
+  }
+
+  async removePhoto(studentId: string) {
+    const student = await this.ensureStudent(studentId);
+    if (!student.photoFileId) return { consent: student.photoConsent, hasPhoto: false };
+    await this.db.$transaction(async (tx) => {
+      await this.files.softDelete(student.photoFileId!, 'Photo retirée', tx);
+      await tx.student.update({ where: { id: studentId }, data: { photoFileId: null } });
+      await this.audit.log(
+        {
+          action: 'students.photo_removed',
+          entity: 'Student',
+          entityId: studentId,
+          before: { photoFileId: student.photoFileId },
+        },
+        tx,
+      );
+    });
+    return { consent: student.photoConsent, hasPhoto: false };
+  }
+
+  /** Lien de courte durée vers la photo, pour qui peut voir l'élève (enseignant : ses classes). */
+  async photoLink(studentId: string) {
+    const student = await this.ensureStudent(studentId);
+    await this.scope.assertStudentInScope(studentId, 'students.read');
+    if (!student.photoConsent || !student.photoFileId)
+      throw new NotFoundException('Aucune photo pour cet élève');
+    return this.files.link(student.photoFileId);
   }
 
   /** Inscription pour l'année en cours (nouvelle classe, redoublement). */

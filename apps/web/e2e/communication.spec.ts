@@ -1,6 +1,13 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { API_URL } from '../playwright.config';
-import { expectNoHorizontalOverflow, isMobile, loginParent, loginStaff, PASSWORD } from './helpers';
+import {
+  expectNoHorizontalOverflow,
+  isMobile,
+  loginParent,
+  loginStaff,
+  openPortalTab,
+  PASSWORD,
+} from './helpers';
 
 async function token(request: APIRequestContext, email: string) {
   const res = await request.post(`${API_URL}/auth/login`, { data: { email, password: PASSWORD } });
@@ -78,7 +85,7 @@ test.describe('communication', () => {
     await expectNoHorizontalOverflow(page);
 
     // Agenda : la réunion des parents du jeu de démonstration (J+8), en liste puis en mois.
-    await nav.getByRole('link', { name: 'Agenda' }).click();
+    await openPortalTab(page, 'Agenda');
     const meeting = addDays(today(), 8);
     await showMonthOf(page, meeting);
     await expect(page.getByText('Réunion des parents (séquence 1)')).toBeVisible();

@@ -14,6 +14,51 @@ export interface StatusResult {
 /** Refus explicite de l'opérateur : la demande n'a pas été prise en compte, rien n'est débité. */
 export class OperatorRejectedError extends Error {}
 
+/**
+ * Issue inconnue (délai dépassé, erreur 5xx) après l'envoi de la demande : le payeur a peut-être
+ * été débité. `reference` permet à la réconciliation d'interroger l'opérateur.
+ */
+export class OperatorPendingError extends Error {
+  constructor(
+    message: string,
+    readonly reference?: string,
+  ) {
+    super(message);
+  }
+}
+
+/** Jeton OAuth mis en cache jusqu'à une minute avant son expiration. */
+export class TokenCache {
+  private token?: { value: string; expiresAt: number };
+  private pending?: Promise<string>;
+
+  constructor(private readonly fetchToken: () => Promise<{ value: string; expiresIn: number }>) {}
+
+  get(): Promise<string> {
+    if (this.token && this.token.expiresAt > Date.now() + 60_000)
+      return Promise.resolve(this.token.value);
+    this.pending ??= this.fetchToken()
+      .then(({ value, expiresIn }) => {
+        this.token = { value, expiresAt: Date.now() + expiresIn * 1000 };
+        return value;
+      })
+      .finally(() => {
+        this.pending = undefined;
+      });
+    return this.pending;
+  }
+
+  clear(): void {
+    this.token = undefined;
+  }
+}
+
+/** Montant entier en FCFA lu dans une réponse d'opérateur (« 35000 », 35000 ou « 35000.00 »). */
+export function parseOperatorAmount(value: unknown): number | undefined {
+  const n = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
+  return Number.isSafeInteger(n) && n > 0 ? n : undefined;
+}
+
 export interface CollectRequest {
   paymentId: string;
   amount: number;
@@ -69,7 +114,8 @@ export class SimulatorMobileMoneyProvider implements MobileMoneyProvider {
 
 /**
  * Agrégateur HTTP générique : POST {url}/collect et GET {url}/status/{reference}.
- * Les intégrations directes MTN MoMo et Orange Money se branchent derrière cette interface.
+ * Les raccordements directs MTN MoMo et Orange Money sont dans `mtn-momo.provider.ts` et
+ * `orange-money.provider.ts` (MOBILE_MONEY_PROVIDER=operators).
  */
 export class HttpMobileMoneyProvider implements MobileMoneyProvider {
   private headers() {
@@ -120,10 +166,25 @@ export class HttpMobileMoneyProvider implements MobileMoneyProvider {
   }
 }
 
-export function createMobileMoneyProvider(): MobileMoneyProvider {
-  return env().MOBILE_MONEY_PROVIDER === 'http'
-    ? new HttpMobileMoneyProvider()
-    : new SimulatorMobileMoneyProvider();
+/** Aiguillage par opérateur vers les raccordements directs configurés. */
+export class OperatorsMobileMoneyProvider implements MobileMoneyProvider {
+  constructor(
+    private readonly operators: Partial<Record<PaymentMethod, MobileMoneyProvider>>,
+  ) {}
+
+  private pick(method: PaymentMethod): MobileMoneyProvider {
+    const provider = this.operators[method];
+    if (!provider) throw new OperatorRejectedError(`Opérateur ${method} non raccordé`);
+    return provider;
+  }
+
+  requestPayment(req: CollectRequest): Promise<{ reference: string }> {
+    return this.pick(req.method).requestPayment(req);
+  }
+
+  checkStatus(reference: string, method: PaymentMethod): Promise<StatusResult> {
+    return this.pick(method).checkStatus(reference, method);
+  }
 }
 
 /** Signature attendue d'un webhook : HMAC-SHA256 hexadécimal du corps brut. */

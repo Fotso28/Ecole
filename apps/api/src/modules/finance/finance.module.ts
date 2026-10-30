@@ -5,10 +5,13 @@ import {
   ForbiddenException,
   Get,
   HttpCode,
+  Inject,
+  Logger,
   Module,
   NotFoundException,
   Param,
   Post,
+  Put,
   Query,
   Req,
   Res,
@@ -34,9 +37,12 @@ import { ZodPipe } from '../../common/zod.pipe';
 import { PdfModule } from '../pdf/pdf.module';
 import { PdfService } from '../pdf/pdf.service';
 import { FinanceService } from './finance.service';
+import { RateLimit } from '../../common/rate-limit';
+import { createMobileMoneyProvider } from './mobile-money.factory';
 import {
-  createMobileMoneyProvider,
   MOBILE_MONEY_PROVIDER,
+  type MobileMoneyProvider,
+  OperatorsMobileMoneyProvider,
   signWebhook,
   SimulatorMobileMoneyProvider,
 } from './mobile-money.provider';
@@ -120,6 +126,7 @@ export class FinanceController {
   }
 
   @RequirePermissions('finance.payments.create')
+  @RateLimit('cashier-payment')
   @Post('payments')
   createPayment(@Body(new ZodPipe(paymentCreateSchema)) body: z.infer<typeof paymentCreateSchema>) {
     return this.finance.createPayment(body);
@@ -159,6 +166,7 @@ export class FinanceController {
   }
 
   @RequirePermissions('finance.payments.reverse')
+  @RateLimit('cashier-payment')
   @Post('payments/:id/reverse')
   reverse(
     @Param('id') id: string,
@@ -216,22 +224,37 @@ export class FinanceController {
   }
 }
 
-/** Webhooks des opérateurs Mobile Money : signature HMAC obligatoire, liste d'IP optionnelle. */
+function assertAllowedOrigin(req: Request): void {
+  const allowed = env()
+    .MOBILE_MONEY_ALLOWED_IPS.split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (allowed.length > 0 && !allowed.includes(req.ip ?? ''))
+    throw new ForbiddenException('Origine non autorisée');
+}
+
+const str = (v: unknown): string | undefined =>
+  typeof v === 'string' && v.length > 0 && v.length <= 100 ? v : undefined;
+
+/**
+ * Confirmations des opérateurs Mobile Money. Passerelle générique : signature HMAC obligatoire.
+ * MTN MoMo et Orange Money : rappels non signés, qui ne font que déclencher une vérification du
+ * statut auprès de l'opérateur. Liste d'IP optionnelle et limite de débit par adresse.
+ */
 @ApiTags('webhooks')
 @Controller('webhooks')
 export class WebhooksController {
-  constructor(private readonly finance: FinanceService) {}
+  constructor(
+    private readonly finance: FinanceService,
+    @Inject(MOBILE_MONEY_PROVIDER) private readonly provider: MobileMoneyProvider,
+  ) {}
 
   @Public()
+  @RateLimit('operator-callback')
   @Post('mobile-money')
   @HttpCode(200)
   async mobileMoney(@Req() req: Request & { rawBody?: Buffer }, @Body() raw: unknown) {
-    const allowed = env()
-      .MOBILE_MONEY_ALLOWED_IPS.split(',')
-      .map((s) => s.trim())
-      .filter(Boolean);
-    if (allowed.length > 0 && !allowed.includes(req.ip ?? ''))
-      throw new ForbiddenException('Origine non autorisée');
+    assertAllowedOrigin(req);
     const signature = req.headers['x-ecole-signature'];
     if (
       typeof signature !== 'string' ||
@@ -248,6 +271,64 @@ export class WebhooksController {
       body.amount,
     );
   }
+
+  /** Rappel MTN MoMo (X-Callback-Url) : corps { externalId, status, … }, sans signature. */
+  @Public()
+  @RateLimit('operator-callback')
+  @Put('mtn-momo')
+  @HttpCode(200)
+  mtnMomoPut(@Req() req: Request, @Body() raw: unknown) {
+    return this.mtnMomo(req, raw);
+  }
+
+  @Public()
+  @RateLimit('operator-callback')
+  @Post('mtn-momo')
+  @HttpCode(200)
+  async mtnMomo(@Req() req: Request, @Body() raw: unknown) {
+    assertAllowedOrigin(req);
+    if (!(this.provider instanceof OperatorsMobileMoneyProvider)) throw new NotFoundException();
+    const body = (raw ?? {}) as Record<string, unknown>;
+    await this.verify('MTN_MOMO', {
+      externalId: str(body.externalId),
+      reference: str(body.referenceId) ?? str(req.headers['x-reference-id']),
+      claimedStatus: str(body.status),
+    });
+    return { received: true };
+  }
+
+  /** Notification Orange Money (notifUrl) : corps { payToken, status, … }, sans signature. */
+  @Public()
+  @RateLimit('operator-callback')
+  @Post('orange-money')
+  @HttpCode(200)
+  async orangeMoney(@Req() req: Request, @Body() raw: unknown) {
+    assertAllowedOrigin(req);
+    if (!(this.provider instanceof OperatorsMobileMoneyProvider)) throw new NotFoundException();
+    const body = (raw ?? {}) as Record<string, unknown>;
+    const data = (body.data ?? {}) as Record<string, unknown>;
+    await this.verify('ORANGE_MONEY', {
+      reference: str(body.payToken) ?? str(data.payToken) ?? str(body.pay_token),
+      claimedStatus: str(body.status) ?? str(data.status),
+    });
+    return { received: true };
+  }
+
+  /** L'opérateur reçoit toujours 200 : la réconciliation reprend les vérifications en échec. */
+  private async verify(
+    method: 'MTN_MOMO' | 'ORANGE_MONEY',
+    hint: { reference?: string; externalId?: string; claimedStatus?: string },
+  ): Promise<void> {
+    try {
+      await this.finance.verifyOperatorCallback(method, hint);
+    } catch (e) {
+      this.logger.warn(
+        `Vérification du rappel ${method} impossible : ${e instanceof Error ? e.message : e}`,
+      );
+    }
+  }
+
+  private readonly logger = new Logger('Webhooks');
 }
 
 /** Outils du simulateur Mobile Money, désactivés en production. */

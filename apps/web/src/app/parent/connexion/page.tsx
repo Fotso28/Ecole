@@ -22,6 +22,8 @@ const T = {
     codeTitle: 'Entrez le code reçu',
     codeLead: 'Si ce numéro est connu de l’école, un code à 6 chiffres vient d’être envoyé au',
     codeLabel: 'Code à 6 chiffres',
+    codeHint:
+      'Le code reste valable 15 minutes. Si vous avez reçu plusieurs SMS, le dernier code fonctionne.',
     login: 'Se connecter',
     resend: 'Renvoyer le code',
     resendIn: (s: number) => `Renvoyer le code dans 0:${String(s).padStart(2, '0')}`,
@@ -39,6 +41,7 @@ const T = {
     codeTitle: 'Enter the code you received',
     codeLead: 'If this number is known to the school, a 6-digit code has been sent to',
     codeLabel: '6-digit code',
+    codeHint: 'The code is valid for 15 minutes. If you received several SMS, the latest code works.',
     login: 'Sign in',
     resend: 'Resend code',
     resendIn: (s: number) => `Resend code in 0:${String(s).padStart(2, '0')}`,
@@ -244,12 +247,15 @@ export default function ParentLoginPage() {
               value={code}
               onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
               aria-invalid={!!error || undefined}
-              aria-describedby="code-error"
+              aria-describedby="code-hint code-error"
               className={cn(
                 'h-16 rounded-[14px] border-2 bg-white text-center text-[30px] font-bold tracking-[0.5em] tabular outline-none',
                 error ? 'border-danger' : 'border-primary',
               )}
             />
+            <span id="code-hint" className="text-sm text-muted">
+              {t.codeHint}
+            </span>
             {error ? (
               <span id="code-error" role="alert" className="text-sm font-medium text-danger">
                 {error}

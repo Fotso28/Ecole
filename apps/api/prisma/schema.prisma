@@ -248,6 +248,21 @@ model OtpCode {
   attempts   Int       @default(0)
   consumedAt DateTime?
   createdAt  DateTime  @default(now())
+  /// Demande faite depuis un appareil de confiance (déjà connecté avec ce numéro) : quota séparé.
+  trusted    Boolean   @default(false)
+  /// SMS réellement envoyé (numéro connu d'une école) : base du plafond de coût.
+  sent       Boolean   @default(false)
+
+  @@index([phone, createdAt])
+  @@index([sent, createdAt])
+}
+
+/// Code de connexion parent erroné : plafond d'essais par numéro, séparé pour les appareils de confiance.
+model OtpFailure {
+  id        String   @id @default(cuid())
+  phone     String
+  trusted   Boolean  @default(false)
+  createdAt DateTime @default(now())
 
   @@index([phone, createdAt])
 }
@@ -838,4 +853,101 @@ model TimetableEntry {
   endTime        String
 
   @@index([schoolId, academicYearId])
+}
+
+enum SubscriptionPricing {
+  PER_STUDENT
+  PER_MODULE
+}
+
+enum SubscriptionInvoiceStatus {
+  ISSUED
+  CANCELLED
+}
+
+/// Offre d'abonnement de la plateforme (catalogue commun, montants annuels en FCFA).
+model SubscriptionPlan {
+  id              String              @id @default(cuid())
+  name            String              @unique
+  pricing         SubscriptionPricing
+  /// Prix par élève inscrit et par an (offre PER_STUDENT).
+  pricePerStudent Int                 @default(0)
+  /// Prix annuel par module activé, par exemple { "grades": 150000 } (offre PER_MODULE).
+  modulePrices    Json                @default("{}")
+  active          Boolean             @default(true)
+  createdAt       DateTime            @default(now())
+
+  subscriptions SchoolSubscription[]
+}
+
+/// Offre retenue par un établissement.
+model SchoolSubscription {
+  id        String   @id @default(cuid())
+  schoolId  String   @unique
+  planId    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  plan SubscriptionPlan @relation(fields: [planId], references: [id], onDelete: Restrict)
+}
+
+/// Facture d'abonnement, calculée sur des chiffres agrégés (effectif, modules) et figée à l'émission.
+model SubscriptionInvoice {
+  id           String                    @id @default(cuid())
+  schoolId     String
+  number       String                    @unique
+  /// Année scolaire facturée, par exemple « 2026-2027 ».
+  period       String
+  planName     String
+  pricing      SubscriptionPricing
+  studentCount Int
+  modules      String[]
+  /// Détail : [{ label, quantity, unitPrice, amount }].
+  lines        Json
+  amount       Int
+  dueDate      DateTime                  @db.Date
+  status       SubscriptionInvoiceStatus @default(ISSUED)
+  issuedById   String?
+  issuedAt     DateTime                  @default(now())
+  cancelledAt  DateTime?
+  cancelReason String?
+
+  payments  SubscriptionPayment[]
+  reminders SubscriptionReminder[]
+
+  @@index([schoolId, issuedAt])
+}
+
+/// Règlement d'une facture d'abonnement, en ajout seul : une correction est une écriture négative.
+model SubscriptionPayment {
+  id           String   @id @default(cuid())
+  schoolId     String
+  invoiceId    String
+  /// Montant signé : négatif pour une écriture de correction.
+  amount       Int
+  method       String
+  reference    String?
+  paidOn       DateTime @db.Date
+  note         String?
+  correctsId   String?  @unique
+  recordedById String?
+  createdAt    DateTime @default(now())
+
+  invoice SubscriptionInvoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+
+  @@index([schoolId, invoiceId])
+}
+
+/// Relance d'une facture d'abonnement impayée.
+model SubscriptionReminder {
+  id        String   @id @default(cuid())
+  schoolId  String
+  invoiceId String
+  sentById  String?
+  recipient String?
+  createdAt DateTime @default(now())
+
+  invoice SubscriptionInvoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+
+  @@index([schoolId, invoiceId])
 }

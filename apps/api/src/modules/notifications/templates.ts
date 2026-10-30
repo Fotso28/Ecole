@@ -2,7 +2,7 @@ import { formatFcfa, formatGrade } from '@ecole/shared';
 
 export const templates = {
   otp: (code: string) =>
-    `Ecole : votre code de connexion est ${code}. Il expire dans 5 minutes. Ne le communiquez à personne.`,
+    `Ecole : votre code de connexion est ${code}. Il expire dans 15 minutes. Ne le communiquez à personne.`,
   absence: (p: { student: string; date: string; slot: string; school: string }) =>
     `${p.school} : ${p.student} était absent(e) le ${p.date} (${p.slot}). Justifiez l'absence depuis l'application ou auprès de la vie scolaire.`,
   absenceThreshold: (p: { student: string; count: number; days: number }) =>
@@ -29,4 +29,6 @@ export const templates = {
     `Le bulletin du ${p.term} de ${p.student} est disponible${p.average === null ? '' : ` (moyenne ${formatGrade(p.average)}/20)`}.`,
   announcement: (p: { school: string; title: string }) =>
     `${p.school} : ${p.title}. Détails dans l'application.`,
+  subscriptionReminder: (p: { school: string; number: string; due: number; dueDate: string }) =>
+    `Ecole : la facture d'abonnement ${p.number} de ${p.school} présente un reste à payer de ${formatFcfa(p.due)} (échéance ${p.dueDate}). Détail dans Paramètres.`,
 };

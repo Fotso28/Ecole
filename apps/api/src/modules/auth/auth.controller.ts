@@ -14,9 +14,11 @@ import { env } from '../../config/env';
 import { currentContext } from '../../common/context';
 import { AccountRoute, AllowWithoutMfa, Public } from '../../common/decorators';
 import { ZodPipe } from '../../common/zod.pipe';
-import { AuthService, SessionResult } from './auth.service';
+import { AuthService, DEVICE_TOKEN_TTL_DAYS, SessionResult } from './auth.service';
 
 export const REFRESH_COOKIE = 'ecole_rt';
+/** Appareil de confiance d'un parent : quota de codes SMS séparé des demandes anonymes. */
+export const DEVICE_COOKIE = 'ecole_pdt';
 
 function sendSession(res: Response, session: SessionResult) {
   res.cookie(REFRESH_COOKIE, session.refreshToken, {
@@ -36,6 +38,10 @@ function sendSession(res: Response, session: SessionResult) {
 
 function refreshCookie(req: Request): string | undefined {
   return (req.cookies as Record<string, string | undefined> | undefined)?.[REFRESH_COOKIE];
+}
+
+function deviceCookie(req: Request): string | undefined {
+  return (req.cookies as Record<string, string | undefined> | undefined)?.[DEVICE_COOKIE];
 }
 
 @ApiTags('auth')
@@ -155,9 +161,16 @@ export class AuthController {
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post('otp/request')
   @HttpCode(202)
-  async requestOtp(@Body(new ZodPipe(otpRequestSchema)) body: z.infer<typeof otpRequestSchema>) {
-    await this.auth.requestOtp(body.phone);
-    return { message: 'Si ce numéro est connu de l’école, un code vient d’être envoyé par SMS.' };
+  async requestOtp(
+    @Body(new ZodPipe(otpRequestSchema)) body: z.infer<typeof otpRequestSchema>,
+    @Req() req: Request,
+  ) {
+    // Réponse identique que le code parte ou non (numéro inconnu, quota atteint).
+    await this.auth.requestOtp(body.phone, deviceCookie(req));
+    return {
+      message:
+        'Si ce numéro est connu de l’école, un code valable 15 minutes vient d’être envoyé par SMS. Le dernier code reçu reste valable.',
+    };
   }
 
   @Public()
@@ -169,9 +182,19 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    return sendSession(
-      res,
-      await this.auth.verifyOtp(body.phone, body.code, req.headers['user-agent']),
+    const session = await this.auth.verifyOtp(
+      body.phone,
+      body.code,
+      req.headers['user-agent'],
+      deviceCookie(req),
     );
+    res.cookie(DEVICE_COOKIE, AuthService.deviceToken(body.phone), {
+      httpOnly: true,
+      secure: env().NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+      maxAge: DEVICE_TOKEN_TTL_DAYS * 86_400_000,
+    });
+    return sendSession(res, session);
   }
 }

@@ -1,0 +1,72 @@
+# Collecte centralisée des journaux, facultative : Vector lit les journaux des conteneurs
+# du projet, Loki les stocke 14 jours (LOG_RETENTION), Grafana les consulte.
+# Activation : COMPOSE_FILE=docker-compose.yml:docker-compose.logs.yml dans .env.
+# Empreinte mémoire plafonnée à environ 550 Mo (serveur de 4 Go).
+
+# Les ancres YAML ne traversent pas les fichiers : rotation redéclarée ici.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: ${LOG_MAX_SIZE:-10m}
+    max-file: ${LOG_MAX_FILES:-5}
+
+services:
+  loki:
+    image: grafana/loki:3.4.2
+    restart: unless-stopped
+    logging: *logging
+    command: ['-config.file=/etc/loki/loki.yml', '-config.expand-env=true']
+    environment:
+      LOG_RETENTION: ${LOG_RETENTION:-336h}
+      GOMEMLIMIT: 200MiB
+    volumes:
+      - ./logs/loki.yml:/etc/loki/loki.yml:ro
+      - lokidata:/loki
+    mem_limit: 256m
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3100/ready']
+      interval: 15s
+      timeout: 5s
+      retries: 20
+
+  vector:
+    image: timberio/vector:0.46.1-alpine
+    restart: unless-stopped
+    logging: *logging
+    command: ['--config', '/etc/vector/vector.yaml']
+    environment:
+      VECTOR_LOG: warn
+    volumes:
+      - ./logs/vector.yaml:/etc/vector/vector.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - vectordata:/var/lib/vector
+    mem_limit: 128m
+    depends_on:
+      loki:
+        condition: service_healthy
+
+  grafana:
+    image: grafana/grafana:11.5.2
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?définir GRAFANA_ADMIN_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+      GF_ANALYTICS_REPORTING_ENABLED: 'false'
+      GF_ANALYTICS_CHECK_FOR_UPDATES: 'false'
+      GF_PLUGINS_PREINSTALL_DISABLED: 'true'
+      GF_LOG_LEVEL: warn
+    volumes:
+      - ./logs/grafana-datasources.yml:/etc/grafana/provisioning/datasources/loki.yml:ro
+      - grafanadata:/var/lib/grafana
+    # Uniquement en local sur le serveur : accès par tunnel SSH (ssh -L 3001:localhost:3001).
+    ports:
+      - '127.0.0.1:3001:3000'
+    mem_limit: 192m
+    depends_on:
+      - loki
+
+volumes:
+  lokidata:
+  vectordata:
+  grafanadata:

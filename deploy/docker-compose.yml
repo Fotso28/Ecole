@@ -2,10 +2,18 @@
 # Usage : cp .env.example .env (puis compléter), docker compose up -d
 name: ecole
 
+# Rotation des journaux Docker (JSON) : 5 fichiers de 10 Mo au plus par service.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: ${LOG_MAX_SIZE:-10m}
+    max-file: ${LOG_MAX_FILES:-5}
+
 services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    logging: *logging
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-ecole}
       POSTGRES_USER: ${POSTGRES_USER:-ecole}
@@ -21,6 +29,7 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    logging: *logging
     command: ['redis-server', '--appendonly', 'yes']
     volumes:
       - redisdata:/data
@@ -38,10 +47,12 @@ services:
       postgres:
         condition: service_healthy
     restart: 'no'
+    logging: *logging
 
   api:
     image: ${API_IMAGE:-ecole-api:latest}
     restart: unless-stopped
+    logging: *logging
     env_file: .env
     environment:
       NODE_ENV: production
@@ -55,10 +66,15 @@ services:
   worker:
     image: ${API_IMAGE:-ecole-api:latest}
     restart: unless-stopped
+    logging: *logging
     command: ['node', '--enable-source-maps', 'dist/worker.js']
     env_file: .env
     environment:
       NODE_ENV: production
+      ALERT_HEALTH_URL: ${ALERT_HEALTH_URL:-http://api:4000/health}
+      BACKUP_STATUS_FILE: /backup-status/last-status.json
+    volumes:
+      - ./backup-status:/backup-status:ro
     healthcheck:
       disable: true
     depends_on:
@@ -70,6 +86,7 @@ services:
   web:
     image: ${WEB_IMAGE:-ecole-web:latest}
     restart: unless-stopped
+    logging: *logging
     environment:
       API_URL: http://api:4000
     depends_on:
@@ -78,6 +95,7 @@ services:
   nginx:
     image: nginx:1.27-alpine
     restart: unless-stopped
+    logging: *logging
     ports:
       - '80:80'
       - '443:443'
@@ -129,6 +147,7 @@ services:
   certbot:
     image: certbot/certbot:v3.1.0
     profiles: ['tls']
+    logging: *logging
     volumes:
       - certs:/etc/letsencrypt
       - certbot-www:/var/www/certbot

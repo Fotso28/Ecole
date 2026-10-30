@@ -19,7 +19,7 @@ const envSchema = z.object({
   SMS_HTTP_URL: z.string().optional(),
   SMS_HTTP_TOKEN: z.string().optional(),
   SMS_SENDER: z.string().default('ECOLE'),
-  EMAIL_PROVIDER: z.enum(['console', 'memory', 'smtp']).default('console'),
+  EMAIL_PROVIDER: z.enum(['console', 'memory', 'smtp', 'http']).default('console'),
   SMTP_HOST: z.string().optional(),
   SMTP_PORT: z.coerce.number().int().positive().default(587),
   SMTP_SECURE: z
@@ -83,6 +83,22 @@ const envSchema = z.object({
     .enum(['true', 'false'])
     .default('true')
     .transform((v) => v === 'true'),
+  LOG_LEVEL: z.enum(['verbose', 'debug', 'log', 'warn', 'error']).default('log'),
+  /** Par défaut : JSON en production, texte lisible ailleurs. */
+  LOG_FORMAT: z.enum(['json', 'text']).optional(),
+  /** Alertes à l'équipe technique : numéros et adresses séparés par des virgules. */
+  ALERT_SMS_TO: z.string().default(''),
+  ALERT_EMAIL_TO: z.string().default(''),
+  /** Anti-répétition : une même alerte n'est renvoyée qu'après ce délai. */
+  ALERT_COOLDOWN_MINUTES: z.coerce.number().int().positive().default(60),
+  /** URL de santé de l'API sondée par le worker (ex. http://api:4000/health). */
+  ALERT_HEALTH_URL: z.string().optional(),
+  /** Fichier d'état écrit par deploy/backup.sh, lu par le worker. */
+  BACKUP_STATUS_FILE: z.string().optional(),
+  BACKUP_MAX_AGE_HOURS: z.coerce.number().int().positive().default(26),
+  /** Passerelle e-mail HTTP générique : POST JSON { to, from, subject, text }. */
+  EMAIL_HTTP_URL: z.string().optional(),
+  EMAIL_HTTP_TOKEN: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

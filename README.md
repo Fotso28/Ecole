@@ -5,7 +5,7 @@ Application de gestion scolaire multi-établissement pour le Cameroun : élèves
 - **API** : NestJS 11, Prisma 6, PostgreSQL 16, Redis + BullMQ (`apps/api`)
 - **Web** : Next.js 15, React 19, Tailwind CSS 4, TanStack Query (`apps/web`)
 - **Partagé** : calculs de notes et de finances, schémas Zod, permissions (`packages/shared`)
-- Maquettes : [docs/ui-ux.md](docs/ui-ux.md) · Exploitation : [docs/exploitation.md](docs/exploitation.md)
+- Maquettes : [docs/ui-ux.md](docs/ui-ux.md) · Exploitation : [docs/exploitation.md](docs/exploitation.md) · Tests de charge : [docs/charge.md](docs/charge.md)
 
 ## Démarrage en local
 

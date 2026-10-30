@@ -15,6 +15,7 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { Prisma } from '@prisma/client';
 import { evaluationCreateSchema, gradesUpsertSchema } from '@ecole/shared';
 import { z } from 'zod';
 import { AuditService } from '../../common/audit.service';
@@ -210,35 +211,46 @@ export class GradesService {
     const beforeBy = new Map(before.map((g) => [g.studentId, g]));
     const changes: { studentId: string; before: string; after: string }[] = [];
     await this.db.$transaction(async (tx) => {
+      // Écritures groupées : une requête pour les nouvelles notes et une pour les effacements,
+      // au lieu d'une requête par élève (une classe compte souvent 50 à 80 élèves).
+      const created: Prisma.GradeCreateManyInput[] = [];
+      const removed: string[] = [];
       for (const p of parsed) {
         const prev = beforeBy.get(p.studentId);
         if (p.stored === 'invalid') continue;
         if (p.stored === null) {
           if (prev) {
-            await tx.grade.delete({ where: { id: prev.id } });
+            removed.push(prev.id);
             changes.push({ studentId: p.studentId, before: compactGrade(prev), after: '' });
           }
           continue;
         }
         if (prev && prev.status === p.stored.status && prev.valueCenti === p.stored.valueCenti)
           continue;
-        await tx.grade.upsert({
-          where: { evaluationId_studentId: { evaluationId, studentId: p.studentId } },
-          create: {
+        if (prev) {
+          await tx.grade.update({
+            where: { id: prev.id },
+            data: { ...p.stored, updatedById: ctx.userId },
+          });
+        } else {
+          created.push({
             schoolId: currentSchoolId(),
             evaluationId,
             studentId: p.studentId,
             ...p.stored,
             updatedById: ctx.userId,
-          },
-          update: { ...p.stored, updatedById: ctx.userId },
-        });
+          });
+        }
         changes.push({
           studentId: p.studentId,
           before: compactGrade(prev),
           after: compactGrade(p.stored),
         });
       }
+      if (removed.length > 0) await tx.grade.deleteMany({ where: { id: { in: removed } } });
+      // Deux enregistrements simultanés de la même grille : le second échoue sur la contrainte
+      // d'unicité (409, transaction annulée) et l'enseignant enregistre de nouveau.
+      if (created.length > 0) await tx.grade.createMany({ data: created });
       if (changes.length > 0) {
         await this.audit.log(
           {

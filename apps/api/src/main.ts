@@ -8,7 +8,13 @@ async function main(): Promise<void> {
   const config = env();
   const { AppModule } = await import('./app.module');
   const { configureApp } = await import('./bootstrap');
-  const app = await NestFactory.create(AppModule, { rawBody: true });
+  const { appLogger } = await import('./common/logger');
+  const logger = appLogger({
+    format: config.LOG_FORMAT ?? (config.NODE_ENV === 'production' ? 'json' : 'text'),
+    level: config.LOG_LEVEL,
+    service: 'api',
+  });
+  const app = await NestFactory.create(AppModule, { rawBody: true, logger });
   configureApp(app);
   await app.listen(config.PORT);
   new Logger('Ecole').log(`API prête sur le port ${config.PORT}`);

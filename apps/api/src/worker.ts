@@ -14,8 +14,14 @@ async function main(): Promise<void> {
   const logger = new Logger('Worker');
   const { AppModule } = await import('./app.module');
   const { JOBS, runJob } = await import('./jobs');
+  const { appLogger } = await import('./common/logger');
+  const { runWithContext } = await import('./common/context');
   const app = await NestFactory.createApplicationContext(AppModule, {
-    logger: ['error', 'warn', 'log'],
+    logger: appLogger({
+      format: config.LOG_FORMAT ?? (config.NODE_ENV === 'production' ? 'json' : 'text'),
+      level: config.LOG_LEVEL,
+      service: 'worker',
+    }),
   });
   const connection = new IORedis(config.REDIS_URL, { maxRetriesPerRequest: null });
   const queue = new Queue(QUEUE, { connection });
@@ -27,12 +33,22 @@ async function main(): Promise<void> {
   }
   const worker = new Worker(
     QUEUE,
-    async (job) => {
-      const result = await runJob(app, job.name);
-      if (job.name !== 'outbox' || (typeof result === 'number' && result > 0))
-        logger.log(`${job.name} : ${JSON.stringify(result)}`);
-      return result;
-    },
+    async (job) =>
+      // Chaque exécution porte son propre identifiant de corrélation dans les journaux.
+      runWithContext(
+        { kind: 'anonymous' },
+        async () => {
+          const result = await runJob(app, job.name);
+          if (
+            !['outbox', 'alerts'].includes(job.name) ||
+            (typeof result === 'number' && result > 0) ||
+            (Array.isArray(result) && result.length > 0)
+          )
+            logger.log(`${job.name} : ${JSON.stringify(result)}`);
+          return result;
+        },
+        `job:${job.name}:${job.id}`,
+      ),
     { connection, concurrency: 1 },
   );
   worker.on('failed', (job, err) => logger.error(`Échec de ${job?.name} : ${err.message}`));

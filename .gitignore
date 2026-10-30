@@ -11,3 +11,7 @@ playwright-report/
 test-results/
 apps/api/storage/
 deploy/backups/
+deploy/backup-status/
+deploy/.deploy/
+loadtest/results/
+loadtest/data/

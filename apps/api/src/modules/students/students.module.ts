@@ -9,8 +9,10 @@ import {
   Post,
   Put,
   Query,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import {
   duplicateCheckSchema,
   enrollmentCreateSchema,
@@ -24,6 +26,8 @@ import { z } from 'zod';
 import { RequireModule, RequirePermissions } from '../../common/decorators';
 import { ZodPipe } from '../../common/zod.pipe';
 import { FinanceModule } from '../finance/finance.module';
+import { FileUpload } from '../files/files.module';
+import type { UploadedFile as Upload } from '../files/files.service';
 import { StudentsService } from './students.service';
 
 const listSchema = z.object({
@@ -130,6 +134,24 @@ export class StudentsController {
     @Body(new ZodPipe(documentSchema)) body: z.infer<typeof documentSchema>,
   ) {
     return this.students.setDocument(id, documentId, body.status);
+  }
+
+  @RequirePermissions('students.documents')
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(FileUpload)
+  @Post('students/:id/documents/:documentId/file')
+  uploadDocument(
+    @Param('id') id: string,
+    @Param('documentId') documentId: string,
+    @UploadedFile() file: Upload | undefined,
+  ) {
+    return this.students.uploadDocument(id, documentId, file);
+  }
+
+  @RequirePermissions('students.documents')
+  @Get('students/:id/documents/:documentId/file')
+  documentFile(@Param('id') id: string, @Param('documentId') documentId: string) {
+    return this.students.documentLink(id, documentId);
   }
 
   @RequirePermissions('health.read')

@@ -59,6 +59,25 @@ export function decrypt(payload: string, hexKey: string): string {
   return Buffer.concat([decipher.update(data), decipher.final()]).toString('utf8');
 }
 
+/** Chiffrement AES-256-GCM d'un contenu binaire (fichiers) : iv (12 o) + tag (16 o) + données. */
+export function encryptBuffer(plain: Buffer, hexKey: string): Buffer {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', Buffer.from(hexKey, 'hex'), iv);
+  const data = Buffer.concat([cipher.update(plain), cipher.final()]);
+  return Buffer.concat([iv, cipher.getAuthTag(), data]);
+}
+
+export function decryptBuffer(payload: Buffer, hexKey: string): Buffer {
+  if (payload.length < 28) throw new Error('Données chiffrées invalides');
+  const decipher = createDecipheriv(
+    'aes-256-gcm',
+    Buffer.from(hexKey, 'hex'),
+    payload.subarray(0, 12),
+  );
+  decipher.setAuthTag(payload.subarray(12, 28));
+  return Buffer.concat([decipher.update(payload.subarray(28)), decipher.final()]);
+}
+
 const BASE32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 
 export function base32Encode(buf: Buffer): string {

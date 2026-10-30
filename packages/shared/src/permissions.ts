@@ -50,6 +50,9 @@ export const PERMISSIONS = [
   'health.read',
   'audit.read',
   'settings.write',
+  'students.documents',
+  'lessons.read',
+  'lessons.write',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -70,6 +73,7 @@ export const ROLE_PERMISSIONS: Record<StaffRole, readonly Permission[]> = {
     'reportcards.read',
     'reportcards.generate',
     'communication.write',
+    'lessons.read',
   ],
   SUPERVISOR: [
     'dashboard.read',
@@ -91,6 +95,7 @@ export const ROLE_PERMISSIONS: Record<StaffRole, readonly Permission[]> = {
     'reportcards.read',
     'finance.read',
     'communication.write',
+    'students.documents',
   ],
   ACCOUNTANT: [
     'dashboard.read',
@@ -110,6 +115,8 @@ export const ROLE_PERMISSIONS: Record<StaffRole, readonly Permission[]> = {
     'attendance.write',
     'grades.read',
     'grades.write',
+    'lessons.read',
+    'lessons.write',
   ],
   NURSE: ['students.read', 'health.read'],
 };

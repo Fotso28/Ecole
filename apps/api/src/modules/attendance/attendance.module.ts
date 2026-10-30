@@ -11,8 +11,10 @@ import {
   Patch,
   Post,
   Query,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import {
   attendanceSubmitSchema,
   isoDate,
@@ -29,6 +31,8 @@ import { RequireModule, RequirePermissions } from '../../common/decorators';
 import { Db, InjectDb, Tx } from '../../common/prisma';
 import { ScopeService } from '../../common/scope.service';
 import { ZodPipe } from '../../common/zod.pipe';
+import { FileUpload } from '../files/files.module';
+import { FilesService, presentFile, type UploadedFile as Upload } from '../files/files.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { templates } from '../notifications/templates';
 
@@ -54,6 +58,7 @@ export class AttendanceService {
     private readonly scope: ScopeService,
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
+    private readonly files: FilesService,
   ) {}
 
   /** Liste d'appel : élèves de la classe et statut déjà saisi pour ce créneau. */
@@ -357,7 +362,7 @@ export class AttendanceService {
       where: { status, ...(studentIds ? { studentId: { in: studentIds } } : {}) },
       orderBy: { createdAt: 'desc' },
       take: 200,
-      include: { records: { include: { session: true } } },
+      include: { records: { include: { session: true } }, file: true },
     });
     const students = await this.db.student.findMany({
       where: { id: { in: [...new Set(items.map((i) => i.studentId))] } },
@@ -368,6 +373,7 @@ export class AttendanceService {
       status: j.status,
       reason: j.reason,
       createdAt: j.createdAt,
+      attachment: presentFile(j.file),
       student: students.find((s) => s.id === j.studentId) ?? null,
       records: j.records.map((r) => ({
         id: r.id,
@@ -377,6 +383,41 @@ export class AttendanceService {
         status: r.status,
       })),
     }));
+  }
+
+  /**
+   * Pièce jointe d'un justificatif (déposée par le parent ou l'école). Remplaçable tant que le
+   * justificatif est en attente ; figée une fois traité.
+   */
+  async attach(id: string, upload: Upload | undefined) {
+    const j = await this.db.justification.findUnique({ where: { id } });
+    if (!j) throw new NotFoundException('Justificatif introuvable');
+    if (j.status !== 'PENDING')
+      throw new ConflictException('Ce justificatif a déjà été traité : pièce jointe figée');
+    this.files.validate(upload);
+    return this.db.$transaction(async (tx) => {
+      const file = await this.files.store(upload, 'JUSTIFICATION', tx);
+      if (j.fileId) await this.files.softDelete(j.fileId, 'Pièce jointe remplacée', tx);
+      await tx.justification.update({ where: { id }, data: { fileId: file.id } });
+      await this.audit.log(
+        {
+          action: 'attendance.justification_attachment',
+          entity: 'Justification',
+          entityId: id,
+          before: { fileId: j.fileId },
+          after: { fileId: file.id },
+        },
+        tx,
+      );
+      return { id, attachment: presentFile(file) };
+    });
+  }
+
+  /** Lien de consultation de la pièce jointe, journalisé (motifs souvent médicaux). */
+  async attachmentLink(id: string) {
+    const j = await this.db.justification.findUnique({ where: { id } });
+    if (!j) throw new NotFoundException('Justificatif introuvable');
+    return this.files.link(j.fileId, true);
   }
 
   async review(id: string, decision: 'ACCEPTED' | 'REJECTED') {
@@ -527,6 +568,20 @@ export class AttendanceController {
     @Body(new ZodPipe(justificationReviewSchema)) body: z.infer<typeof justificationReviewSchema>,
   ) {
     return this.attendance.review(id, body.decision);
+  }
+
+  @RequirePermissions('attendance.justify')
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(FileUpload)
+  @Post('justifications/:id/attachment')
+  attach(@Param('id') id: string, @UploadedFile() file: Upload | undefined) {
+    return this.attendance.attach(id, file);
+  }
+
+  @RequirePermissions('attendance.justify')
+  @Get('justifications/:id/attachment')
+  attachment(@Param('id') id: string) {
+    return this.attendance.attachmentLink(id);
   }
 
   @RequirePermissions('attendance.read')

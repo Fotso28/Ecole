@@ -14,8 +14,10 @@ import { AuthModule } from './modules/auth/auth.module';
 import { CommunicationModule } from './modules/communication/communication.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { DevModule } from './modules/dev/dev.module';
+import { FilesModule } from './modules/files/files.module';
 import { FinanceModule } from './modules/finance/finance.module';
 import { GradesModule } from './modules/grades/grades.module';
+import { LessonsModule } from './modules/lessons/lessons.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { PlatformModule } from './modules/platform/platform.module';
 import { PortalModule } from './modules/portal/portal.module';
@@ -56,6 +58,8 @@ import { VerifyModule } from './modules/verify/verify.module';
     TimetableModule,
     VerifyModule,
     DevModule,
+    FilesModule,
+    LessonsModule,
   ],
   controllers: [HealthController],
   providers: [

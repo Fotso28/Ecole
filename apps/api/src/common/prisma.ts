@@ -43,6 +43,9 @@ export const TENANT_MODELS: ReadonlySet<string> = new Set<Prisma.ModelName>([
   'Counter',
   'Room',
   'TimetableEntry',
+  'StoredFile',
+  'LessonLog',
+  'CourseMaterial',
 ]);
 
 export class TenantIsolationError extends ForbiddenException {

@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { ClipboardCheck, NotebookPen, PenLine } from 'lucide-react';
+import { ClipboardCheck, GraduationCap, NotebookPen, PenLine } from 'lucide-react';
 import Link from 'next/link';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -14,7 +14,8 @@ import {
 } from '@/components/ui/card';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import { formatWeekday } from '@/lib/format';
+import { useMySupervisions } from '@/lib/exams';
+import { formatShortDate, formatWeekday } from '@/lib/format';
 
 interface TeacherDay {
   today: string;
@@ -44,6 +45,7 @@ export default function TeacherPage() {
     queryKey: ['teacher-today'],
     queryFn: () => api<TeacherDay>('/teacher/today'),
   });
+  const supervisions = useMySupervisions();
   if (q.isPending) return <LoadingBlock />;
   if (q.isError) return <ErrorBlock error={q.error} onRetry={() => q.refetch()} />;
   const d = q.data;
@@ -86,6 +88,33 @@ export default function TeacherPage() {
           </ul>
         )}
       </Card>
+      {supervisions.data && supervisions.data.supervisions.length > 0 ? (
+        <Card>
+          <CardHeader title="Mes surveillances d’examen" />
+          <ul className="flex flex-col">
+            {supervisions.data.supervisions.slice(0, 6).map((s) => (
+              <li
+                key={s.id}
+                className="flex flex-wrap items-center gap-3 border-t border-line py-3 first:border-t-0"
+              >
+                <GraduationCap className="size-5 shrink-0 text-primary" aria-hidden />
+                <div className="flex min-w-40 flex-1 flex-col">
+                  <strong className="tabular">
+                    {s.date === supervisions.data.today ? 'Aujourd’hui' : formatShortDate(s.date)} ·{' '}
+                    {s.startTime}–{s.endTime} · salle {s.roomName}
+                  </strong>
+                  <span className="text-sm text-muted">
+                    {s.subjectName} · {s.sessionName}
+                  </span>
+                </div>
+                {s.date === supervisions.data.today ? (
+                  <Badge tone="saffron">Aujourd’hui</Badge>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </Card>
+      ) : null}
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-bold">Mes classes</h2>
         {d.classSubjects.length === 0 ? (

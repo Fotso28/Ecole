@@ -61,6 +61,10 @@ export const PERMISSIONS = [
   'students.documents',
   'lessons.read',
   'lessons.write',
+  'exams.read',
+  'exams.manage',
+  'exams.grade',
+  'exams.anonymity.reveal',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -83,6 +87,10 @@ export const ROLE_PERMISSIONS: Record<StaffRole, readonly Permission[]> = {
     'communication.write',
     'lessons.read',
     'messaging.use',
+    'exams.read',
+    'exams.manage',
+    'exams.grade',
+    'exams.anonymity.reveal',
   ],
   SUPERVISOR: [
     'dashboard.read',
@@ -95,6 +103,7 @@ export const ROLE_PERMISSIONS: Record<StaffRole, readonly Permission[]> = {
     'communication.write',
     'discipline.read',
     'messaging.use',
+    'exams.read',
   ],
   SECRETARY: [
     'dashboard.read',
@@ -109,6 +118,7 @@ export const ROLE_PERMISSIONS: Record<StaffRole, readonly Permission[]> = {
     'documents.read',
     'documents.issue',
     'students.documents',
+    'exams.read',
   ],
   ACCOUNTANT: [
     'dashboard.read',
@@ -131,6 +141,8 @@ export const ROLE_PERMISSIONS: Record<StaffRole, readonly Permission[]> = {
     'lessons.read',
     'lessons.write',
     'messaging.use',
+    'exams.read',
+    'exams.grade',
   ],
   NURSE: ['students.read', 'health.read'],
 };

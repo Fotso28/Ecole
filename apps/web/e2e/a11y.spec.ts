@@ -44,6 +44,8 @@ test('écrans de la direction', async ({ page }) => {
     '/impayes',
     '/emploi-du-temps',
     '/cahier-de-texte',
+    '/examens',
+    '/examens/copies',
     '/parametres',
     '/eleves/import',
     '/documents',
@@ -86,6 +88,39 @@ test('fenêtres du secrétariat et de la surveillance', async ({ page }) => {
   await page.getByRole('button', { name: 'Signaler un incident' }).click();
   await expect(page.getByRole('dialog', { name: 'Signaler un incident' })).toBeVisible();
   await expectAccessible(page, '/incidents (saisie)');
+});
+
+test('écrans d’une session d’examen', async ({ page, request }) => {
+  test.setTimeout(180_000);
+  const login = await request.post(`${API_URL}/auth/login`, {
+    data: { email: 'censeur@demo.cm', password: PASSWORD },
+  });
+  const { accessToken } = (await login.json()) as { accessToken: string };
+  const headers = { Authorization: `Bearer ${accessToken}` };
+  const classes = (await (
+    await request.get(`${API_URL}/academic/classes`, { headers })
+  ).json()) as { id: string; name: string }[];
+  const created = await request.post(`${API_URL}/exams/sessions`, {
+    headers,
+    data: {
+      name: `Contrôle accessibilité ${Date.now()}`,
+      kind: 'PROMOTION',
+      startDate: '2027-06-01',
+      endDate: '2027-06-02',
+      classIds: [classes.find((c) => c.name === '6e A')!.id],
+    },
+  });
+  const { id } = (await created.json()) as { id: string };
+  await loginStaff(page, 'censeur@demo.cm');
+  await page.goto(`/examens/${id}`);
+  await expect(page.locator('main h1').first()).toBeVisible();
+  for (const tab of ['Calendrier', 'Salles et places', 'Surveillants', 'Résultats', 'Documents']) {
+    await page.getByRole('tab', { name: tab }).click();
+    await expectAccessible(page, `/examens/[id] (${tab})`);
+  }
+  await page.getByRole('tab', { name: 'Calendrier' }).click();
+  await page.getByRole('button', { name: 'Ajouter une épreuve' }).click();
+  await expectAccessible(page, '/examens/[id] (ajout d’épreuve)');
 });
 
 test('appel et notes de l’enseignant', async ({ page }) => {

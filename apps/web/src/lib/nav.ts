@@ -143,6 +143,21 @@ export const NAV: NavGroup[] = [
         module: 'grades',
       },
       {
+        href: '/examens',
+        label: 'Examens',
+        icon: GraduationCap,
+        permission: 'exams.read',
+        module: 'exams',
+      },
+      {
+        href: '/examens/copies',
+        label: 'Notes d’examen',
+        short: 'Copies',
+        icon: NotebookPen,
+        permission: 'exams.grade',
+        module: 'exams',
+      },
+      {
         href: '/emploi-du-temps',
         label: 'Emploi du temps',
         short: 'Emploi',

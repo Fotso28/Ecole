@@ -16,6 +16,7 @@ import { CommunicationModule } from './modules/communication/communication.modul
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { DevModule } from './modules/dev/dev.module';
 import { FilesModule } from './modules/files/files.module';
+import { ExamsModule } from './modules/exams/exams.module';
 import { FinanceModule } from './modules/finance/finance.module';
 import { GradesModule } from './modules/grades/grades.module';
 import { LessonsModule } from './modules/lessons/lessons.module';
@@ -66,6 +67,7 @@ import { ReenrollmentModule } from './modules/reenrollment/reenrollment.module';
     TimetableModule,
     VerifyModule,
     TranscriptsModule,
+    ExamsModule,
     DevModule,
     DocumentsModule,
     DisciplineModule,

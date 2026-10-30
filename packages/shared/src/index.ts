@@ -1,6 +1,7 @@
 export * from './billing';
 export * from './files';
 export * from './communication';
+export * from './exams';
 export * from './finance';
 export * from './grades';
 export * from './identity';

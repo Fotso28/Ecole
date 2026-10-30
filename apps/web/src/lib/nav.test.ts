@@ -35,6 +35,17 @@ function me(
 const hrefs = (m: Me) => visibleNav(m).flatMap((g) => g.items.map((i) => i.href));
 
 describe('navigation par rôle', () => {
+  it('réserve la facturation des écoles au super-administrateur', () => {
+    expect(hrefs(me(['DIRECTOR']))).not.toContain('/plateforme/facturation');
+    const admin: Me = {
+      ...me([]),
+      user: { ...me([]).user, isPlatformAdmin: true },
+      activeSchool: null,
+    };
+    expect(hrefs(admin)).toEqual(['/plateforme/facturation']);
+    expect(primaryNav(admin).map((i) => i.href)).toEqual(['/plateforme/facturation']);
+  });
+
   it('masque ce qui n’est pas autorisé au lieu de le griser', () => {
     const teacher = hrefs(me(['TEACHER']));
     expect(teacher).toEqual(

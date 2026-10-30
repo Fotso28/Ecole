@@ -52,7 +52,11 @@ export class FakeMtn {
       this.tokenRequests++;
       if (headers.authorization !== `Basic ${Buffer.from('api-user:api-key').toString('base64')}`)
         return json(401, { error: 'login_failed' });
-      return json(200, { access_token: `jeton-${this.tokenRequests}`, token_type: 'access_token', expires_in: 3600 });
+      return json(200, {
+        access_token: `jeton-${this.tokenRequests}`,
+        token_type: 'access_token',
+        expires_in: 3600,
+      });
     }
     if (!headers.authorization?.startsWith('Bearer ')) return json(401, {});
     if (headers['ocp-apim-subscription-key'] !== 'cle-collection') return json(401, {});
@@ -75,7 +79,8 @@ export class FakeMtn {
         partyId: body.payer.partyId,
         status: 'PENDING',
       });
-      if (forced === 'timeout-after-receipt') throw new Error('The operation was aborted due to timeout');
+      if (forced === 'timeout-after-receipt')
+        throw new Error('The operation was aborted due to timeout');
       return new Response(null, { status: 202 });
     }
     const m = /^\/collection\/v1_0\/requesttopay\/(.+)$/.exec(path);
@@ -150,7 +155,10 @@ export class FakeOrange {
         status: 'PENDING',
       });
       if (forced === 'timeout') throw new Error('The operation was aborted due to timeout');
-      return json(200, { message: 'Paiement en cours', data: { status: 'PENDING', payToken: body.payToken } });
+      return json(200, {
+        message: 'Paiement en cours',
+        data: { status: 'PENDING', payToken: body.payToken },
+      });
     }
     const m = /^\/omcoreapis\/1\.0\.2\/mp\/paymentstatus\/(.+)$/.exec(path);
     if (m?.[1]) {

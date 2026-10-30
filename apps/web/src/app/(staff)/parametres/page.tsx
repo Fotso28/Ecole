@@ -1,13 +1,17 @@
 'use client';
 
+import { SUBSCRIPTION_PRICING_LABELS } from '@ecole/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { TriangleAlert } from 'lucide-react';
+import { StateBadge } from '@/components/billing';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, ErrorBlock, LoadingBlock, PageHeader } from '@/components/ui/card';
 import { Checkbox, InputField } from '@/components/ui/field';
 import { useToast } from '@/components/ui/toast';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import { formatDateTime } from '@/lib/format';
+import type { BillingWarning, Invoice, Plan } from '@/lib/billing';
+import { formatDate, formatDateTime, formatFcfa } from '@/lib/format';
 
 interface SchoolSettings {
   id: string;
@@ -34,6 +38,77 @@ interface AuditPage {
     reason: string | null;
     actor: { firstName: string; lastName: string } | null;
   }[];
+}
+
+interface Subscription {
+  plan: Plan | null;
+  invoices: Invoice[];
+  warning: BillingWarning | null;
+}
+
+/** Abonnement de l'école : facture et statut, avertissement sans coupure de l'accès. */
+function SubscriptionCard() {
+  const q = useQuery({
+    queryKey: ['subscription'],
+    queryFn: () => api<Subscription>('/subscription'),
+  });
+  if (!q.data) return null;
+  const { plan, invoices, warning } = q.data;
+  return (
+    <Card id="abonnement">
+      <CardHeader
+        title="Abonnement"
+        subtitle={
+          plan
+            ? `Offre ${plan.name} · ${SUBSCRIPTION_PRICING_LABELS[plan.pricing].toLowerCase()}`
+            : 'Aucune offre enregistrée par la plateforme.'
+        }
+      />
+      {warning ? (
+        <div
+          role="status"
+          className="mb-3 flex items-start gap-3 rounded-[12px] bg-warn-soft p-3 text-sm"
+        >
+          <TriangleAlert className="mt-0.5 size-5 shrink-0 text-warn" aria-hidden />
+          <span>
+            {warning.level === 'overdue'
+              ? 'Votre facture d’abonnement est en retard'
+              : 'Une facture d’abonnement est en attente de règlement'}{' '}
+            : reste à payer <strong className="tabular">{formatFcfa(warning.due)}</strong>. Votre
+            accès n’est pas interrompu ; merci de régulariser auprès de la plateforme.
+          </span>
+        </div>
+      ) : null}
+      {invoices.length === 0 ? (
+        <p className="text-sm text-muted">Aucune facture pour l’instant.</p>
+      ) : (
+        <ul className="flex flex-col">
+          {invoices.map((inv) => (
+            <li
+              key={inv.id}
+              className="flex flex-col gap-1 border-t border-line py-2.5 text-sm first:border-t-0 sm:flex-row sm:items-center sm:gap-3"
+            >
+              <span className="flex flex-1 flex-col">
+                <strong className="font-semibold tabular">
+                  {inv.number} · {inv.period}
+                </strong>
+                <span className="text-[13px] text-muted">
+                  {inv.studentCount} élèves · échéance le {formatDate(inv.dueDate)}
+                </span>
+              </span>
+              <span className="tabular">
+                {formatFcfa(inv.amount)}
+                {inv.due > 0 && inv.state !== 'CANCELLED' ? (
+                  <span className="text-danger"> · reste {formatFcfa(inv.due)}</span>
+                ) : null}
+              </span>
+              <StateBadge state={inv.state} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
 }
 
 const MODULE_LABELS: Record<string, string> = {
@@ -138,6 +213,7 @@ export default function SettingsPage() {
           </Button>
         </form>
       </Card>
+      {can('subscription.read') ? <SubscriptionCard /> : null}
       <Card>
         <CardHeader
           title="Modules de l’abonnement"

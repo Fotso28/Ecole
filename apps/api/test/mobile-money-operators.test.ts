@@ -40,7 +40,9 @@ describe('adaptateur MTN MoMo (API Collection)', () => {
   it('obtient un jeton OAuth, envoie la demande de paiement et réutilise le jeton', async () => {
     const { reference } = await provider.requestPayment(collect());
     expect(reference).toBe(MtnMomoProvider.referenceFor('cmpaiement000000000000001'));
-    expect(reference).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(reference).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
     const [token, pay] = mtn.calls;
     expect(token).toMatchObject({ method: 'POST', url: 'https://mtn.test/collection/token/' });
     expect(token?.headers['ocp-apim-subscription-key']).toBe('cle-collection');
@@ -111,17 +113,22 @@ describe('adaptateur Orange Money Cameroun (paiement marchand)', () => {
     provider = new OrangeMoneyProvider(orangeTestConfig(orange.baseUrl), orange.fetch);
   });
 
-  const order = (over = {}) =>
-    collect({ method: 'ORANGE_MONEY', phone: '+237699887766', ...over });
+  const order = (over = {}) => collect({ method: 'ORANGE_MONEY', phone: '+237699887766', ...over });
 
   it('initialise puis présente le paiement au payeur', async () => {
     const { reference } = await provider.requestPayment(order());
     expect(reference).toBe('MP000001');
     const [token, init, pay] = orange.calls;
-    expect(token).toMatchObject({ url: 'https://orange.test/token', body: 'grant_type=client_credentials' });
+    expect(token).toMatchObject({
+      url: 'https://orange.test/token',
+      body: 'grant_type=client_credentials',
+    });
     expect(token?.headers['content-type']).toBe('application/x-www-form-urlencoded');
     expect(init?.url).toBe('https://orange.test/omcoreapis/1.0.2/mp/init');
-    expect(init?.headers).toMatchObject({ authorization: 'Bearer jeton-orange', 'x-auth-token': 'x-auth' });
+    expect(init?.headers).toMatchObject({
+      authorization: 'Bearer jeton-orange',
+      'x-auth-token': 'x-auth',
+    });
     expect(JSON.parse(pay?.body ?? '{}')).toMatchObject({
       payToken: 'MP000001',
       amount: '35000',
@@ -223,9 +230,9 @@ describe('circuit complet avec les opérateurs', () => {
       .put('/webhooks/mtn-momo')
       .send({ externalId: created.body.id, status: 'SUCCESSFUL', amount: '35000' })
       .expect(200);
-    expect((await prisma.payment.findUniqueOrThrow({ where: { id: created.body.id } })).status).toBe(
-      'PENDING',
-    );
+    expect(
+      (await prisma.payment.findUniqueOrThrow({ where: { id: created.body.id } })).status,
+    ).toBe('PENDING');
     mtn.setStatus(reference, 'SUCCESSFUL');
     await http()
       .post('/webhooks/mtn-momo')
@@ -248,9 +255,9 @@ describe('circuit complet avec les opérateurs', () => {
     const created = await pay('MTN_MOMO');
     mtn.setStatus(MtnMomoProvider.referenceFor(created.body.id), 'FAILED');
     await http().put('/webhooks/mtn-momo').send({ externalId: created.body.id }).expect(200);
-    expect((await prisma.payment.findUniqueOrThrow({ where: { id: created.body.id } })).status).toBe(
-      'FAILED',
-    );
+    expect(
+      (await prisma.payment.findUniqueOrThrow({ where: { id: created.body.id } })).status,
+    ).toBe('FAILED');
     expect(await prisma.ledgerEntry.count({ where: { paymentId: created.body.id } })).toBe(0);
   });
 
@@ -260,14 +267,15 @@ describe('circuit complet avec les opérateurs', () => {
     expect(created.body).toMatchObject({ status: 'PENDING', unconfirmed: true });
     const reference = MtnMomoProvider.referenceFor(created.body.id);
     expect(
-      (await prisma.payment.findUniqueOrThrow({ where: { id: created.body.id } })).operatorReference,
+      (await prisma.payment.findUniqueOrThrow({ where: { id: created.body.id } }))
+        .operatorReference,
     ).toBe(reference);
     await prisma.$executeRaw`UPDATE "Payment" SET "createdAt" = now() - interval '20 minutes' WHERE "id" = ${created.body.id}`;
     mtn.setStatus(reference, 'SUCCESSFUL');
     expect(await app.get(FinanceService).reconcilePending()).toMatchObject({ settled: 1 });
-    expect((await prisma.payment.findUniqueOrThrow({ where: { id: created.body.id } })).status).toBe(
-      'SUCCESS',
-    );
+    expect(
+      (await prisma.payment.findUniqueOrThrow({ where: { id: created.body.id } })).status,
+    ).toBe('SUCCESS');
   });
 
   it('Orange : la notification déclenche une vérification avant l’encaissement', async () => {
@@ -279,17 +287,17 @@ describe('circuit complet avec les opérateurs', () => {
       .post('/webhooks/orange-money')
       .send({ payToken, status: 'SUCCESSFULL' })
       .expect(200);
-    expect((await prisma.payment.findUniqueOrThrow({ where: { id: created.body.id } })).status).toBe(
-      'PENDING',
-    );
+    expect(
+      (await prisma.payment.findUniqueOrThrow({ where: { id: created.body.id } })).status,
+    ).toBe('PENDING');
     orange.setStatus(payToken, 'SUCCESSFULL');
     await http()
       .post('/webhooks/orange-money')
       .send({ data: { payToken, status: 'SUCCESSFULL' } })
       .expect(200);
-    expect((await prisma.payment.findUniqueOrThrow({ where: { id: created.body.id } })).status).toBe(
-      'SUCCESS',
-    );
+    expect(
+      (await prisma.payment.findUniqueOrThrow({ where: { id: created.body.id } })).status,
+    ).toBe('SUCCESS');
     // Notification pour un jeton inconnu : aucun effet, aucune information renvoyée.
     const unknown = await http()
       .post('/webhooks/orange-money')
@@ -305,9 +313,9 @@ describe('circuit complet avec les opérateurs', () => {
     const p = orange.payments.get(payToken);
     if (p) p.amount = '3500';
     await http().post('/webhooks/orange-money').send({ payToken }).expect(200);
-    expect((await prisma.payment.findUniqueOrThrow({ where: { id: created.body.id } })).status).toBe(
-      'PENDING',
-    );
+    expect(
+      (await prisma.payment.findUniqueOrThrow({ where: { id: created.body.id } })).status,
+    ).toBe('PENDING');
     expect(
       await prisma.auditLog.count({ where: { action: 'finance.mobile_money_amount_mismatch' } }),
     ).toBe(1);

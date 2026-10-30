@@ -92,9 +92,9 @@ describe('subscriptionInvoiceState', () => {
     expect(subscriptionInvoiceState({ ...base, paid: 40000, today: '2026-11-30' })).toBe('PARTIAL');
     expect(subscriptionInvoiceState({ ...base, paid: 0, today: '2026-11-01' })).toBe('DUE');
     expect(subscriptionInvoiceState({ ...base, paid: 40000, today: '2026-12-01' })).toBe('OVERDUE');
-    expect(subscriptionInvoiceState({ ...base, paid: 0, today: '2026-12-01', cancelled: true })).toBe(
-      'CANCELLED',
-    );
+    expect(
+      subscriptionInvoiceState({ ...base, paid: 0, today: '2026-12-01', cancelled: true }),
+    ).toBe('CANCELLED');
   });
 });
 

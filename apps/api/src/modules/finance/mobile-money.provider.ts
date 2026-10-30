@@ -168,9 +168,7 @@ export class HttpMobileMoneyProvider implements MobileMoneyProvider {
 
 /** Aiguillage par opérateur vers les raccordements directs configurés. */
 export class OperatorsMobileMoneyProvider implements MobileMoneyProvider {
-  constructor(
-    private readonly operators: Partial<Record<PaymentMethod, MobileMoneyProvider>>,
-  ) {}
+  constructor(private readonly operators: Partial<Record<PaymentMethod, MobileMoneyProvider>>) {}
 
   private pick(method: PaymentMethod): MobileMoneyProvider {
     const provider = this.operators[method];

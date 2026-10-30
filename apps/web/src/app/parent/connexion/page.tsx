@@ -41,7 +41,8 @@ const T = {
     codeTitle: 'Enter the code you received',
     codeLead: 'If this number is known to the school, a 6-digit code has been sent to',
     codeLabel: '6-digit code',
-    codeHint: 'The code is valid for 15 minutes. If you received several SMS, the latest code works.',
+    codeHint:
+      'The code is valid for 15 minutes. If you received several SMS, the latest code works.',
     login: 'Sign in',
     resend: 'Resend code',
     resendIn: (s: number) => `Resend code in 0:${String(s).padStart(2, '0')}`,

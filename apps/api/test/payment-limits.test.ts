@@ -49,7 +49,10 @@ describe('limiteur à fenêtre fixe', () => {
     const t0 = 1_000_000;
     expect(RateLimiter.hit('k', windows, t0).allowed).toBe(true);
     expect(RateLimiter.hit('k', windows, t0 + 1).allowed).toBe(true);
-    expect(RateLimiter.hit('k', windows, t0 + 2)).toEqual({ allowed: false, retryAfterSeconds: 60 });
+    expect(RateLimiter.hit('k', windows, t0 + 2)).toEqual({
+      allowed: false,
+      retryAfterSeconds: 60,
+    });
     // Fenêtre courte écoulée : la fenêtre horaire autorise encore une requête, puis bloque.
     expect(RateLimiter.hit('k', windows, t0 + 61_000).allowed).toBe(true);
     const blocked = RateLimiter.hit('k', windows, t0 + 122_000);

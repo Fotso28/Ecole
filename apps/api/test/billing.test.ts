@@ -90,7 +90,9 @@ describe('offres d’abonnement', () => {
       .expect(409);
     const list = await http().get('/platform/billing/plans').set(admin.auth).expect(200);
     expect(list.body).toHaveLength(2);
-    expect(await prisma.auditLog.count({ where: { action: 'platform.subscription_plan_created' } })).toBe(2);
+    expect(
+      await prisma.auditLog.count({ where: { action: 'platform.subscription_plan_created' } }),
+    ).toBe(2);
   });
 
   it('réserve la facturation au super-administrateur', async () => {
@@ -119,10 +121,15 @@ describe('factures calculées sur des chiffres agrégés', () => {
       .get(`/platform/billing/schools/${a.schoolId}`)
       .set(admin.auth)
       .expect(200);
-    expect(detail.body.preview).toMatchObject({ period: '2026-2027', studentCount: 3, total: 4500 });
+    expect(detail.body.preview).toMatchObject({
+      period: '2026-2027',
+      studentCount: 3,
+      total: 4500,
+    });
     // Aucune donnée nominative dans les réponses de la plateforme.
     const text = JSON.stringify([overview.body, detail.body]);
-    for (const name of ['Marie-Claire', 'Ngono', 'Bello', 'Tchoupo', 'CD-']) expect(text).not.toContain(name);
+    for (const name of ['Marie-Claire', 'Ngono', 'Bello', 'Tchoupo', 'CD-'])
+      expect(text).not.toContain(name);
 
     const invoice = await issue(a.schoolId).expect(201);
     expect(invoice.body).toMatchObject({
@@ -224,7 +231,12 @@ describe('règlements et relances', () => {
 
   it('enregistre des règlements en ajout seul et corrige par écriture négative', async () => {
     const partial = await pay(10000).expect(201);
-    expect(partial.body).toMatchObject({ amount: 30000, paid: 10000, due: 20000, state: 'OVERDUE' });
+    expect(partial.body).toMatchObject({
+      amount: 30000,
+      paid: 10000,
+      due: 20000,
+      state: 'OVERDUE',
+    });
     await pay(25000).expect(400);
     await pay(0).expect(400);
     const full = await pay(20000).expect(201);
@@ -259,7 +271,10 @@ describe('règlements et relances', () => {
       await prisma.auditLog.count({
         where: {
           action: {
-            in: ['platform.subscription_payment_recorded', 'platform.subscription_payment_corrected'],
+            in: [
+              'platform.subscription_payment_recorded',
+              'platform.subscription_payment_corrected',
+            ],
           },
           schoolId: a.schoolId,
         },

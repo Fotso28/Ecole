@@ -88,19 +88,10 @@ describe('épuisement des codes par un tiers', () => {
     expect(res.body.message).toContain('Le dernier code reçu reste valable');
     expect(await smsCount()).toBe(3);
     // Une nouvelle demande n'annule pas le code précédent : le premier code fonctionne encore.
-    await http()
-      .post('/auth/otp/verify')
-      .send({ phone: '677123456', code: codes[0] })
-      .expect(200);
+    await http().post('/auth/otp/verify').send({ phone: '677123456', code: codes[0] }).expect(200);
     // Chaque code ne sert qu'une fois ; les autres restent utilisables.
-    await http()
-      .post('/auth/otp/verify')
-      .send({ phone: '677123456', code: codes[0] })
-      .expect(401);
-    await http()
-      .post('/auth/otp/verify')
-      .send({ phone: '677123456', code: codes[2] })
-      .expect(200);
+    await http().post('/auth/otp/verify').send({ phone: '677123456', code: codes[0] }).expect(401);
+    await http().post('/auth/otp/verify').send({ phone: '677123456', code: codes[2] }).expect(200);
   });
 
   it('isole les faux codes d’un tiers des essais depuis l’appareil de confiance', async () => {
@@ -162,7 +153,9 @@ describe('épuisement des codes par un tiers', () => {
         .set('Cookie', device)
         .send({ phone: '699887766' })
         .expect(202);
-    expect(await prisma.otpCode.count({ where: { phone: '+237699887766', trusted: true } })).toBe(0);
+    expect(await prisma.otpCode.count({ where: { phone: '+237699887766', trusted: true } })).toBe(
+      0,
+    );
     expect(await prisma.otpCode.count({ where: { phone: '+237699887766', sent: true } })).toBe(3);
   });
 });

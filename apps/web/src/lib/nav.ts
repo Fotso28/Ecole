@@ -4,6 +4,7 @@ import {
   CalendarDays,
   ClipboardCheck,
   FileText,
+  Landmark,
   LayoutGrid,
   Megaphone,
   PenLine,
@@ -29,6 +30,8 @@ export interface NavItem {
   permission?: Permission;
   module?: Module;
   teacherOnly?: boolean;
+  /** Réservé au super-administrateur de la plateforme. */
+  platformAdmin?: boolean;
 }
 
 export interface NavGroup {
@@ -159,6 +162,18 @@ export const NAV: NavGroup[] = [
       { href: '/parametres', label: 'Paramètres', icon: Settings, permission: 'settings.write' },
     ],
   },
+  {
+    label: 'Plateforme',
+    items: [
+      {
+        href: '/plateforme/facturation',
+        label: 'Facturation des écoles',
+        short: 'Facturation',
+        icon: Landmark,
+        platformAdmin: true,
+      },
+    ],
+  },
 ];
 
 /** Destinations du menu inférieur (téléphone), par rôle principal. */
@@ -191,7 +206,8 @@ export function visibleNav(me: Me | null): NavGroup[] {
       (i) =>
         (!i.permission || perms.has(i.permission)) &&
         (!i.module || modules.has(i.module)) &&
-        (!i.teacherOnly || me.roles.includes('TEACHER')),
+        (!i.teacherOnly || me.roles.includes('TEACHER')) &&
+        (!i.platformAdmin || me.user.isPlatformAdmin),
     ),
   })).filter((g) => g.items.length > 0);
 }
@@ -199,7 +215,7 @@ export function visibleNav(me: Me | null): NavGroup[] {
 export function primaryNav(me: Me | null): NavItem[] {
   const items = visibleNav(me).flatMap((g) => g.items);
   const role = ROLE_ORDER.find((r) => me?.roles.includes(r));
-  const wanted = role ? PRIMARY[role] : [];
+  const wanted = role ? PRIMARY[role] : me?.user.isPlatformAdmin ? ['/plateforme/facturation'] : [];
   return wanted
     .map((href) => items.find((i) => i.href === href))
     .filter((i): i is NavItem => !!i)

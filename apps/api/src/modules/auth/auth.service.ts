@@ -443,7 +443,9 @@ export class AuthService {
       return { sent: false };
     }
     if (outcome === 'over-budget') {
-      this.logger.error('Budget journalier de SMS de connexion atteint : demandes anonymes suspendues');
+      this.logger.error(
+        'Budget journalier de SMS de connexion atteint : demandes anonymes suspendues',
+      );
       return { sent: false };
     }
     if (outcome !== 'send') return { sent: false };

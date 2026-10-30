@@ -2,6 +2,20 @@ limit_req_zone $binary_remote_addr zone=ecole_api:10m rate=20r/s;
 limit_req_zone $binary_remote_addr zone=ecole_auth:10m rate=10r/m;
 limit_req_status 429;
 
+# Paiements : demandes (POST) limitées par adresse et par session (jeton Bearer),
+# confirmations des opérateurs limitées par adresse.
+map $request_method $ecole_pay_ip {
+  POST $binary_remote_addr;
+  default "";
+}
+map $request_method:$http_authorization $ecole_pay_user {
+  ~^POST:(?<bearer>.+)$ $bearer;
+  default "";
+}
+limit_req_zone $ecole_pay_ip zone=ecole_pay_ip:10m rate=60r/m;
+limit_req_zone $ecole_pay_user zone=ecole_pay_user:10m rate=6r/m;
+limit_req_zone $binary_remote_addr zone=ecole_webhooks:10m rate=120r/m;
+
 server {
   listen 80;
   server_name ${DOMAIN};

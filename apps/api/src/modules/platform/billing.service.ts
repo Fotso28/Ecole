@@ -78,7 +78,9 @@ function presentInvoice(invoice: InvoiceWithPayments, today = todayInCameroon())
 export type PresentedInvoice = ReturnType<typeof presentInvoice>;
 
 /** Avertissement affiché à la direction : jamais de coupure de l'accès. */
-function warningFor(invoices: PresentedInvoice[]): { level: 'overdue' | 'due'; due: number } | null {
+function warningFor(
+  invoices: PresentedInvoice[],
+): { level: 'overdue' | 'due'; due: number } | null {
   const open = invoices.filter((i) => i.state !== 'CANCELLED' && i.due > 0);
   if (open.length === 0) return null;
   const due = open.reduce((sum, i) => sum + i.due, 0);
@@ -208,7 +210,13 @@ export class BillingService {
     period?: string,
   ) {
     const counted = await this.studentCount(school.id, period);
-    if (!plan || !counted) return { period: counted?.period ?? null, studentCount: counted?.count ?? 0, lines: [], total: null };
+    if (!plan || !counted)
+      return {
+        period: counted?.period ?? null,
+        studentCount: counted?.count ?? 0,
+        lines: [],
+        total: null,
+      };
     const { lines, total } = computeSubscriptionInvoice({
       pricing: plan.pricing,
       pricePerStudent: plan.pricePerStudent,
@@ -313,7 +321,8 @@ export class BillingService {
   async issueInvoice(schoolId: string, input: { period?: string; dueDate: string }) {
     const school = await this.schoolOrThrow(schoolId);
     const subscription = await this.subscriptionOf(schoolId);
-    if (!subscription) throw new BadRequestException('Choisissez d’abord une offre pour cet établissement');
+    if (!subscription)
+      throw new BadRequestException('Choisissez d’abord une offre pour cet établissement');
     const preview = await this.preview(school, subscription.plan, input.period);
     if (!preview.period || preview.total === null)
       throw new BadRequestException(
@@ -402,9 +411,7 @@ export class BillingService {
       throw new BadRequestException('Facture annulée : aucun règlement possible');
     const current = presentInvoice(invoice);
     if (input.amount > current.due)
-      throw new BadRequestException(
-        `Le règlement dépasse le reste à payer (${current.due} FCFA)`,
-      );
+      throw new BadRequestException(`Le règlement dépasse le reste à payer (${current.due} FCFA)`);
     return runAsSystem(
       'billing-payment',
       () =>

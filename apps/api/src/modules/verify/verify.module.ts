@@ -1,13 +1,14 @@
 import { Controller, Get, Module, NotFoundException, Param } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
-import { formatFcfa, formatGrade } from '@ecole/shared';
+import { ADMIN_DOCUMENT_LABELS, formatFcfa, formatGrade } from '@ecole/shared';
 import { runAsSystem } from '../../common/context';
 import { Public } from '../../common/decorators';
 import { Db, InjectDb } from '../../common/prisma';
+import type { AdminDocumentData } from '../documents/documents.service';
 import type { ReportCardData } from '../report-cards/report-cards.service';
 
-/** Vérification publique de l'authenticité d'un bulletin ou d'un reçu (QR code). */
+/** Vérification publique de l'authenticité d'un bulletin, d'un reçu ou d'un document administratif (QR code). */
 @ApiTags('verify')
 @Controller('verify')
 export class VerifyController {
@@ -66,6 +67,28 @@ export class VerifyController {
           number: receipt.number,
           amount: formatFcfa(receipt.payment.amount),
           issuedAt: receipt.issuedAt,
+        };
+      }
+      const document = await this.db.adminDocument.findUnique({
+        where: { verificationCode: code },
+      });
+      if (document) {
+        const data = document.data as unknown as AdminDocumentData;
+        // Le motif d'annulation reste interne : seul le statut est public.
+        return {
+          type: 'document',
+          documentType: document.type,
+          label: ADMIN_DOCUMENT_LABELS[document.type],
+          valid: document.status === 'ISSUED',
+          status: document.status,
+          school: data.school.name,
+          student: `${data.student.lastName.toUpperCase()} ${data.student.firstName}`,
+          class: data.class.name,
+          year: data.year.name,
+          number: document.number,
+          duplicateOf: data.duplicateOf?.number ?? null,
+          issuedAt: document.issuedAt,
+          cancelledAt: document.cancelledAt,
         };
       }
       throw new NotFoundException('Code inconnu');

@@ -15,9 +15,11 @@ import {
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import {
   attendanceSubmitSchema,
+  INCIDENT_TYPES,
   isoDate,
   justificationCreateSchema,
   justificationReviewSchema,
+  SANCTION_TYPES,
   timeOfDay,
   toMinutes,
 } from '@ecole/shared';
@@ -44,6 +46,8 @@ const incidentSchema = z.object({
   date: isoDate,
   description: z.string().trim().min(3).max(1000),
   sanction: z.string().trim().max(300).optional(),
+  type: z.enum(INCIDENT_TYPES).optional(),
+  sanctionType: z.enum(SANCTION_TYPES).optional(),
 });
 const statsSchema = z.object({ from: isoDate.optional(), to: isoDate.optional() });
 
@@ -468,6 +472,8 @@ export class AttendanceService {
         date: toDbDate(input.date),
         description: input.description,
         sanction: input.sanction,
+        type: input.type,
+        sanctionType: input.sanctionType ?? (input.sanction ? 'OTHER' : 'NONE'),
         reportedById: currentActorId() ?? '',
       },
     });

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -9,7 +10,12 @@ import {
   Post,
   Put,
   Query,
+  Res,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import {
   duplicateCheckSchema,
@@ -25,6 +31,7 @@ import { RequireModule, RequirePermissions } from '../../common/decorators';
 import { ZodPipe } from '../../common/zod.pipe';
 import { FinanceModule } from '../finance/finance.module';
 import { StudentsService } from './students.service';
+import { buildImportTemplate } from './xlsx';
 
 const listSchema = z.object({
   search: z.string().max(80).optional(),
@@ -39,6 +46,14 @@ const enrollmentChangeSchema = z.object({
   classId: z.string().optional(),
   status: z.enum(ENROLLMENT_STATUSES).optional(),
 });
+const xlsxImportSchema = z.object({
+  classId: z.string().min(1).optional(),
+  dryRun: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
+});
+const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const healthQuerySchema = z.object({
   reason: z.string().trim().min(5, 'Motif obligatoire (5 caractères minimum)').max(300),
 });
@@ -81,6 +96,25 @@ export class StudentsController {
   @Post('students/import')
   import(@Body(new ZodPipe(studentImportSchema)) body: z.infer<typeof studentImportSchema>) {
     return this.students.importCsv(body.csv, body.classId, body.dryRun);
+  }
+
+  @RequirePermissions('students.write')
+  @Post('students/import/xlsx')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024, files: 1 } }))
+  importXlsx(
+    @UploadedFile() file: { buffer: Buffer; originalname: string } | undefined,
+    @Body(new ZodPipe(xlsxImportSchema)) body: z.infer<typeof xlsxImportSchema>,
+  ) {
+    if (!file?.buffer.length) throw new BadRequestException('Fichier Excel manquant');
+    return this.students.importXlsx(file.buffer, body.classId, body.dryRun);
+  }
+
+  @RequirePermissions('students.write')
+  @Get('students/import/template.xlsx')
+  async importTemplate(@Res() res: Response) {
+    res.setHeader('content-type', XLSX_MIME);
+    res.setHeader('content-disposition', 'attachment; filename="modele-import-eleves.xlsx"');
+    res.send(await buildImportTemplate());
   }
 
   @RequirePermissions('students.read')

@@ -26,6 +26,7 @@ import { fromDbDate, todayInCameroon, toDbDate } from '../../common/dates';
 import { Db, InjectDb, Tx } from '../../common/prisma';
 import { ScopeService } from '../../common/scope.service';
 import { FinanceService } from '../finance/finance.service';
+import { normalizeImportHeader, readStudentSheet } from './xlsx';
 
 export const DEFAULT_DOCUMENTS = [
   'Acte de naissance',
@@ -627,23 +628,35 @@ export class StudentsService {
    * En mode aperçu, rien n'est enregistré ; l'import est refusé s'il reste une erreur.
    */
   async importCsv(csv: string, classId: string | undefined, dryRun: boolean) {
+    const parsed = Papa.parse<Record<string, string>>(csv.trim(), {
+      header: true,
+      skipEmptyLines: true,
+      transformHeader: normalizeImportHeader,
+    });
+    return this.importRecords(
+      parsed.data.map((raw, i) => ({ line: i + 2, raw })),
+      classId,
+      dryRun,
+    );
+  }
+
+  /** Import Excel (.xlsx) : mêmes colonnes, même aperçu et même rapport que le CSV. */
+  async importXlsx(file: Buffer, classId: string | undefined, dryRun: boolean) {
+    return this.importRecords(await readStudentSheet(file), classId, dryRun);
+  }
+
+  /** Lignes déjà lues (en-têtes normalisés), avec leur numéro dans le fichier d'origine. */
+  private async importRecords(
+    records: { line: number; raw: Record<string, string> }[],
+    classId: string | undefined,
+    dryRun: boolean,
+  ) {
     const year = await this.scope.currentYear();
     if (classId) {
       const cls = await this.db.class.findUnique({ where: { id: classId } });
       if (!cls || cls.academicYearId !== year.id)
         throw new BadRequestException('Classe inconnue pour l’année en cours');
     }
-    const parsed = Papa.parse<Record<string, string>>(csv.trim(), {
-      header: true,
-      skipEmptyLines: true,
-      transformHeader: (h) =>
-        h
-          .trim()
-          .toLowerCase()
-          .normalize('NFD')
-          .replace(/[\u0300-\u036f]/g, '')
-          .replace(/\s+/g, '_'),
-    });
     const relationshipOf = (v: string): (typeof GUARDIAN_RELATIONSHIPS)[number] => {
       const s = v.trim().toLowerCase();
       if (s.startsWith('p') || s === 'father') return 'FATHER';
@@ -658,8 +671,7 @@ export class StudentsService {
     };
     const rows: { line: number; input?: StudentInput; errors: string[] }[] = [];
     const seen = new Map<string, number>();
-    for (const [i, raw] of parsed.data.entries()) {
-      const line = i + 2;
+    for (const { line, raw } of records) {
       const errors: string[] = [];
       const guardian = guardianInputSchema.safeParse({
         firstName: raw.parent_prenom ?? raw.parent_prenoms ?? '',

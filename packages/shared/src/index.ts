@@ -3,4 +3,5 @@ export * from './grades';
 export * from './identity';
 export * from './permissions';
 export * from './schemas';
+export * from './secretariat';
 export * from './timetable';

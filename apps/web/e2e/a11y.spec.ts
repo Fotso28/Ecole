@@ -385,6 +385,10 @@ test('facturation de la plateforme', async ({ page, request }) => {
   await expect(page.getByRole('dialog')).toBeVisible();
   await expectAccessible(page, '/plateforme/facturation (nouvelle offre)');
   await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Nouvel établissement' }).click();
+  await expect(page.getByRole('dialog', { name: 'Nouvel établissement' })).toBeVisible();
+  await expectAccessible(page, '/plateforme/facturation (nouvel établissement)');
+  await page.keyboard.press('Escape');
   await page
     .getByRole('link', { name: /Collège Démo/ })
     .filter({ visible: true })

@@ -18,7 +18,8 @@ import { useState } from 'react';
 import { Button, ButtonLink } from '@/components/ui/button';
 import { Card, CardHeader, ErrorBlock, LoadingBlock, PageHeader, Stat } from '@/components/ui/card';
 import { useToast } from '@/components/ui/toast';
-import { api, downloadFile, openPdf } from '@/lib/api';
+import { StartGuide } from '@/components/start-guide';
+import { api, ApiError, downloadFile, openPdf } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { formatFcfa, formatGrade, formatTime, formatWeekday, plural } from '@/lib/format';
 
@@ -284,8 +285,16 @@ function WeeklyChart({ weeks }: { weeks: Weekly }) {
 export default function DashboardPage() {
   const { me, can } = useAuth();
   const toast = useToast();
-  const q = useQuery({ queryKey: ['dashboard'], queryFn: () => api<Dashboard>('/dashboard') });
+  // École neuve sans année scolaire en cours : guide de démarrage au lieu d'une erreur.
+  const noYear = !!me?.activeSchool && !me.activeSchool.currentYear;
+  const q = useQuery({
+    queryKey: ['dashboard', me?.activeSchool?.currentYear?.id ?? null],
+    queryFn: () => api<Dashboard>('/dashboard'),
+    enabled: !noYear,
+  });
   const fail = (e: unknown) => toast(e instanceof Error ? e.message : 'Erreur', 'error');
+  if (noYear || (q.error instanceof ApiError && q.error.code === 'NO_CURRENT_YEAR'))
+    return <StartGuide />;
   if (q.isPending) return <LoadingBlock />;
   if (q.isError) return <ErrorBlock error={q.error} onRetry={() => q.refetch()} />;
   const d = q.data;

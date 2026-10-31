@@ -1,4 +1,6 @@
+import Link from 'next/link';
 import type { HTMLAttributes, ReactNode } from 'react';
+import { ApiError } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 export function Card({ className, ...props }: HTMLAttributes<HTMLElement>) {
@@ -107,6 +109,20 @@ export function LoadingBlock({ label = 'Chargement…' }: { label?: string }) {
 
 export function ErrorBlock({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
   const message = error instanceof Error ? error.message : 'Une erreur est survenue.';
+  // École sans année scolaire en cours : orienter vers le guide de démarrage, pas une erreur.
+  if (error instanceof ApiError && error.code === 'NO_CURRENT_YEAR')
+    return (
+      <div role="status" className="flex flex-col gap-3 rounded-[14px] bg-info-soft p-4 text-sm">
+        <strong>Aucune année scolaire en cours</strong>
+        <span>Créez l’année scolaire pour commencer à utiliser cette page.</span>
+        <Link
+          href="/tableau-de-bord"
+          className="inline-flex min-h-11 items-center self-start font-semibold text-primary underline"
+        >
+          Ouvrir le guide de démarrage
+        </Link>
+      </div>
+    );
   return (
     <div role="alert" className="flex flex-col gap-3 rounded-[14px] bg-danger-soft p-4 text-sm">
       <strong className="text-danger">Impossible d’afficher cette page</strong>

@@ -35,6 +35,8 @@ interface GradeSheet {
   };
   sequence: { id: string; name: string; termName: string };
   status: 'DRAFT' | 'SUBMITTED' | 'LOCKED' | 'MIXED';
+  /** Bulletins publiés sur ces notes (grille validée). */
+  published?: boolean;
   evaluations: {
     id: string;
     name: string;
@@ -332,7 +334,7 @@ function NotesContent() {
               {STATUS[data.status].label}
             </Badge>
             <span className="flex items-center gap-1.5 text-[13px] text-muted" aria-live="polite">
-              {saveState === 'saving' ? (
+              {!editable && saveState === 'idle' ? null : saveState === 'saving' ? (
                 'Enregistrement…'
               ) : saveState === 'saved' ? (
                 <>
@@ -392,6 +394,27 @@ function NotesContent() {
               ) : null}
             </div>
           </div>
+
+          {data.status === 'LOCKED' ? (
+            <p
+              role="status"
+              className="flex items-start gap-2 rounded-[12px] border border-line bg-paper p-3 text-sm"
+            >
+              <Lock className="mt-0.5 size-4 shrink-0" aria-hidden />
+              <span>
+                {data.published
+                  ? 'Notes validées : bulletin publié, les notes sont figées.'
+                  : 'Notes validées par le censeur : elles sont figées.'}{' '}
+                {can('grades.validate')
+                  ? 'Pour une correction, rouvrez la grille (motif obligatoire).'
+                  : 'Pour une correction, adressez-vous au censeur.'}
+              </span>
+            </p>
+          ) : data.status === 'SUBMITTED' && !editable ? (
+            <p role="status" className="rounded-[12px] border border-line bg-paper p-3 text-sm">
+              Grille soumise au censeur : la saisie est fermée en attendant sa validation.
+            </p>
+          ) : null}
 
           {data.evaluations.length === 0 ? (
             <EmptyState title="Aucune évaluation pour cette séquence">

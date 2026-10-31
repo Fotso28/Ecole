@@ -118,6 +118,7 @@ export class PortalService {
         id: l.student.id,
         firstName: l.student.firstName,
         lastName: l.student.lastName,
+        gender: l.student.gender,
         matricule: l.student.matricule,
         school,
         className: l.student.enrollments[0]?.class.name ?? null,
@@ -181,6 +182,7 @@ export class PortalService {
             }),
             this.db.announcement.findMany({
               where: {
+                withdrawnAt: null,
                 OR: [
                   { scope: 'SCHOOL' },
                   { scope: 'STUDENTS', studentIds: { has: studentId } },
@@ -211,6 +213,36 @@ export class PortalService {
                 })
               : Promise.resolve([]),
           ]);
+        // Justificatifs refusés : le parent voit « Refusé » et le motif tant qu'aucun autre
+        // justificatif n'a été envoyé pour l'absence.
+        const rejected = absences.length
+          ? await this.db.justification.findMany({
+              where: {
+                studentId,
+                status: 'REJECTED',
+                recordIds: { hasSome: absences.map((r) => r.id) },
+              },
+              orderBy: { reviewedAt: 'desc' },
+              select: { recordIds: true, reviewNote: true, reviewedAt: true },
+            })
+          : [];
+        // Exclusions temporaires de l'année (les autres incidents restent internes à l'école).
+        const yearStart = enrollment
+          ? (
+              await this.db.academicYear.findUniqueOrThrow({
+                where: { id: enrollment.academicYearId },
+                select: { startDate: true },
+              })
+            ).startDate
+          : null;
+        const exclusions = yearStart
+          ? await this.db.incident.findMany({
+              where: { studentId, sanctionType: 'TEMPORARY_EXCLUSION', date: { gte: yearStart } },
+              orderBy: { date: 'desc' },
+              take: 5,
+              select: { id: true, date: true, sanction: true },
+            })
+          : [];
         const yearTerms = enrollment
           ? await this.db.term.findMany({
               where: { academicYearId: enrollment.academicYearId },
@@ -272,6 +304,11 @@ export class PortalService {
             justification: r.justification?.status ?? null,
             justificationId: r.justification?.id ?? null,
             hasAttachment: !!r.justification?.fileId,
+            rejection: r.justification
+              ? null
+              : (rejected
+                  .filter((j) => j.recordIds.includes(r.id))
+                  .map((j) => ({ note: j.reviewNote, reviewedAt: j.reviewedAt }))[0] ?? null),
           })),
           reportCards: (hasGrades ? reportCards : []).map((r) => {
             const data = r.data as unknown as ReportCardData;
@@ -308,6 +345,11 @@ export class PortalService {
             title: a.title,
             body: a.body,
             publishedAt: a.publishedAt,
+          })),
+          exclusions: exclusions.map((x) => ({
+            id: x.id,
+            date: fromDbDate(x.date),
+            details: x.sanction,
           })),
         };
       },

@@ -52,9 +52,20 @@ export const SANCTION_TYPE_LABELS: Record<SanctionType, string> = {
   OTHER: 'Autre sanction',
 };
 
+/** Date du jour au Cameroun (UTC+1, sans heure d'été), au format AAAA-MM-JJ. */
+export function cameroonToday(now: Date = new Date()): string {
+  return new Date(now.getTime() + 3_600_000).toISOString().slice(0, 10);
+}
+
+/** Date d'un fait déjà survenu : aujourd'hui au plus tard (heure du Cameroun). */
+export const pastOrTodayDate = isoDate.refine((d) => d <= cameroonToday(), {
+  message: 'La date ne peut pas être dans le futur',
+});
+
+/** Signalement ou correction d'un incident (la correction reprend tous les champs). */
 export const incidentCreateSchema = z.object({
   studentId: id,
-  date: isoDate,
+  date: pastOrTodayDate,
   type: z.enum(INCIDENT_TYPES).default('OTHER'),
   description: z.string().trim().min(3, 'Décrivez l’incident (3 caractères minimum)').max(1000),
   sanctionType: z.enum(SANCTION_TYPES).default('NONE'),
@@ -87,6 +98,7 @@ export interface IncidentStatRow {
 export interface IncidentStats {
   total: number;
   students: number;
+  /** Élèves ayant reçu au moins une sanction (jamais plus que `students`). */
   sanctioned: number;
   byType: { type: string; count: number }[];
   bySanction: { sanctionType: string; count: number }[];
@@ -112,7 +124,7 @@ export function summarizeIncidents(rows: readonly IncidentStatRow[]): IncidentSt
   return {
     total: rows.length,
     students: perStudent.size,
-    sanctioned: rows.filter((r) => r.sanctionType !== 'NONE').length,
+    sanctioned: new Set(rows.filter((r) => r.sanctionType !== 'NONE').map((r) => r.studentId)).size,
     byType: [...countBy(rows, (r) => r.type)]
       .sort(byCount)
       .map(([type, count]) => ({ type, count })),

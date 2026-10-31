@@ -99,6 +99,12 @@ export default function PortalAbsences() {
                     <span className="text-[13px] text-muted">
                       {a.startTime}–{a.endTime}
                     </span>
+                    {a.rejection ? (
+                      <span className="text-[13px] text-danger">
+                        Justificatif refusé
+                        {a.rejection.note ? ` : ${a.rejection.note}` : ''}
+                      </span>
+                    ) : null}
                   </span>
                   <Badge tone={a.status === 'ABSENT' ? 'danger' : 'warn'}>
                     {a.status === 'ABSENT' ? 'Absence' : 'Retard'}
@@ -149,6 +155,15 @@ export default function PortalAbsences() {
                   <Badge tone="info">Justifiée</Badge>
                 ) : a.justification === 'PENDING' ? (
                   <Badge>En examen</Badge>
+                ) : a.rejection ? (
+                  <Badge tone="danger">Refusé</Badge>
+                ) : null}
+                {!a.justification && a.rejection ? (
+                  <span className="basis-full text-[13px] text-muted">
+                    Justificatif refusé
+                    {a.rejection.note ? ` · Motif : ${a.rejection.note}` : ''}. Vous pouvez en
+                    envoyer un autre.
+                  </span>
                 ) : null}
                 {a.justification === 'PENDING' && a.justificationId && !a.hasAttachment ? (
                   <Button

@@ -67,7 +67,7 @@ function when(e: SchoolEvent): string {
   return `${dates}${time}`;
 }
 
-function EventCard({ event, action }: { event: SchoolEvent; action?: ReactNode }) {
+export function EventCard({ event, action }: { event: SchoolEvent; action?: ReactNode }) {
   return (
     <li className="flex flex-col gap-1.5 rounded-[14px] border border-line bg-white p-3.5">
       <div className="flex items-start justify-between gap-2">
@@ -105,12 +105,15 @@ export function EventCalendar({
   onMonthChange,
   actionFor,
   loading,
+  emptyExtra,
 }: {
   events: SchoolEvent[];
   month: Month;
   onMonthChange: (next: Month) => void;
   actionFor?: (event: SchoolEvent) => ReactNode;
   loading?: boolean;
+  /** Contenu affiché sous « Aucun événement ce mois-ci » (prochains événements…). */
+  emptyExtra?: ReactNode;
 }) {
   const [view, setView] = useState<'list' | 'month'>('list');
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
@@ -257,7 +260,10 @@ export function EventCalendar({
           )}
         </>
       ) : loading ? null : events.length === 0 ? (
-        <EmptyState title="Aucun événement ce mois-ci" />
+        <>
+          <EmptyState title="Aucun événement ce mois-ci" />
+          {emptyExtra}
+        </>
       ) : (
         <ul className="flex flex-col gap-2" aria-label={`Événements de ${title}`}>
           {events.map((e) => (

@@ -17,6 +17,11 @@ async function token(request: APIRequestContext, email: string) {
 const today = () => new Date(Date.now() + 3600_000).toISOString().slice(0, 10);
 const addDays = (iso: string, n: number) =>
   new Date(new Date(`${iso}T00:00:00Z`).getTime() + n * 86_400_000).toISOString().slice(0, 10);
+/** Réunion des parents du jeu de démonstration : le samedi d'au moins une semaine plus tard. */
+const demoMeeting = () => {
+  const inAWeek = addDays(today(), 7);
+  return addDays(inAWeek, (6 - new Date(`${inAWeek}T00:00:00Z`).getUTCDay()) % 7);
+};
 
 /** Va au mois qui contient `date` dans le calendrier affiché. */
 async function showMonthOf(page: Page, date: string) {
@@ -84,9 +89,18 @@ test.describe('communication', () => {
     await expect(nav.getByRole('link', { name: 'Messages', exact: true })).toBeVisible();
     await expectNoHorizontalOverflow(page);
 
-    // Agenda : la réunion des parents du jeu de démonstration (J+8), en liste puis en mois.
+    // Agenda : un mois vide propose les prochains événements.
     await openPortalTab(page, 'Agenda');
-    const meeting = addDays(today(), 8);
+    for (let i = 0; i < 3; i++) await page.getByRole('button', { name: 'Mois précédent' }).click();
+    await expect(page.getByText('Aucun événement ce mois-ci')).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Prochains événements' })).toContainText(
+      'Réunion des parents (séquence 1)',
+    );
+    await expectNoHorizontalOverflow(page);
+    for (let i = 0; i < 3; i++) await page.getByRole('button', { name: 'Mois suivant' }).click();
+
+    // La réunion des parents du jeu de démonstration, en liste puis en mois.
+    const meeting = demoMeeting();
     await showMonthOf(page, meeting);
     await expect(page.getByText('Réunion des parents (séquence 1)')).toBeVisible();
     await page.getByRole('button', { name: 'Mois', exact: true }).click();
@@ -111,6 +125,12 @@ test.describe('communication', () => {
     await page.getByRole('button', { name: 'Nouvel événement' }).click();
     const form = page.getByRole('dialog');
     await form.getByLabel('Titre').fill(title);
+    // La classe visée n'est jamais présélectionnée.
+    await form.getByLabel('Concerne').selectOption({ label: 'Une classe' });
+    await expect(form.getByLabel('Classe', { exact: true }).locator('option:checked')).toHaveText(
+      'Choisir…',
+    );
+    await form.getByLabel('Concerne').selectOption({ label: 'Toute l’école' });
     await form.getByLabel('Type').selectOption({ label: 'Fête' });
     await form.getByLabel(/^Lieu/).fill('Cour principale');
     await form.getByLabel(/^Heure de début/).fill('10:00');
@@ -140,6 +160,28 @@ test.describe('communication', () => {
     await expect(page.getByText(/Annonce publiée/)).toBeVisible();
     await expect(page.getByText(announcement)).toBeVisible();
     await expect(page.getByText('1 élève visé').first()).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+
+    // Annonce à une classe : la classe se choisit explicitement, puis l'annonce est retirée.
+    const outing = `Sortie pédagogique (${info.project.name})`;
+    await page.getByLabel('Titre').fill(outing);
+    await page.getByLabel('Message').fill('Départ à 8 h devant le collège.');
+    await page.getByLabel('Destinataires').selectOption({ label: 'Une classe' });
+    const classe = page.getByLabel('Classe', { exact: true });
+    await expect(classe.locator('option:checked')).toHaveText('Choisir…');
+    await expect(page.getByRole('button', { name: 'Publier' })).toBeDisabled();
+    await classe.selectOption({ label: '4e A' });
+    await page.getByRole('button', { name: 'Publier' }).click();
+    await expect(page.getByText(/Annonce publiée/).first()).toBeVisible();
+    const card = page.getByRole('article', { name: outing });
+    await expect(card).toContainText('Destinataires : Classe 4e A');
+    await card.getByRole('button', { name: 'Retirer l’annonce' }).click();
+    const confirm = page.getByRole('dialog', { name: 'Retirer l’annonce ?' });
+    await expect(confirm).toContainText('Classe 4e A');
+    await confirm.getByRole('button', { name: 'Retirer', exact: true }).click();
+    await expect(page.getByText(/Annonce retirée/)).toBeVisible();
+    await expect(card.getByText('Retirée', { exact: true })).toBeVisible();
+    await expect(card.getByRole('button', { name: 'Retirer l’annonce' })).toHaveCount(0);
     await expectNoHorizontalOverflow(page);
 
     // Supervision : lecture d'un fil sur motif.

@@ -613,6 +613,10 @@ model Justification {
   status        JustificationStatus @default(PENDING)
   reviewedById  String?
   reviewedAt    DateTime?
+  /// Motif donné par la vie scolaire quand le justificatif est refusé (montré au parent).
+  reviewNote    String?
+  /// Absences visées à l'envoi, conservées même après un refus (qui les remet « à justifier »).
+  recordIds     String[]            @default([])
   createdAt     DateTime            @default(now())
   /// Pièce jointe (certificat médical, convocation…), déposée par le parent ou l'école.
   fileId        String?
@@ -901,16 +905,19 @@ model NotificationOutbox {
 }
 
 model Announcement {
-  id          String            @id @default(cuid())
-  schoolId    String
-  title       String
-  body        String
-  scope       AnnouncementScope
-  targetId    String?
+  id            String            @id @default(cuid())
+  schoolId      String
+  title         String
+  body          String
+  scope         AnnouncementScope
+  targetId      String?
   /// Portée STUDENTS : élèves dont les parents sont destinataires.
-  studentIds  String[]          @default([])
-  authorId    String
-  publishedAt DateTime          @default(now())
+  studentIds    String[]          @default([])
+  authorId      String
+  publishedAt   DateTime          @default(now())
+  /// Annonce retirée (erreur de destinataire…) : elle n'est plus visible sur le portail.
+  withdrawnAt   DateTime?
+  withdrawnById String?
 
   @@index([schoolId, publishedAt])
 }

@@ -60,3 +60,8 @@ export function todayIso(): string {
 export function plural(n: number, one: string, many: string): string {
   return `${n} ${n > 1 ? many : one}`;
 }
+
+/** Accord au sexe de l'élève quand il est connu (« absente », « montée »), forme épicène sinon. */
+export function agree(gender: 'F' | 'M' | null | undefined, word: string): string {
+  return gender === 'F' ? `${word}e` : gender === 'M' ? word : `${word}(e)`;
+}

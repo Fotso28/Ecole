@@ -29,6 +29,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'attendance.justify': 'Justifier les absences',
   'discipline.read': 'Voir les incidents de discipline',
   'discipline.write': 'Signaler et sanctionner les incidents',
+  'discipline.manage': 'Corriger ou supprimer les incidents signalés par d’autres',
   'grades.read': 'Voir les notes',
   'grades.write': 'Saisir les notes',
   'grades.validate': 'Valider et verrouiller les notes',
@@ -107,6 +108,7 @@ export const PERMISSION_GROUPS: readonly PermissionGroup[] = [
       'attendance.justify',
       'discipline.read',
       'discipline.write',
+      'discipline.manage',
     ],
   },
   {

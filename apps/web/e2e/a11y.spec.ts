@@ -173,6 +173,11 @@ test('fenêtres du secrétariat et de la surveillance', async ({ page }) => {
   await dialog.getByLabel('Élève', { exact: true }).fill('Ngono');
   await expect(dialog.getByRole('button', { name: /Ngono Marie-Claire/ })).toBeVisible();
   await expectAccessible(page, '/documents (délivrance)');
+  // Annonces : retrait d'une annonce (confirmation).
+  await page.goto('/annonces');
+  await page.getByRole('button', { name: 'Retirer l’annonce' }).first().click();
+  await expect(page.getByRole('dialog', { name: 'Retirer l’annonce ?' })).toBeVisible();
+  await expectAccessible(page, '/annonces (retrait)');
   await page.goto('/connexion');
   await page.evaluate(() => fetch('/api/auth/logout', { method: 'POST' }));
   await loginStaff(page, 'surveillant@demo.cm');
@@ -180,6 +185,13 @@ test('fenêtres du secrétariat et de la surveillance', async ({ page }) => {
   await page.getByRole('button', { name: 'Signaler un incident' }).click();
   await expect(page.getByRole('dialog', { name: 'Signaler un incident' })).toBeVisible();
   await expectAccessible(page, '/incidents (saisie)');
+  // Justificatif apporté à l'école, saisi par la vie scolaire.
+  await page.goto('/presences/justificatifs');
+  await page.getByRole('button', { name: 'Saisir un justificatif' }).click();
+  const entry = page.getByRole('dialog', { name: 'Saisir un justificatif' });
+  await entry.getByLabel('Élève', { exact: true }).fill('Ngono');
+  await expect(entry.getByRole('button', { name: /Ngono Marie-Claire/ })).toBeVisible();
+  await expectAccessible(page, '/presences/justificatifs (saisie)');
 });
 
 test('écrans d’une session d’examen', async ({ page, request }) => {
@@ -213,6 +225,13 @@ test('écrans d’une session d’examen', async ({ page, request }) => {
   await page.getByRole('tab', { name: 'Calendrier' }).click();
   await page.getByRole('button', { name: 'Ajouter une épreuve' }).click();
   await expectAccessible(page, '/examens/[id] (ajout d’épreuve)');
+  await page.getByRole('button', { name: 'Fermer' }).click();
+  await page.getByRole('tab', { name: 'Salles et places' }).click();
+  await page.getByRole('button', { name: 'Salle', exact: true }).click();
+  const room = page.getByRole('dialog', { name: 'Ajouter une salle' });
+  await room.getByRole('button', { name: 'Ajouter', exact: true }).click();
+  await expect(room.getByText(/Choisissez une salle existante/)).toBeVisible();
+  await expectAccessible(page, '/examens/[id] (ajout de salle, erreur)');
 });
 
 test('formulaires de la comptabilité', async ({ page }) => {

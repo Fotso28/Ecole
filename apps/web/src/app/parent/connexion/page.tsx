@@ -29,6 +29,14 @@ const T = {
     resendIn: (s: number) => `Renvoyer le code dans 0:${String(s).padStart(2, '0')}`,
     staff: 'Personnel de l’école ?',
     staffLink: 'Connexion par e-mail',
+    langName: 'Français',
+    errors: {
+      code: 'Code incorrect ou expiré.',
+      tooMany: 'Trop de demandes. Réessayez dans quelques minutes.',
+      invalid: 'Vérifiez le numéro ou le code saisi.',
+      server: 'Service momentanément indisponible. Réessayez plus tard.',
+      network: 'Erreur réseau : vérifiez votre connexion puis réessayez.',
+    },
   },
   en: {
     title: 'Follow your children’s schooling',
@@ -48,10 +56,32 @@ const T = {
     resendIn: (s: number) => `Resend code in 0:${String(s).padStart(2, '0')}`,
     staff: 'School staff?',
     staffLink: 'Sign in with e-mail',
+    langName: 'English',
+    errors: {
+      code: 'Incorrect or expired code.',
+      tooMany: 'Too many attempts. Please try again in a few minutes.',
+      invalid: 'Please check the number or the code you entered.',
+      server: 'The service is temporarily unavailable. Please try again later.',
+      network: 'Network error: check your connection and try again.',
+    },
   },
 } as const;
 
 type Lang = keyof typeof T;
+
+/**
+ * Message d'erreur dans la langue choisie : en français, le message précis de l'API ; en anglais,
+ * une traduction selon le type d'erreur (code refusé, trop de demandes, réseau…).
+ */
+function errorMessage(e: unknown, lang: Lang): string {
+  const t = T[lang].errors;
+  if (!(e instanceof ApiError)) return t.network;
+  if (lang === 'fr' && e.message) return e.message;
+  if (e.status === 401) return t.code;
+  if (e.status === 429) return t.tooMany;
+  if (e.status >= 500) return t.server;
+  return t.invalid;
+}
 
 export default function ParentLoginPage() {
   const { status, me, requestOtp, verifyOtp } = useAuth();
@@ -73,6 +103,16 @@ export default function ParentLoginPage() {
       // Stockage indisponible : français par défaut.
     }
   }, []);
+  // Langue du document (lecteurs d'écran) : suit le choix, revient au français en quittant la page.
+  useEffect(() => {
+    document.documentElement.lang = lang;
+  }, [lang]);
+  useEffect(
+    () => () => {
+      document.documentElement.lang = 'fr';
+    },
+    [],
+  );
   useEffect(() => {
     if (status === 'authenticated' && me?.kind === 'parent') router.replace('/portail');
   }, [status, me, router]);
@@ -84,6 +124,7 @@ export default function ParentLoginPage() {
 
   const chooseLang = (l: Lang) => {
     setLang(l);
+    setError(null);
     try {
       localStorage.setItem('ecole.lang', l);
     } catch {
@@ -105,7 +146,7 @@ export default function ParentLoginPage() {
       setStep('code');
       setCooldown(45);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Erreur réseau.');
+      setError(errorMessage(e, lang));
     } finally {
       setBusy(false);
     }
@@ -118,7 +159,7 @@ export default function ParentLoginPage() {
     try {
       await verifyOtp(normalized, code);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Erreur réseau.');
+      setError(errorMessage(e, lang));
       setBusy(false);
     }
   };
@@ -131,13 +172,15 @@ export default function ParentLoginPage() {
         </span>
         <div
           role="group"
-          aria-label="Langue"
+          aria-label={lang === 'fr' ? 'Langue' : 'Language'}
           className="flex gap-0.5 rounded-full bg-neutral-soft p-1"
         >
           {(['fr', 'en'] as const).map((l) => (
             <button
               key={l}
               type="button"
+              lang={l}
+              aria-label={T[l].langName}
               aria-pressed={lang === l}
               onClick={() => chooseLang(l)}
               className={cn(

@@ -715,10 +715,10 @@ export default function StudentPage({ params }: { params: Promise<{ id: string }
                     {formatShortDate(r.date)} · {r.startTime}–{r.endTime}
                   </span>
                   <Badge tone={r.status === 'ABSENT' ? 'danger' : 'warn'}>
-                    {r.status === 'ABSENT' ? 'Absent' : 'Retard'}
+                    {r.status === 'ABSENT' ? (s.gender === 'F' ? 'Absente' : 'Absent') : 'Retard'}
                   </Badge>
                   {r.justification === 'ACCEPTED' ? (
-                    <Badge tone="info">Justifié</Badge>
+                    <Badge tone="info">{r.status === 'ABSENT' ? 'Justifiée' : 'Justifié'}</Badge>
                   ) : r.justification === 'PENDING' ? (
                     <Badge>Justificatif en attente</Badge>
                   ) : null}

@@ -218,7 +218,16 @@ export const justificationCreateSchema = z.object({
   recordIds: z.array(id).min(1),
   reason: z.string().trim().min(3).max(500),
 });
-export const justificationReviewSchema = z.object({ decision: z.enum(['ACCEPTED', 'REJECTED']) });
+/** Décision sur un justificatif : un refus porte un motif, montré au parent. */
+export const justificationReviewSchema = z
+  .object({
+    decision: z.enum(['ACCEPTED', 'REJECTED']),
+    note: z.string().trim().max(300, '300 caractères au plus').optional(),
+  })
+  .refine((v) => v.decision !== 'REJECTED' || (v.note ?? '').length >= 3, {
+    path: ['note'],
+    message: 'Indiquez le motif du refus (3 caractères minimum)',
+  });
 
 // Notes
 export const EVALUATION_TYPES = ['QUIZ', 'HOMEWORK', 'EXAM'] as const;

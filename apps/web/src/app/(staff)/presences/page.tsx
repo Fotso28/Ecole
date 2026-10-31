@@ -18,12 +18,14 @@ type Mark = 'PRESENT' | 'ABSENT' | 'LATE';
 
 interface Roster {
   class: { id: string; name: string };
+  absenceNotificationDelayMinutes?: number;
   session: { id: string; updatedAt: string } | null;
   students: {
     id: string;
     firstName: string;
     lastName: string;
     matricule: string;
+    gender?: 'F' | 'M';
     status: Mark | null;
   }[];
 }
@@ -280,7 +282,9 @@ function AttendanceContent() {
                         type="button"
                         role="radio"
                         aria-checked={cur === m.value}
-                        aria-label={m.label}
+                        aria-label={
+                          s.gender === 'F' && m.value !== 'LATE' ? `${m.label}e` : m.label
+                        }
                         onClick={() => setMarks((prev) => ({ ...prev, [s.id]: m.value }))}
                         className={cn(
                           'h-12 w-12 rounded-[10px] text-[15px] font-bold',
@@ -298,8 +302,8 @@ function AttendanceContent() {
           <div className="sticky bottom-20 z-20 -mx-4 border-t border-line bg-paper/95 px-4 py-3 backdrop-blur lg:bottom-0 lg:mx-0 lg:rounded-[12px] lg:border lg:px-4">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
               <p className="flex-1 text-[13px] text-muted">
-                Les parents des absents non justifiés reçoivent un SMS une heure après la fin du
-                cours. L’appel reste modifiable d’ici là.
+                {smsDelayText(roster.data.absenceNotificationDelayMinutes ?? 60)} L’appel reste
+                modifiable d’ici là.
               </p>
               <Button
                 size="lg"
@@ -327,4 +331,17 @@ export default function AttendancePage() {
       <AttendanceContent />
     </Suspense>
   );
+}
+
+/** Moment du SMS d'absence : délai réglé par l'école après la fin du cours, ou après l'appel. */
+function smsDelayText(minutes: number): string {
+  const delay =
+    minutes === 0
+      ? null
+      : minutes % 60 === 0
+        ? plural(minutes / 60, 'heure', 'heures').replace(/^1 heure$/, 'une heure')
+        : `${minutes} min`;
+  return delay
+    ? `Les parents des absents non justifiés reçoivent un SMS ${delay} après la fin du cours, ou après l’enregistrement de l’appel s’il est fait plus tard.`
+    : 'Les parents des absents non justifiés reçoivent un SMS dès la fin du cours, ou dès l’enregistrement de l’appel s’il est fait plus tard.';
 }

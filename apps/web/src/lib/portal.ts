@@ -32,6 +32,8 @@ export interface ChildOverview {
     justification: 'PENDING' | 'ACCEPTED' | 'REJECTED' | null;
     justificationId: string | null;
     hasAttachment: boolean;
+    /** Dernier justificatif refusé pour cette absence (à justifier de nouveau), avec son motif. */
+    rejection: { note: string | null; reviewedAt: string | null } | null;
   }[];
   reportCards: {
     id: string;
@@ -51,6 +53,8 @@ export interface ChildOverview {
     year: { id: string } | null;
   };
   announcements: { id: string; title: string; body: string; publishedAt: string }[];
+  /** Exclusions temporaires de l'année (date de l'incident, précisions de la vie scolaire). */
+  exclusions?: { id: string; date: string; details: string | null }[];
 }
 
 export function useChildOverview(id: string | undefined) {

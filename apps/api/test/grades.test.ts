@@ -531,11 +531,17 @@ describe('bulletins', () => {
     await fillTerm();
     const body = { classId: f.class4AId, termId: f.term1Id };
     await http().post('/report-cards/generate').set(s.censeur.auth).send(body).expect(201);
+    const sheetUrl = `/grades/sheet?classSubjectId=${f.cs.maths4A}&sequenceId=${f.seq2Id}`;
+    const beforePublish = await http().get(sheetUrl).set(s.prof.auth).expect(200);
+    expect(beforePublish.body.published).toBe(false);
     await http().post('/report-cards/publish').set(s.direction.auth).send(body).expect(201);
     const evs = await prisma.evaluation.findMany({
       where: { classSubject: { classId: f.class4AId } },
     });
     expect(new Set(evs.map((e) => e.status))).toEqual(new Set(['LOCKED']));
+    // La grille indique à l'enseignant que le bulletin est publié (message explicite à l'écran).
+    const locked = await http().get(sheetUrl).set(s.prof.auth).expect(200);
+    expect(locked.body).toMatchObject({ status: 'LOCKED', published: true });
 
     // Notes figées : ni nouvelle évaluation, ni correction, même par la vie pédagogique.
     const ev = evs.find((e) => e.classSubjectId === f.cs.maths4A && e.sequenceId === f.seq2Id)!;

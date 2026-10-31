@@ -127,22 +127,62 @@ test.describe('transport scolaire', () => {
     const headers = await apiToken(request);
     const subs = (await (
       await request.get(`${API_URL}/transport/subscriptions`, { headers })
-    ).json()) as { status: string; line: { name: string }; student: { id: string } | null }[];
+    ).json()) as {
+      status: string;
+      direction: string;
+      line: { id: string; name: string };
+      student: { id: string } | null;
+    }[];
     const students = (await (
       await request.get(`${API_URL}/students?pageSize=100`, { headers })
-    ).json()) as { items: { id: string; lastName: string; guardian: { phone: string } | null }[] };
-    // Enfants abonnés à la ligne de démonstration, hors famille Ngono (limite de codes SMS).
-    const phones = subs
-      .filter((sub) => sub.status === 'ACTIVE' && sub.line.name === 'Ligne 1 – Bastos')
-      .map((sub) => students.items.find((st) => st.id === sub.student?.id))
-      .filter((st) => st && st.lastName !== 'Ngono' && st.guardian)
-      .map((st) => st!.guardian!.phone);
-    await loginParent(page, phones[isMobile(info) ? 0 : 1]!.replace('+237', ''));
+    ).json()) as {
+      items: {
+        id: string;
+        lastName: string;
+        gender: 'F' | 'M';
+        guardian: { phone: string } | null;
+      }[];
+    };
+    // Enfants abonnés (aller et retour) à la ligne de démonstration, hors famille Ngono (limite
+    // de codes SMS).
+    const children = subs
+      .filter(
+        (sub) =>
+          sub.status === 'ACTIVE' &&
+          sub.line.name === 'Ligne 1 – Bastos' &&
+          sub.direction === 'BOTH',
+      )
+      .map((sub) => ({ sub, st: students.items.find((st) => st.id === sub.student?.id) }))
+      .filter(({ st }) => st && st.lastName !== 'Ngono' && st.guardian);
+    const { sub, st } = children[isMobile(info) ? 0 : 1]!;
+    // Montée au trajet retour, pointée par la surveillance (texte accordé, sans « Ce matin »).
+    const supervisor = await request.post(`${API_URL}/auth/login`, {
+      data: { email: 'surveillant@demo.cm', password: PASSWORD },
+    });
+    const { accessToken } = (await supervisor.json()) as { accessToken: string };
+    const saved = await request.put(`${API_URL}/transport/trips`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      data: {
+        lineId: sub.line.id,
+        date: new Date(Date.now() + 3600_000).toISOString().slice(0, 10),
+        direction: 'RETURN',
+        records: [{ studentId: st!.id, boarded: true, alighted: null }],
+      },
+    });
+    expect(saved.ok()).toBeTruthy();
+    await loginParent(page, st!.guardian!.phone.replace('+237', ''));
     await page.getByRole('link', { name: /Transport scolaire/ }).click();
     await expect(page.getByRole('heading', { name: 'Transport scolaire' })).toBeVisible();
     await expect(page.getByText('Ligne 1 – Bastos')).toBeVisible();
     await expect(page.getByText('Passage du matin')).toBeVisible();
     await expect(page.getByText(/^\d{2}:\d{2}$/).first()).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Aujourd’hui' })).toBeVisible();
+    const trip = page.getByRole('listitem').filter({ hasText: 'Trajet retour' });
+    await expect(trip).toContainText(
+      st!.gender === 'F' ? /Montée à \d{2}:\d{2}/ : /Monté à \d{2}:\d{2}/,
+    );
+    await expect(trip).not.toContainText('(e)');
+    await expect(page.getByText('Ce matin')).toHaveCount(0);
     await expectNoHorizontalOverflow(page);
   });
 });

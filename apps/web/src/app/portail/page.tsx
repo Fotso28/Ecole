@@ -68,6 +68,25 @@ export default function PortalHome() {
         <ErrorBlock error={q.error} onRetry={() => q.refetch()} />
       ) : (
         <>
+          {(q.data.exclusions ?? []).map((x) => (
+            <section
+              key={x.id}
+              aria-label="Exclusion temporaire"
+              className="flex gap-3 rounded-[16px] border border-[#f0c7c2] bg-danger-soft p-4"
+            >
+              <CircleAlert className="mt-0.5 size-5 shrink-0 text-danger" aria-hidden />
+              <div className="flex flex-1 flex-col gap-1">
+                <strong className="text-[15px]">Exclusion temporaire</strong>
+                <span className="text-sm">
+                  À la suite de l’incident du {formatShortDate(x.date)}
+                  {x.details ? ` : ${x.details}` : ''}.
+                </span>
+                <span className="text-sm text-muted">
+                  Pour toute question, prenez contact avec la vie scolaire.
+                </span>
+              </div>
+            </section>
+          ))}
           {unjustified.length > 0 ? (
             <section className="flex gap-3 rounded-[16px] bg-danger-soft p-4">
               <CircleAlert className="mt-0.5 size-5 shrink-0 text-danger" aria-hidden />

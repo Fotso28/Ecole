@@ -21,6 +21,7 @@ import {
   isoDate,
   justificationCreateSchema,
   justificationReviewSchema,
+  pastOrTodayDate,
   SANCTION_TYPES,
   timeOfDay,
   toMinutes,
@@ -47,13 +48,17 @@ interface AttendanceSettings {
 const rosterSchema = z.object({ classId: z.string().min(1), date: isoDate, startTime: timeOfDay });
 const incidentSchema = z.object({
   studentId: z.string().min(1),
-  date: isoDate,
+  date: pastOrTodayDate,
   description: z.string().trim().min(3).max(1000),
   sanction: z.string().trim().max(300).optional(),
   type: z.enum(INCIDENT_TYPES).optional(),
   sanctionType: z.enum(SANCTION_TYPES).optional(),
 });
 const statsSchema = z.object({ from: isoDate.optional(), to: isoDate.optional() });
+
+/** Motifs d'annulation d'un SMS d'absence pas encore parti. */
+const PRESENT_NOTE = 'Annulé : élève marqué présent';
+const ACCEPTED_NOTE = 'Annulé : absence justifiée';
 
 @Injectable()
 export class AttendanceService {
@@ -73,8 +78,15 @@ export class AttendanceService {
       where: { classId, date: toDbDate(date), startTime },
       include: { records: true },
     });
+    const school = await this.db.school.findUniqueOrThrow({
+      where: { id: currentSchoolId() },
+      select: { settings: true },
+    });
+    const settings = (school.settings ?? {}) as AttendanceSettings;
     return {
       class: { id: cls.id, name: cls.name },
+      /** Délai du SMS d'absence après la fin du cours (ou après l'appel, s'il est fait plus tard). */
+      absenceNotificationDelayMinutes: settings.absenceNotificationDelayMinutes ?? 60,
       session: session
         ? {
             id: session.id,
@@ -88,6 +100,7 @@ export class AttendanceService {
         firstName: s.firstName,
         lastName: s.lastName,
         matricule: s.matricule,
+        gender: s.gender,
         status: session?.records.find((r) => r.studentId === s.id)?.status ?? null,
       })),
     };
@@ -200,7 +213,7 @@ export class AttendanceService {
   ) {
     const student = await tx.student.findUniqueOrThrow({
       where: { id: studentId },
-      select: { firstName: true, lastName: true },
+      select: { firstName: true, lastName: true, gender: true },
     });
     const link = await tx.studentGuardian.findFirst({
       where: { studentId },
@@ -215,6 +228,7 @@ export class AttendanceService {
         template: 'absence',
         body: templates.absence({
           student: `${student.firstName} ${student.lastName}`,
+          gender: student.gender,
           date: date.split('-').reverse().join('/'),
           slot,
           school: schoolName,
@@ -228,10 +242,13 @@ export class AttendanceService {
     return true;
   }
 
-  /** Annule le SMS d'absence pas encore parti si l'élève est finalement marqué présent. */
-  private async cancelAbsenceNotification(tx: Tx, recordId: string) {
+  /**
+   * Annule le SMS d'absence pas encore parti : élève finalement marqué présent, ou absence
+   * justifiée entre-temps. Le motif reste lisible dans la table d'envoi.
+   */
+  private async cancelAbsenceNotification(tx: Tx, recordId: string, why = PRESENT_NOTE) {
     await tx.$executeRaw`
-      UPDATE "NotificationOutbox" SET "status" = 'FAILED', "lastError" = 'Annulé : élève marqué présent'
+      UPDATE "NotificationOutbox" SET "status" = 'FAILED', "lastError" = ${why}
       WHERE "status" = 'PENDING' AND "template" = 'absence' AND "payload"->>'recordId' = ${recordId}`;
     await tx.attendanceRecord.update({ where: { id: recordId }, data: { notifiedAt: null } });
   }
@@ -314,43 +331,54 @@ export class AttendanceService {
     }));
   }
 
+  /**
+   * Justificatif d'une ou plusieurs absences d'un élève. Le rattachement est conditionnel et fait
+   * dans la même transaction : une seconde demande identique (double appui) échoue au lieu de
+   * laisser un justificatif rattaché à aucune absence.
+   */
   async createJustification(
     input: z.infer<typeof justificationCreateSchema>,
     submittedById: string,
     tx?: Tx,
   ) {
-    const db = tx ?? this.db;
-    const records = await db.attendanceRecord.findMany({
-      where: { id: { in: input.recordIds }, studentId: input.studentId },
-    });
-    if (records.length !== input.recordIds.length)
-      throw new BadRequestException('Absence inconnue pour cet élève');
-    if (records.some((r) => r.status === 'PRESENT'))
-      throw new BadRequestException('Seules les absences et retards se justifient');
-    if (records.some((r) => r.justificationId))
-      throw new ConflictException('Une de ces absences a déjà un justificatif');
-    const justification = await db.justification.create({
-      data: {
-        schoolId: records[0]?.schoolId ?? currentSchoolId(),
-        studentId: input.studentId,
-        submittedById,
-        reason: input.reason,
-      },
-    });
-    await db.attendanceRecord.updateMany({
-      where: { id: { in: input.recordIds } },
-      data: { justificationId: justification.id },
-    });
-    await this.audit.log(
-      {
-        action: 'attendance.justification_submitted',
-        entity: 'Justification',
-        entityId: justification.id,
-        after: input,
-      },
-      tx,
-    );
-    return justification;
+    const recordIds = [...new Set(input.recordIds)];
+    const run = async (db: Tx) => {
+      const records = await db.attendanceRecord.findMany({
+        where: { id: { in: recordIds }, studentId: input.studentId },
+      });
+      if (records.length === 0 || records.length !== recordIds.length)
+        throw new BadRequestException('Absence inconnue pour cet élève');
+      if (records.some((r) => r.status === 'PRESENT'))
+        throw new BadRequestException('Seules les absences et retards se justifient');
+      if (records.some((r) => r.justificationId))
+        throw new ConflictException('Une de ces absences a déjà un justificatif');
+      const justification = await db.justification.create({
+        data: {
+          schoolId: records[0]?.schoolId ?? currentSchoolId(),
+          studentId: input.studentId,
+          submittedById,
+          reason: input.reason,
+          recordIds,
+        },
+      });
+      const linked = await db.attendanceRecord.updateMany({
+        where: { id: { in: recordIds }, justificationId: null },
+        data: { justificationId: justification.id },
+      });
+      if (linked.count !== recordIds.length)
+        throw new ConflictException('Une de ces absences a déjà un justificatif');
+      await this.audit.log(
+        {
+          action: 'attendance.justification_submitted',
+          entity: 'Justification',
+          entityId: justification.id,
+          after: { ...input, recordIds },
+        },
+        db,
+      );
+      return justification;
+    };
+    return tx ? run(tx) : this.db.$transaction(run);
   }
 
   async listJustifications(status?: 'PENDING' | 'ACCEPTED' | 'REJECTED') {
@@ -367,12 +395,20 @@ export class AttendanceService {
       where: { status, ...(studentIds ? { studentId: { in: studentIds } } : {}) },
       orderBy: { createdAt: 'desc' },
       take: 200,
-      include: { records: { include: { session: true } }, file: true },
+      include: { file: true },
     });
-    const students = await this.db.student.findMany({
-      where: { id: { in: [...new Set(items.map((i) => i.studentId))] } },
-      select: { id: true, firstName: true, lastName: true, matricule: true },
-    });
+    // Absences visées à l'envoi : un refus les remet « à justifier » sans perdre la trace.
+    const [students, records] = await Promise.all([
+      this.db.student.findMany({
+        where: { id: { in: [...new Set(items.map((i) => i.studentId))] } },
+        select: { id: true, firstName: true, lastName: true, matricule: true },
+      }),
+      this.db.attendanceRecord.findMany({
+        where: { id: { in: [...new Set(items.flatMap((i) => i.recordIds))] } },
+        include: { session: true },
+        orderBy: [{ session: { date: 'asc' } }, { session: { startTime: 'asc' } }],
+      }),
+    ]);
     return items.map((j) => ({
       id: j.id,
       status: j.status,
@@ -381,14 +417,18 @@ export class AttendanceService {
       // Nom et détails de la pièce (souvent médicale) réservés à qui traite les justificatifs.
       attachment: this.scope.can('attendance.justify') ? presentFile(j.file) : null,
       hasAttachment: !!presentFile(j.file),
+      reviewNote: j.reviewNote,
+      reviewedAt: j.reviewedAt,
       student: students.find((s) => s.id === j.studentId) ?? null,
-      records: j.records.map((r) => ({
-        id: r.id,
-        date: fromDbDate(r.session.date),
-        startTime: r.session.startTime,
-        endTime: r.session.endTime,
-        status: r.status,
-      })),
+      records: records
+        .filter((r) => j.recordIds.includes(r.id))
+        .map((r) => ({
+          id: r.id,
+          date: fromDbDate(r.session.date),
+          startTime: r.session.startTime,
+          endTime: r.session.endTime,
+          status: r.status,
+        })),
     }));
   }
 
@@ -427,34 +467,88 @@ export class AttendanceService {
     return this.files.link(j.fileId, true);
   }
 
-  async review(id: string, decision: 'ACCEPTED' | 'REJECTED') {
+  /**
+   * Décision de la vie scolaire. Un refus porte un motif, remet les absences « à justifier » (un
+   * nouveau justificatif reste possible), garde la trace des absences visées et prévient le parent
+   * par la table d'envoi.
+   */
+  async review(id: string, decision: 'ACCEPTED' | 'REJECTED', note?: string) {
     const j = await this.db.justification.findUnique({ where: { id }, include: { records: true } });
     if (!j) throw new NotFoundException('Justificatif introuvable');
     if (j.status !== 'PENDING') throw new ConflictException('Ce justificatif a déjà été traité');
+    const reviewNote = decision === 'REJECTED' ? note?.trim() || null : null;
     return this.db.$transaction(async (tx) => {
-      const updated = await tx.justification.update({
-        where: { id },
-        data: { status: decision, reviewedById: currentActorId(), reviewedAt: new Date() },
+      const claimed = await tx.justification.updateMany({
+        where: { id, status: 'PENDING' },
+        data: {
+          status: decision,
+          reviewedById: currentActorId(),
+          reviewedAt: new Date(),
+          reviewNote,
+        },
       });
+      if (claimed.count === 0) throw new ConflictException('Ce justificatif a déjà été traité');
       if (decision === 'REJECTED') {
         await tx.attendanceRecord.updateMany({
           where: { justificationId: id },
           data: { justificationId: null },
         });
+        await this.notifyRejection(tx, j.studentId, j.recordIds, reviewNote ?? '');
       } else {
-        for (const r of j.records) await this.cancelAbsenceNotification(tx, r.id);
+        for (const r of j.records) await this.cancelAbsenceNotification(tx, r.id, ACCEPTED_NOTE);
       }
       await this.audit.log(
         {
           action: 'attendance.justification_reviewed',
           entity: 'Justification',
           entityId: id,
-          after: { decision },
+          after: { decision, ...(reviewNote ? { note: reviewNote } : {}) },
         },
         tx,
       );
-      return updated;
+      return tx.justification.findUniqueOrThrow({ where: { id } });
     });
+  }
+
+  /** SMS au parent principal : justificatif refusé, motif et absences concernées. */
+  private async notifyRejection(tx: Tx, studentId: string, recordIds: string[], note: string) {
+    const [student, link, school, records] = await Promise.all([
+      tx.student.findUniqueOrThrow({
+        where: { id: studentId },
+        select: { firstName: true, lastName: true },
+      }),
+      tx.studentGuardian.findFirst({
+        where: { studentId },
+        include: { guardian: true },
+        orderBy: { isPrimary: 'desc' },
+      }),
+      tx.school.findUniqueOrThrow({ where: { id: currentSchoolId() }, select: { name: true } }),
+      tx.attendanceRecord.findMany({
+        where: { id: { in: recordIds } },
+        include: { session: true },
+        orderBy: [{ session: { date: 'asc' } }, { session: { startTime: 'asc' } }],
+      }),
+    ]);
+    if (!link) return;
+    await this.notifications.enqueue(
+      {
+        schoolId: currentSchoolId(),
+        recipient: link.guardian.phone,
+        template: 'justificationRejected',
+        body: templates.justificationRejected({
+          school: school.name,
+          student: `${student.firstName} ${student.lastName}`,
+          records: records.map((r) => ({
+            date: fromDbDate(r.session.date).split('-').reverse().join('/'),
+            slot: `${r.session.startTime}–${r.session.endTime}`,
+            late: r.status === 'LATE',
+          })),
+          note,
+        }),
+        payload: { studentId, recordIds },
+      },
+      tx,
+    );
   }
 
   async stats(from?: string, to?: string) {
@@ -576,7 +670,7 @@ export class AttendanceController {
     @Param('id') id: string,
     @Body(new ZodPipe(justificationReviewSchema)) body: z.infer<typeof justificationReviewSchema>,
   ) {
-    return this.attendance.review(id, body.decision);
+    return this.attendance.review(id, body.decision, body.note);
   }
 
   @RequirePermissions('attendance.justify')

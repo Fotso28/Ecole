@@ -188,7 +188,22 @@ export class ExamsService {
     const roomName = new Map(roomNames.map((r) => [r.id, r.name]));
     const conflicts = await this.conflictsFor({ sessionIds: [id] });
     const describe = await this.describeConflicts(conflicts);
+    // Ce que la personne peut ouvrir : un enseignant ne voit les listes nominatives que des
+    // sessions qu'il surveille, les résultats qu'une fois publiés, l'émargement que de ses salles.
+    const scoped = this.scope.isClassScoped('exams.read');
+    const me = staffContext().userId;
+    const mine = papers.flatMap((p) =>
+      p.supervisions
+        .filter((s) => s.userId === me)
+        .map((s) => ({ paperId: p.id, roomId: s.roomId })),
+    );
     return {
+      access: {
+        seating: !scoped || mine.length > 0,
+        results: !scoped || !!session.resultsPublishedAt,
+        /** Salles dont la personne peut imprimer l'émargement ; null : toutes. */
+        attendanceRooms: scoped ? mine : null,
+      },
       id: session.id,
       name: session.name,
       kind: session.kind,
@@ -806,7 +821,8 @@ export class ExamsService {
     const papers = await this.db.examPaper.findMany({
       where: { session: { academicYearId: year.id } },
       include: { session: true, _count: { select: { scores: true } } },
-      orderBy: [{ date: 'desc' }, { startTime: 'asc' }],
+      // Sessions récentes d'abord ; dans une session, les épreuves dans l'ordre du calendrier.
+      orderBy: [{ session: { startDate: 'desc' } }, { date: 'asc' }, { startTime: 'asc' }],
     });
     const allowed = await this.gradableFilter();
     const visible = papers.filter((p) => allowed(p));

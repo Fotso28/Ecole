@@ -113,7 +113,14 @@ function EventForm({ onDone }: { onDone: () => void }) {
         <option value="CLASS">Une classe</option>
       </SelectField>
       {scope !== 'SCHOOL' ? (
-        <SelectField label="Cible" name="targetId" required>
+        <SelectField
+          key={scope}
+          label={scope === 'CLASS' ? 'Classe' : scope === 'LEVEL' ? 'Niveau' : 'Cycle'}
+          name="targetId"
+          required
+          defaultValue=""
+        >
+          <option value="">Choisir…</option>
           {targets.map((t) => (
             <option key={t.id} value={t.id}>
               {t.name}

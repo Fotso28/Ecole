@@ -17,6 +17,8 @@ export interface Child {
   id: string;
   firstName: string;
   lastName: string;
+  /** Pour accorder les textes (« montée », « déposée »). */
+  gender?: 'F' | 'M';
   matricule: string;
   school: { id: string; name: string; city: string };
   className: string | null;

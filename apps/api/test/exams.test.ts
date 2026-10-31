@@ -334,6 +334,84 @@ describe('module Examens', () => {
       .expect(403);
   });
 
+  it('ne propose à un enseignant que les volets et émargements permis, et explique une salle manquante', async () => {
+    const p = await plannedSession();
+    // Sans salle choisie : un message clair plutôt que « Données invalides ».
+    const missing = await http()
+      .post(`/exams/sessions/${p.sessionId}/rooms`)
+      .set(s.censeur.auth)
+      .send({ capacity: 10 })
+      .expect(400);
+    expect(missing.body.errors[0]).toEqual({
+      path: 'roomId',
+      message: 'Choisissez une salle existante ou donnez le nom de la nouvelle salle',
+    });
+    for (const [roomId, capacity] of [
+      [p.b12, 3],
+      [p.b14, 4],
+    ] as const)
+      await http()
+        .post(`/exams/sessions/${p.sessionId}/rooms`)
+        .set(s.censeur.auth)
+        .send({ roomId, capacity })
+        .expect(201);
+    await http()
+      .post(`/exams/sessions/${p.sessionId}/seating`)
+      .set(s.censeur.auth)
+      .send({})
+      .expect(201);
+
+    // La direction et le censeur voient tout.
+    const full = await http().get(`/exams/sessions/${p.sessionId}`).set(s.censeur.auth).expect(200);
+    expect(full.body.access).toEqual({ seating: true, results: true, attendanceRooms: null });
+    // Enseignant qui ne surveille pas : ni salles et places, ni résultats, ni émargement.
+    const outsider = await http()
+      .get(`/exams/sessions/${p.sessionId}`)
+      .set(s.prof.auth)
+      .expect(200);
+    expect(outsider.body.access).toEqual({ seating: false, results: false, attendanceRooms: [] });
+    await http().get(`/exams/sessions/${p.sessionId}/seating`).set(s.prof.auth).expect(403);
+    await http().get(`/exams/sessions/${p.sessionId}/results`).set(s.prof.auth).expect(403);
+
+    // Surveillant de la salle B12 en maths : la répartition et l'émargement de sa seule salle.
+    await http()
+      .post('/exams/supervisions')
+      .set(s.censeur.auth)
+      .send({ paperId: p.mathsId, roomId: p.b12, userId: f.users.teacher })
+      .expect(201);
+    const supervisor = await http()
+      .get(`/exams/sessions/${p.sessionId}`)
+      .set(s.prof.auth)
+      .expect(200);
+    expect(supervisor.body.access).toEqual({
+      seating: true,
+      results: false,
+      attendanceRooms: [{ paperId: p.mathsId, roomId: p.b12 }],
+    });
+    await http().get(`/exams/sessions/${p.sessionId}/seating`).set(s.prof.auth).expect(200);
+    await http()
+      .get(
+        `/exams/sessions/${p.sessionId}/attendance-sheet.pdf?paperId=${p.mathsId}&roomId=${p.b14}`,
+      )
+      .set(s.prof.auth)
+      .expect(403);
+
+    // « Notes d'examen » : les épreuves dans l'ordre du calendrier.
+    for (const date of ['2026-11-18', '2026-11-17'])
+      await addPaper(s.censeur, p.sessionId, {
+        subjectId: f.subjects.maths,
+        date,
+        startTime: '14:00',
+        durationMinutes: 60,
+      }).expect(201);
+    const grading = await http().get('/exams/grading').set(s.prof.auth).expect(200);
+    expect(grading.body.map((x: { date: string }) => x.date)).toEqual([
+      '2026-11-16',
+      '2026-11-17',
+      '2026-11-18',
+    ]);
+  });
+
   it('saisit les notes par numéro d’anonymat, publie et reporte dans la séquence', async () => {
     const p = await plannedSession();
     await http()

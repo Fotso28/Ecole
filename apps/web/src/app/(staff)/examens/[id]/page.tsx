@@ -24,7 +24,7 @@ import { Card, CardHeader, EmptyState, ErrorBlock, LoadingBlock } from '@/compon
 import { Checkbox, InputField, SelectField, TextareaField } from '@/components/ui/field';
 import { Sheet } from '@/components/ui/sheet';
 import { useToast } from '@/components/ui/toast';
-import { api, openPdf } from '@/lib/api';
+import { api, ApiError, openPdf } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import {
   useExamSession,
@@ -47,7 +47,13 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'documents', label: 'Documents' },
 ];
 
-const errorMessage = (e: unknown) => (e instanceof Error ? e.message : 'Erreur');
+/** Message de l'API, ou le premier motif précis d'une saisie refusée. */
+const errorMessage = (e: unknown) =>
+  e instanceof ApiError && e.fieldErrors[0]
+    ? e.fieldErrors[0].message
+    : e instanceof Error
+      ? e.message
+      : 'Erreur';
 
 export default function ExamSessionPage() {
   const { id } = useParams<{ id: string }>();
@@ -56,6 +62,13 @@ export default function ExamSessionPage() {
   if (q.isPending) return <LoadingBlock />;
   if (q.isError) return <ErrorBlock error={q.error} onRetry={() => q.refetch()} />;
   const s = q.data;
+  // Volets refusés (enseignant non surveillant, résultats non publiés) : non proposés.
+  const tabs = TABS.filter(
+    (t) =>
+      (t.id !== 'rooms' || s.access?.seating !== false) &&
+      (t.id !== 'results' || s.access?.results !== false),
+  );
+  const current = tabs.some((t) => t.id === tab) ? tab : 'calendar';
   return (
     <>
       <div className="flex flex-col gap-2">
@@ -105,18 +118,20 @@ export default function ExamSessionPage() {
         aria-label="Volets de la session"
         className="-mx-4 flex gap-2 overflow-x-auto px-4"
       >
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <button
             key={t.id}
             type="button"
             role="tab"
             id={`tab-${t.id}`}
-            aria-selected={tab === t.id}
+            aria-selected={current === t.id}
             aria-controls={`panel-${t.id}`}
             onClick={() => setTab(t.id)}
             className={cn(
               'min-h-11 shrink-0 rounded-full border px-4 text-sm font-semibold',
-              tab === t.id ? 'border-primary bg-primary text-white' : 'border-line-strong bg-white',
+              current === t.id
+                ? 'border-primary bg-primary text-white'
+                : 'border-line-strong bg-white',
             )}
           >
             {t.label}
@@ -125,15 +140,15 @@ export default function ExamSessionPage() {
       </div>
       <div
         role="tabpanel"
-        id={`panel-${tab}`}
-        aria-labelledby={`tab-${tab}`}
+        id={`panel-${current}`}
+        aria-labelledby={`tab-${current}`}
         className="flex flex-col gap-4"
       >
-        {tab === 'calendar' ? <CalendarTab session={s} /> : null}
-        {tab === 'rooms' ? <RoomsTab session={s} /> : null}
-        {tab === 'supervisors' ? <SupervisorsTab session={s} /> : null}
-        {tab === 'results' ? <ResultsTab session={s} /> : null}
-        {tab === 'documents' ? <DocumentsTab session={s} /> : null}
+        {current === 'calendar' ? <CalendarTab session={s} /> : null}
+        {current === 'rooms' ? <RoomsTab session={s} /> : null}
+        {current === 'supervisors' ? <SupervisorsTab session={s} /> : null}
+        {current === 'results' ? <ResultsTab session={s} /> : null}
+        {current === 'documents' ? <DocumentsTab session={s} /> : null}
       </div>
     </>
   );
@@ -545,51 +560,13 @@ function RoomsTab({ session: s }: { session: ExamSessionDetail }) {
           ))
       )}
 
-      <Sheet open={roomOpen} onClose={() => setRoomOpen(false)} title="Ajouter une salle">
-        <form
-          className="flex flex-col gap-4"
-          onSubmit={(e) => {
-            e.preventDefault();
-            const fd = new FormData(e.currentTarget);
-            const capacity = Number(fd.get('capacity')) || undefined;
-            const roomId = String(fd.get('roomId') || '');
-            addRoom.mutate(
-              roomId
-                ? { roomId, capacity }
-                : { name: String(fd.get('name') || '').trim(), capacity },
-            );
-          }}
-        >
-          <SelectField label="Salle existante" name="roomId" optional>
-            <option value="">Nouvelle salle…</option>
-            {available.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.name}
-                {r.capacity ? ` (${r.capacity} places)` : ''}
-              </option>
-            ))}
-          </SelectField>
-          <InputField
-            label="Nom de la nouvelle salle"
-            name="name"
-            maxLength={40}
-            optional
-            hint="Seulement si la salle n’existe pas encore."
-          />
-          <InputField
-            label="Places en configuration d’examen"
-            name="capacity"
-            type="number"
-            min={1}
-            max={500}
-            optional
-            hint="Par défaut, la capacité enregistrée de la salle."
-          />
-          <Button type="submit" loading={addRoom.isPending}>
-            Ajouter
-          </Button>
-        </form>
-      </Sheet>
+      <AddRoomSheet
+        open={roomOpen}
+        onClose={() => setRoomOpen(false)}
+        rooms={available}
+        pending={addRoom.isPending}
+        onSubmit={(body) => addRoom.mutate(body)}
+      />
 
       <Sheet
         open={!!moving}
@@ -1171,21 +1148,29 @@ function DocumentsTab({ session: s }: { session: ExamSessionDetail }) {
                       Toutes les salles
                     </Button>
                   ) : null}
-                  {p.rooms.map((r) => (
-                    <Button
-                      key={r.id}
-                      size="sm"
-                      variant="secondary"
-                      aria-label={`Émargement ${p.subjectName}, salle ${r.name}`}
-                      onClick={() =>
-                        void open(
-                          `/exams/sessions/${s.id}/attendance-sheet.pdf?paperId=${p.id}&roomId=${r.id}`,
-                        )
-                      }
-                    >
-                      Salle {r.name}
-                    </Button>
-                  ))}
+                  {p.rooms
+                    .filter(
+                      (r) =>
+                        !s.access?.attendanceRooms ||
+                        s.access.attendanceRooms.some(
+                          (a) => a.paperId === p.id && a.roomId === r.id,
+                        ),
+                    )
+                    .map((r) => (
+                      <Button
+                        key={r.id}
+                        size="sm"
+                        variant="secondary"
+                        aria-label={`Émargement ${p.subjectName}, salle ${r.name}`}
+                        onClick={() =>
+                          void open(
+                            `/exams/sessions/${s.id}/attendance-sheet.pdf?paperId=${p.id}&roomId=${r.id}`,
+                          )
+                        }
+                      >
+                        Salle {r.name}
+                      </Button>
+                    ))}
                 </div>
               </li>
             ))}
@@ -1193,5 +1178,121 @@ function DocumentsTab({ session: s }: { session: ExamSessionDetail }) {
         )}
       </Card>
     </>
+  );
+}
+
+/**
+ * Ajout d'une salle à la session : une salle existante, ou une nouvelle salle à nommer. La capacité
+ * n'est facultative que si la salle choisie en a une d'enregistrée.
+ */
+function AddRoomSheet({
+  open,
+  onClose,
+  rooms,
+  pending,
+  onSubmit,
+}: {
+  open: boolean;
+  onClose: () => void;
+  rooms: { id: string; name: string; capacity: number | null }[];
+  pending: boolean;
+  onSubmit: (body: { roomId?: string; name?: string; capacity?: number }) => void;
+}) {
+  const [roomId, setRoomId] = useState('');
+  const [name, setName] = useState('');
+  const [capacity, setCapacity] = useState('');
+  const [errors, setErrors] = useState<{ room?: string; capacity?: string }>({});
+  const chosen = rooms.find((r) => r.id === roomId);
+  const known = chosen?.capacity ?? null;
+  const reset = () => {
+    setRoomId('');
+    setName('');
+    setCapacity('');
+    setErrors({});
+  };
+  return (
+    <Sheet
+      open={open}
+      onClose={() => {
+        reset();
+        onClose();
+      }}
+      title="Ajouter une salle"
+    >
+      <form
+        className="flex flex-col gap-4"
+        noValidate
+        onSubmit={(e) => {
+          e.preventDefault();
+          const places = Number(capacity) || undefined;
+          const next: typeof errors = {};
+          if (!roomId && !name.trim())
+            next.room = 'Choisissez une salle existante ou donnez le nom de la nouvelle salle.';
+          if (!places && known === null)
+            next.capacity = 'Indiquez le nombre de places pour l’examen.';
+          else if (places !== undefined && (places < 1 || places > 500))
+            next.capacity = 'Entre 1 et 500 places.';
+          setErrors(next);
+          if (next.room || next.capacity) return;
+          onSubmit(roomId ? { roomId, capacity: places } : { name: name.trim(), capacity: places });
+        }}
+      >
+        <SelectField
+          label="Salle"
+          value={roomId}
+          onChange={(e) => {
+            setRoomId(e.target.value);
+            setErrors({});
+          }}
+        >
+          <option value="">Nouvelle salle…</option>
+          {rooms.map((r) => (
+            <option key={r.id} value={r.id}>
+              {r.name}
+              {r.capacity ? ` (${r.capacity} places)` : ''}
+            </option>
+          ))}
+        </SelectField>
+        {roomId ? null : (
+          <InputField
+            label="Nom de la nouvelle salle"
+            value={name}
+            onChange={(e) => {
+              setName(e.target.value);
+              setErrors((x) => ({ ...x, room: undefined }));
+            }}
+            maxLength={40}
+            required
+            aria-required
+            error={errors.room}
+            hint="Ou choisissez une salle existante dans la liste ci-dessus."
+          />
+        )}
+        <InputField
+          label="Places en configuration d’examen"
+          type="number"
+          min={1}
+          max={500}
+          value={capacity}
+          onChange={(e) => {
+            setCapacity(e.target.value);
+            setErrors((x) => ({ ...x, capacity: undefined }));
+          }}
+          optional={known !== null}
+          required={known === null}
+          error={errors.capacity}
+          hint={
+            known !== null
+              ? `Laissez vide pour garder la capacité enregistrée de la salle : ${known} places.`
+              : chosen
+                ? 'Cette salle n’a pas de capacité enregistrée : indiquez le nombre de places.'
+                : 'Nombre de candidats que la salle peut accueillir pendant l’examen.'
+          }
+        />
+        <Button type="submit" loading={pending}>
+          Ajouter
+        </Button>
+      </form>
+    </Sheet>
   );
 }

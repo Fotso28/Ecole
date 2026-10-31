@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatDate, formatShortDate, formatWeekday, plural } from './format';
+import { agree, formatDate, formatShortDate, formatWeekday, plural } from './format';
 
 describe('formats français', () => {
   it('formate les dates calendaires sans décalage de fuseau', () => {
@@ -11,5 +11,11 @@ describe('formats français', () => {
   it('accorde au pluriel', () => {
     expect(plural(1, 'élève', 'élèves')).toBe('1 élève');
     expect(plural(3, 'élève', 'élèves')).toBe('3 élèves');
+  });
+
+  it('accorde au sexe de l’élève quand il est connu', () => {
+    expect(agree('F', 'Monté')).toBe('Montée');
+    expect(agree('M', 'Déposé')).toBe('Déposé');
+    expect(agree(undefined, 'inscrit')).toBe('inscrit(e)');
   });
 });

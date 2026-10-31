@@ -570,8 +570,11 @@ export const examPaperCreateSchema = z.object({
   classIds: z.array(z.string().min(1)).min(1).optional(),
 });
 
+const ROOM_REQUIRED = 'Choisissez une salle existante ou donnez le nom de la nouvelle salle';
 export const examRoomAddSchema = z.object({
-  roomId: z.string().min(1),
+  roomId: z
+    .string({ required_error: ROOM_REQUIRED, invalid_type_error: ROOM_REQUIRED })
+    .min(1, ROOM_REQUIRED),
   capacity: z.number().int().min(1).max(500).optional(),
 });
 

@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, Clock, Printer, Search, X } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useMemo, useState } from 'react';
-import { Badge, LINE_BADGE } from '@/components/ui/badge';
+import { Badge, lineBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, ErrorBlock, LoadingBlock, PageHeader } from '@/components/ui/card';
 import { InputField, TextareaField } from '@/components/ui/field';
@@ -385,9 +385,7 @@ function CashContent() {
                               <span className="text-sm font-semibold tabular">
                                 {payable ? formatFcfa(l.outstanding) : formatFcfa(l.due)}
                               </span>
-                              <Badge tone={LINE_BADGE[l.status].tone}>
-                                {LINE_BADGE[l.status].label}
-                              </Badge>
+                              <Badge tone={lineBadge(l).tone}>{lineBadge(l).label}</Badge>
                             </span>
                           </label>
                         </li>

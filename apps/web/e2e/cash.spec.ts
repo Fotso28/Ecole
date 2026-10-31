@@ -15,6 +15,12 @@ test('encaissement en espèces, reçu, annulation et clôture de caisse', async 
   await page.getByRole('button', { name: new RegExp(student) }).click();
   await expect(page.getByRole('heading', { name: 'Échéancier' })).toBeVisible();
   await expectNoHorizontalOverflow(page);
+  // Une échéance échue impayée porte « En retard », jamais « À venir ».
+  const overdue = await page.locator('li').filter({ hasText: 'Échue le' }).all();
+  for (const line of overdue) {
+    await expect(line.getByText('À venir', { exact: true })).toHaveCount(0);
+    await expect(line.getByText(/En retard|Payé/)).toBeVisible();
+  }
 
   const amountText = await page.getByLabel('Montant encaissé').inputValue();
   const amount = Number(amountText);

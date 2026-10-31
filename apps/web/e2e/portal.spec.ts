@@ -7,7 +7,8 @@ test.describe('portail parents', () => {
     // Liste des enfants lente : jamais « Aucun enfant rattaché » pendant le chargement.
     await context.route('**/api/portal/children', async (route) => {
       await new Promise((resolve) => setTimeout(resolve, 1500));
-      await route.continue();
+      // Requête déjà servie (service worker) ou abandonnée : rien à faire.
+      await route.continue().catch(() => undefined);
     });
     await loginParent(page, '677123456');
     await expect(
@@ -46,7 +47,7 @@ test.describe('portail parents', () => {
       .getByRole('link', { name: 'Accueil' })
       .click();
     const history = page.getByRole('list', { name: 'Derniers paiements' });
-    await expect(history.getByText(`reçu ${receipt}`, { exact: false })).toBeVisible();
+    await expect(history.getByText(new RegExp(`· reçu ${receipt}$`))).toBeVisible();
     await expect(history.getByRole('button', { name: `Reçu ${receipt}` })).toBeVisible();
     await expectNoHorizontalOverflow(page);
   });

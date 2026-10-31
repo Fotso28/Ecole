@@ -53,6 +53,12 @@ test('comptabilité : scolarité, saisie, contre-passation, dépense validée, �
     amount: 150000,
   });
   await expect(page.getByText(/Écriture OD-\d{4}-\d{6} enregistrée/)).toBeVisible();
+  // Une nouvelle saisie repart d'un formulaire vide (libellé et pièce compris).
+  await page.getByRole('button', { name: 'Nouvelle écriture' }).click();
+  const entryForm = page.getByRole('dialog', { name: 'Nouvelle écriture' });
+  await expect(entryForm.getByLabel('Libellé')).toHaveValue('');
+  await expect(entryForm.getByLabel('Pièce justificative')).toHaveValue('');
+  await entryForm.getByRole('button', { name: 'Fermer' }).click();
   await row(page, `Apport du promoteur ${tag}`)
     .getByRole('button', { name: 'Contre-passer' })
     .click();
@@ -85,6 +91,25 @@ test('comptabilité : scolarité, saisie, contre-passation, dépense validée, �
     row(page, `Électricité ${tag}`).getByRole('button', { name: 'Valider' }),
   ).toHaveCount(0);
   await expectNoHorizontalOverflow(page);
+
+  // Nouvelle saisie : formulaire vide ; la même pièce du même fournisseur est signalée.
+  await page.getByRole('button', { name: 'Nouvelle dépense' }).click();
+  await expect(form.getByLabel('Fournisseur')).toHaveValue('');
+  await expect(form.getByLabel('Objet')).toHaveValue('');
+  await expect(form.getByLabel('Montant (FCFA)')).toHaveValue('');
+  await expect(form.getByLabel('Pièce de référence')).toHaveValue('');
+  await form.getByLabel('Fournisseur').fill('ENEO');
+  await form.getByLabel('Objet').fill(`Électricité ${tag} (doublon)`);
+  await form.getByLabel('Montant (FCFA)').fill('150000');
+  await form.getByLabel('Compte de charge').selectOption('6052');
+  await form.getByLabel('Pièce de référence').fill(`ENEO-${tag}`);
+  await form.getByRole('button', { name: 'Enregistrer la dépense' }).click();
+  await expect(form.getByRole('alert')).toContainText(
+    `La pièce ENEO-${tag} de ENEO est déjà enregistrée`,
+  );
+  await expect(form.getByRole('button', { name: 'Enregistrer quand même' })).toBeVisible();
+  await form.getByRole('button', { name: 'Fermer' }).click();
+  await expect(row(page, `Électricité ${tag} (doublon)`)).toHaveCount(0);
 
   await logout(page);
   await loginStaff(page, 'direction@demo.cm');

@@ -11,7 +11,7 @@ import { InputField, SelectField } from '@/components/ui/field';
 import { Sheet } from '@/components/ui/sheet';
 import { useToast } from '@/components/ui/toast';
 import { useAccounts, type ExpenseView } from '@/lib/accounting';
-import { api } from '@/lib/api';
+import { api, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { formatFcfa, formatShortDate, todayIso } from '@/lib/format';
 
@@ -30,6 +30,12 @@ export default function ExpensesPage() {
   const queryClient = useQueryClient();
   const [status, setStatus] = useState('');
   const [creating, setCreating] = useState(false);
+  // Nouvelle clé à chaque ouverture : le formulaire repart vide (aucune saisie précédente).
+  const [formKey, setFormKey] = useState(0);
+  const startCreating = () => {
+    setFormKey((k) => k + 1);
+    setCreating(true);
+  };
   const [rejecting, setRejecting] = useState<ExpenseView | null>(null);
   const [cancelling, setCancelling] = useState<ExpenseView | null>(null);
   const q = useQuery({
@@ -122,7 +128,7 @@ export default function ExpensesPage() {
         }
         actions={
           can('accounting.write') ? (
-            <Button onClick={() => setCreating(true)}>
+            <Button onClick={startCreating}>
               <Plus className="size-4" aria-hidden />
               Nouvelle dépense
             </Button>
@@ -246,6 +252,7 @@ export default function ExpensesPage() {
         </>
       )}
       <ExpenseForm
+        key={formKey}
         open={creating}
         threshold={threshold}
         onClose={() => setCreating(false)}
@@ -321,16 +328,23 @@ function ExpenseForm({
     enabled: open,
   });
   const charges = (accounts.data ?? []).filter((a) => a.class === 6 && a.postable);
+  // Même pièce du même fournisseur déjà saisie : avertissement, puis confirmation explicite.
+  const [duplicate, setDuplicate] = useState<{ message: string; body: object } | null>(null);
   const create = useMutation({
-    mutationFn: (body: unknown) =>
+    mutationFn: (body: object) =>
       api<{ status: ExpenseView['status'] }>('/accounting/expenses', { method: 'POST', body }),
     onSuccess: onCreated,
-    onError: (e) => toast(errorMessage(e), 'error'),
+    onError: (e, body) => {
+      if (e instanceof ApiError && e.code === 'DUPLICATE_PIECE')
+        setDuplicate({ message: e.message, body });
+      else toast(errorMessage(e), 'error');
+    },
   });
   return (
     <Sheet open={open} onClose={onClose} title="Nouvelle dépense">
       <form
         className="flex flex-col gap-4"
+        onChange={() => setDuplicate(null)}
         onSubmit={(ev) => {
           ev.preventDefault();
           const data = new FormData(ev.currentTarget);
@@ -400,9 +414,30 @@ function ExpenseForm({
             personne avant d’être comptabilisée.
           </p>
         ) : null}
-        <Button type="submit" loading={create.isPending}>
-          Enregistrer la dépense
-        </Button>
+        {duplicate ? (
+          <div role="alert" className="flex flex-col gap-3 rounded-[12px] bg-warn-soft p-3 text-sm">
+            <p>
+              <strong>Pièce déjà saisie.</strong> {duplicate.message} Vérifiez qu’il ne s’agit pas
+              d’une double saisie.
+            </p>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <Button type="button" variant="secondary" onClick={() => setDuplicate(null)}>
+                Corriger la saisie
+              </Button>
+              <Button
+                type="button"
+                loading={create.isPending}
+                onClick={() => create.mutate({ ...duplicate.body, allowDuplicatePiece: true })}
+              >
+                Enregistrer quand même
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <Button type="submit" loading={create.isPending}>
+            Enregistrer la dépense
+          </Button>
+        )}
       </form>
     </Sheet>
   );

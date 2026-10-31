@@ -805,7 +805,13 @@ export function carryForwardLines(balances: readonly AccountBalance[]): EntryLin
 
 // ---------------------------------------------------------------- Schémas
 
-const fcfa = z.number().int().min(0).max(10_000_000_000);
+/** Plafond d'un montant comptable : reste loin de la limite des entiers 32 bits de la base. */
+const MAX_ACCOUNTING_AMOUNT = 1_000_000_000;
+const fcfa = z
+  .number()
+  .int('Montant entier en FCFA')
+  .min(0, 'Le montant ne peut pas être négatif')
+  .max(MAX_ACCOUNTING_AMOUNT, 'Montant trop élevé (1 000 000 000 FCFA au plus)');
 const accountNumber = z.string().trim().regex(ACCOUNT_NUMBER_RE, 'Numéro de compte invalide');
 
 export const accountCreateSchema = z.object({
@@ -855,6 +861,8 @@ export const expenseCreateSchema = z
     accountNumber,
     method: z.enum(PAYMENT_METHODS),
     pieceRef: z.string().trim().min(1).max(60),
+    /** Confirmation explicite d'une pièce déjà saisie pour le même fournisseur. */
+    allowDuplicatePiece: z.boolean().optional(),
   })
   .refine((e) => e.supplierId || e.supplierName, {
     message: 'Indiquez le fournisseur',

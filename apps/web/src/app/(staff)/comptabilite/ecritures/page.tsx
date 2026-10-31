@@ -68,6 +68,12 @@ export default function EntriesPage() {
   const [to, setTo] = useState(todayIso());
   const [journal, setJournal] = useState('');
   const [creating, setCreating] = useState(false);
+  // Nouvelle clé à chaque ouverture : le formulaire repart vide (aucune saisie précédente).
+  const [formKey, setFormKey] = useState(0);
+  const startCreating = () => {
+    setFormKey((k) => k + 1);
+    setCreating(true);
+  };
   const [reversing, setReversing] = useState<EntryView | null>(null);
   const accounts = useAccounts();
   const labels = useMemo(
@@ -101,7 +107,7 @@ export default function EntriesPage() {
         subtitle="Partie double, numérotation continue par journal. Correction par contre-passation."
         actions={
           can('accounting.write') ? (
-            <Button onClick={() => setCreating(true)}>
+            <Button onClick={startCreating}>
               <Plus className="size-4" aria-hidden />
               Nouvelle écriture
             </Button>
@@ -271,6 +277,7 @@ export default function EntriesPage() {
         </ul>
       )}
       <EntryForm
+        key={formKey}
         open={creating}
         onClose={() => setCreating(false)}
         onCreated={(e) => {

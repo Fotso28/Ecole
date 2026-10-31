@@ -21,6 +21,7 @@ import {
   expenseCreateSchema,
   expenseNeedsApproval,
   expensePostings,
+  formatFcfa,
   formatPayrollMonth,
   fiscalYearsOverlap,
   incomeStatement,
@@ -1418,6 +1419,23 @@ export class AccountingService {
         ? await tx.supplier.findUnique({ where: { id: input.supplierId } })
         : await tx.supplier.findFirst({ where: { name: input.supplierName } });
       if (input.supplierId && !supplier) throw new NotFoundException('Fournisseur introuvable');
+      // Même pièce du même fournisseur déjà saisie : avertissement, confirmation explicite requise.
+      if (supplier && !input.allowDuplicatePiece) {
+        const twin = await tx.expense.findFirst({
+          where: {
+            supplierId: supplier.id,
+            pieceRef: { equals: input.pieceRef, mode: 'insensitive' },
+            status: { in: ['PENDING_APPROVAL', 'POSTED'] },
+          },
+          orderBy: { createdAt: 'desc' },
+        });
+        if (twin)
+          throw new ConflictException({
+            statusCode: 409,
+            code: 'DUPLICATE_PIECE',
+            message: `La pièce ${twin.pieceRef} de ${supplier.name} est déjà enregistrée (dépense du ${frDate(fromDbDate(twin.date))}, ${formatFcfa(twin.amount)} : « ${twin.label} »).`,
+          });
+      }
       supplier ??= await tx.supplier.create({
         data: { schoolId: currentSchoolId(), name: input.supplierName ?? '' },
       });
@@ -1441,7 +1459,13 @@ export class AccountingService {
           action: 'accounting.expense_created',
           entity: 'Expense',
           entityId: expense.id,
-          after: { ...input, supplier: supplier.name, status: expense.status, entries },
+          after: {
+            ...input,
+            supplier: supplier.name,
+            status: expense.status,
+            entries,
+            duplicatePiece: input.allowDuplicatePiece ?? false,
+          },
         },
         tx,
       );

@@ -68,7 +68,9 @@ async function gradeThirdTerm(request: APIRequestContext) {
 test('le censeur prépare le bulletin de fin d’année et saisit la décision du conseil', async ({
   page,
   request,
-}) => {
+}, info) => {
+  // Appréciation propre à chaque projet : la décision change donc à chaque passage.
+  const comment = `Très bonne année (${info.project.name})`;
   await gradeThirdTerm(request);
   await loginStaff(page, 'censeur@demo.cm');
   await page.goto('/bulletins');
@@ -87,7 +89,7 @@ test('le censeur prépare le bulletin de fin d’année et saisit la décision d
   const yearEnd = dialog.getByLabel('Décision de fin d’année');
   await expect(dialog.getByText(/Moyenne annuelle \d+,\d\d · proposition/)).toBeVisible();
   await yearEnd.selectOption({ label: 'Admis en classe supérieure' });
-  await dialog.getByLabel('Appréciation du conseil').fill('Très bonne année');
+  await dialog.getByLabel('Appréciation du conseil').fill(comment);
   await dialog.getByRole('button', { name: 'Enregistrer' }).click();
   await expect(page.getByText(/Décision enregistrée/)).toBeVisible();
   // La décision apparaît tout de suite et les brouillons sont signalés comme à mettre à jour.
@@ -97,7 +99,7 @@ test('le censeur prépare le bulletin de fin d’année et saisit la décision d
   // Rouverte, la fiche reprend la décision enregistrée ; un autre élève a sa propre fiche.
   await row.getByRole('button', { name: 'Décision' }).click();
   await expect(yearEnd).toHaveValue('PROMOTED');
-  await expect(dialog.getByLabel('Appréciation du conseil')).toHaveValue('Très bonne année');
+  await expect(dialog.getByLabel('Appréciation du conseil')).toHaveValue(comment);
   await expect(dialog.getByText(/décision déjà enregistrée/)).toBeVisible();
   await dialog.getByRole('button', { name: 'Fermer' }).click();
   const other = page

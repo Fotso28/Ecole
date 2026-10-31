@@ -18,7 +18,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const push = useCallback((message: string, tone: Toast['tone'] = 'success') => {
     const id = Date.now() + Math.random();
-    setToasts((t) => [...t, { id, message, tone }]);
+    // Un message identique déjà affiché n'est pas répété (double appui, double réponse).
+    setToasts((t) =>
+      t.some((x) => x.message === message && x.tone === tone) ? t : [...t, { id, message, tone }],
+    );
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 5000);
   }, []);
   return (

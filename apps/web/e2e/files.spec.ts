@@ -145,10 +145,12 @@ test.describe('fichiers et pédagogie', () => {
     await expect(sheet.getByText('Indiquez pour quand le travail est à faire')).toBeVisible();
     await sheet.getByLabel('Pour le').fill(inDays(1));
     await expectNoHorizontalOverflow(page);
-    await sheet.getByRole('button', { name: 'Enregistrer la séance' }).click();
+    // Double appui (réseau lent) : une seule séance est enregistrée.
+    await sheet.getByRole('button', { name: 'Enregistrer la séance' }).dblclick();
     await expect(page.getByText('Séance enregistrée')).toBeVisible();
 
     const card = page.locator('li').filter({ hasText: content });
+    await expect(card).toHaveCount(1);
     await expect(card.getByText(homework)).toBeVisible();
     await card.getByRole('button', { name: 'Joindre un support' }).click();
     await sheet.getByLabel('Titre').fill(title);

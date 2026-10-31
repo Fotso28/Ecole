@@ -145,6 +145,54 @@ test.describe('emploi du temps', () => {
     if (mobile) await page.getByRole('tab', { name: 'Lundi' }).click();
     await expect(maths).toContainText('09:20–10:15');
   });
+
+  test('retirer un cours demande une confirmation et l’annonce', async ({ page }, info) => {
+    const mobile = isMobile(info);
+    await loginStaff(page, 'direction@demo.cm');
+    await page.goto('/emploi-du-temps');
+    await page.getByLabel('Classe').selectOption({ label: '4e B' });
+    await page.getByRole('button', { name: 'Ajouter un cours' }).click();
+    const add = page.getByRole('dialog', { name: /Ajouter un cours/ });
+    await add.getByLabel('Matière').selectOption({ index: 1 });
+    await add.getByLabel('Jour').selectOption({ label: 'Samedi' });
+    await add.getByLabel('Début').fill('10:30');
+    await add.getByLabel('Fin').fill('11:25');
+    await add.getByRole('button', { name: /Ajouter/ }).click();
+    await expect(page.getByText('Cours ajouté')).toBeVisible();
+    if (mobile) await page.getByRole('tab', { name: 'Samedi' }).click();
+    // Vue affichée seulement (la liste du téléphone est masquée sur ordinateur, et inversement).
+    const lesson = page.locator('[data-lesson]:visible', { hasText: '10:30–11:25' }).first();
+    await lesson.getByRole('button', { name: /^Retirer/ }).click();
+    const confirm = page.getByRole('dialog', { name: 'Retirer ce cours ?' });
+    await expect(confirm).toContainText('samedi 10:30–11:25');
+    await confirm.getByRole('button', { name: 'Annuler' }).click();
+    await expect(lesson).toBeVisible();
+    await lesson.getByRole('button', { name: /^Retirer/ }).click();
+    await confirm.getByRole('button', { name: 'Retirer', exact: true }).click();
+    await expect(page.getByText('Cours retiré de l’emploi du temps')).toBeVisible();
+    await expect(page.locator('[data-lesson]:visible', { hasText: '10:30–11:25' })).toHaveCount(0);
+  });
+
+  test('l’enseignant arrive sur sa propre semaine, toutes classes confondues', async ({
+    page,
+  }, info) => {
+    await loginStaff(page, 'prof.maths@demo.cm');
+    await page.goto('/emploi-du-temps');
+    await expect(page.getByLabel('Classe')).toHaveValue('moi');
+    await expect(
+      page.getByText('Tous vos cours de la semaine, toutes classes confondues.'),
+    ).toBeVisible();
+    const mine = page.locator('[data-lesson]', { hasText: '4e A · Mathématiques' });
+    if (isMobile(info)) {
+      for (const d of ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi']) {
+        await page.getByRole('tab', { name: d }).click();
+        if (await mine.count()) break;
+      }
+    }
+    await expect(mine.first()).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Ajouter un cours' })).toHaveCount(0);
+    await expectNoHorizontalOverflow(page);
+  });
 });
 
 test.describe('portail des parents', () => {

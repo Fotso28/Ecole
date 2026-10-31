@@ -1,6 +1,6 @@
 'use client';
 
-import { checkMove, gridStartTimes, type MoveConflict } from '@ecole/shared';
+import { checkMove, gridStartTimes, toMinutes, type MoveConflict } from '@ecole/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { GripVertical, Move, Plus, Trash2 } from 'lucide-react';
 import {
@@ -64,9 +64,11 @@ const CONFLICT: Record<string, string> = {
 };
 /** Déplacement minimal (px) avant de considérer un appui comme un glisser. */
 const DRAG_THRESHOLD = 6;
+/** Choix « Mon emploi du temps » : tous les cours de l'enseignant connecté, toutes classes. */
+const MINE = 'moi';
 
 export default function TimetablePage() {
-  const { can } = useAuth();
+  const { can, me } = useAuth();
   const toast = useToast();
   const queryClient = useQueryClient();
   const structure = useCurrentStructure();
@@ -76,15 +78,15 @@ export default function TimetablePage() {
   const [addOpen, setAddOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [moving, setMoving] = useState<Entry | null>(null);
+  const [removing, setRemoving] = useState<Entry | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
   const pending = useRef<{ entry: Entry; x: number; y: number; pointerId: number } | null>(null);
   // Dernier état du glisser, lu au relâchement sans dépendre du rendu en cours.
   const dragRef = useRef<DragState | null>(null);
   const editable = can('academic.write');
-
-  useEffect(() => {
-    if (!classId && structure.data?.classes[0]) setClassId(structure.data.classes[0].id);
-  }, [structure.data, classId]);
+  const myId = me?.user.id ?? '';
+  const teaches = !!me?.roles.includes('TEACHER');
+  const mine = classId === MINE;
 
   const planning = useQuery({
     queryKey: ['timetable', 'planning'],
@@ -104,7 +106,16 @@ export default function TimetablePage() {
     [structure.data],
   );
   const all = useMemo(() => planning.data?.entries ?? [], [planning.data]);
-  const entries = useMemo(() => all.filter((e) => e.classId === classId), [all, classId]);
+  // Un enseignant arrive sur sa propre semaine ; les autres sur la première classe.
+  useEffect(() => {
+    if (classId || !structure.data) return;
+    if (teaches && !editable) setClassId(MINE);
+    else if (structure.data.classes[0]) setClassId(structure.data.classes[0].id);
+  }, [structure.data, classId, teaches, editable]);
+  const entries = useMemo(
+    () => all.filter((e) => (mine ? e.teacherId === myId : e.classId === classId)),
+    [all, classId, mine, myId],
+  );
   const rows = useMemo(() => gridStartTimes(entries), [entries]);
 
   const conflictText = (conflicts: { kind: string; entryId?: string; slotId?: string }[]) =>
@@ -145,7 +156,12 @@ export default function TimetablePage() {
   });
   const remove = useMutation({
     mutationFn: (id: string) => api(`/timetable/entries/${id}`, { method: 'DELETE' }),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['timetable'] }),
+    onSuccess: () => {
+      setRemoving(null);
+      toast('Cours retiré de l’emploi du temps');
+      void queryClient.invalidateQueries({ queryKey: ['timetable'] });
+    },
+    onError: (e) => toast(e instanceof Error ? e.message : 'Erreur', 'error'),
   });
   const move = useMutation({
     mutationFn: ({ id, target }: { id: string; target: Target }) =>
@@ -237,7 +253,7 @@ export default function TimetablePage() {
         key={e.id}
         data-lesson={e.id}
         className={cn(
-          'flex items-center gap-1 rounded-[10px] p-1.5',
+          'flex flex-wrap items-center gap-1 rounded-[10px] p-1.5',
           GROUP_TONE[s?.subject.group ?? 'OTHER'],
           dragging && 'opacity-40',
         )}
@@ -251,14 +267,16 @@ export default function TimetablePage() {
             onPointerMove={onPointerMove}
             onPointerUp={(ev) => endDrag(ev)}
             onPointerCancel={(ev) => endDrag(ev, true)}
-            className="flex min-h-11 w-7 shrink-0 cursor-grab touch-none items-center justify-center rounded-[8px] text-muted hover:bg-white/60 active:cursor-grabbing"
+            className="flex min-h-11 w-7 shrink-0 cursor-grab touch-none items-center justify-center rounded-[8px] text-muted hover:bg-white/60 active:cursor-grabbing lg:min-h-8"
           >
             <GripVertical className="size-4" />
           </span>
         ) : null}
-        <div className="flex min-w-0 flex-1 flex-col py-1 pl-1">
-          <strong className="truncate text-sm">{name}</strong>
-          <span className="truncate text-xs text-muted tabular">
+        <div className="order-first flex min-w-0 flex-1 basis-[7.5rem] flex-col py-1 pl-1 lg:basis-full lg:py-0">
+          <strong className="line-clamp-2 text-sm [overflow-wrap:anywhere]">
+            {mine ? `${classNameOf.get(e.classId) ?? ''} · ${name}` : name}
+          </strong>
+          <span className="text-xs text-muted tabular">
             {e.startTime}–{e.endTime}
             {e.roomId ? ` · ${rooms.data?.find((r) => r.id === e.roomId)?.name ?? ''}` : ''}
           </span>
@@ -269,7 +287,7 @@ export default function TimetablePage() {
               type="button"
               aria-label={`Déplacer ${name} du ${DAYS[e.dayOfWeek - 1]?.toLowerCase()} ${e.startTime}`}
               title="Déplacer"
-              className="flex size-11 shrink-0 items-center justify-center rounded-[8px] text-muted hover:bg-white/60"
+              className="flex size-11 shrink-0 items-center justify-center rounded-[8px] text-muted hover:bg-white/60 lg:size-8"
               onClick={() => setMoving(e)}
             >
               <Move className="size-4" aria-hidden />
@@ -277,8 +295,8 @@ export default function TimetablePage() {
             <button
               type="button"
               aria-label={`Retirer ${name} du ${DAYS[e.dayOfWeek - 1]?.toLowerCase()} ${e.startTime}`}
-              className="flex size-11 shrink-0 items-center justify-center rounded-[8px] text-muted hover:bg-white/60"
-              onClick={() => remove.mutate(e.id)}
+              className="flex size-11 shrink-0 items-center justify-center rounded-[8px] text-muted hover:bg-white/60 lg:size-8"
+              onClick={() => setRemoving(e)}
             >
               <Trash2 className="size-4" aria-hidden />
             </button>
@@ -290,6 +308,23 @@ export default function TimetablePage() {
 
   const at = (d: number, time: string) =>
     entries.filter((e) => e.dayOfWeek === d && e.startTime === time);
+  /** Cours commencés plus tôt et encore en cours à cette heure (cours de deux heures). */
+  const ongoing = (d: number, time: string) =>
+    entries.filter(
+      (e) =>
+        e.dayOfWeek === d &&
+        toMinutes(e.startTime) < toMinutes(time) &&
+        toMinutes(e.endTime) > toMinutes(time),
+    );
+  const continuation = (e: Entry) => (
+    <p
+      key={`suite-${e.id}`}
+      className="rounded-[10px] border border-dashed border-line-strong px-2 py-1.5 text-xs text-muted"
+    >
+      Suite : {mine ? `${classNameOf.get(e.classId) ?? ''} · ` : ''}
+      {subjectOf.get(e.classSubjectId)?.subject.name ?? 'cours'} jusqu’à {e.endTime}
+    </p>
+  );
 
   return (
     <>
@@ -298,10 +333,12 @@ export default function TimetablePage() {
         subtitle={
           editable
             ? 'Glissez un cours vers un autre créneau, ou utilisez « Déplacer ». Les conflits sont signalés et refusés.'
-            : 'Les conflits d’enseignant, de salle et de classe sont refusés à l’enregistrement.'
+            : mine
+              ? 'Tous vos cours de la semaine, toutes classes confondues.'
+              : 'Emploi du temps de la classe choisie.'
         }
         actions={
-          editable && classId ? (
+          editable && classId && !mine ? (
             <Button onClick={() => setAddOpen(true)}>
               <Plus className="size-4" aria-hidden />
               Ajouter un cours
@@ -315,6 +352,7 @@ export default function TimetablePage() {
         onChange={(e) => setClassId(e.target.value)}
         containerClassName="sm:max-w-xs"
       >
+        {teaches ? <option value={MINE}>Mon emploi du temps</option> : null}
         {structure.data?.classes.map((c) => (
           <option key={c.id} value={c.id}>
             {c.name}
@@ -326,7 +364,7 @@ export default function TimetablePage() {
       ) : planning.isError ? (
         <ErrorBlock error={planning.error} />
       ) : entries.length === 0 ? (
-        <EmptyState title="Aucun cours pour cette classe" />
+        <EmptyState title={mine ? 'Aucun cours à votre nom' : 'Aucun cours pour cette classe'} />
       ) : (
         <>
           <div className="flex flex-col gap-3 lg:hidden">
@@ -370,6 +408,7 @@ export default function TimetablePage() {
                     {time}
                   </span>
                   <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                    {ongoing(day, time).map(continuation)}
                     {at(day, time).map(lesson)}
                   </div>
                 </li>
@@ -380,7 +419,9 @@ export default function TimetablePage() {
           <div className="hidden lg:block">
             <table className="w-full table-fixed border-separate border-spacing-1.5 text-sm">
               <caption className="sr-only">
-                Emploi du temps de la classe {cls?.name}, par jour et heure de début
+                {mine
+                  ? 'Mon emploi du temps, par jour et heure de début'
+                  : `Emploi du temps de la classe ${cls?.name ?? ''}, par jour et heure de début`}
               </caption>
               <thead>
                 <tr>
@@ -413,7 +454,10 @@ export default function TimetablePage() {
                           dropClass(dropState(i + 1, time)),
                         )}
                       >
-                        <div className="flex flex-col gap-1">{at(i + 1, time).map(lesson)}</div>
+                        <div className="flex flex-col gap-1">
+                          {ongoing(i + 1, time).map(continuation)}
+                          {at(i + 1, time).map(lesson)}
+                        </div>
                       </td>
                     ))}
                   </tr>
@@ -462,6 +506,35 @@ export default function TimetablePage() {
         onClose={() => setMoving(null)}
         onMove={(target) => moving && move.mutate({ id: moving.id, target })}
       />
+
+      <Sheet
+        open={!!removing}
+        onClose={() => setRemoving(null)}
+        title="Retirer ce cours ?"
+        footer={
+          <div className="grid grid-cols-2 gap-2">
+            <Button variant="secondary" onClick={() => setRemoving(null)}>
+              Annuler
+            </Button>
+            <Button
+              variant="danger"
+              loading={remove.isPending}
+              onClick={() => removing && remove.mutate(removing.id)}
+            >
+              Retirer
+            </Button>
+          </div>
+        }
+      >
+        <p className="text-sm">
+          {removing
+            ? `${subjectOf.get(removing.classSubjectId)?.subject.name ?? 'Cours'} · ${classNameOf.get(removing.classId) ?? ''} · ${DAYS[removing.dayOfWeek - 1]?.toLowerCase()} ${removing.startTime}–${removing.endTime}`
+            : ''}
+        </p>
+        <p className="mt-2 text-sm text-muted">
+          Le cours disparaît de l’emploi du temps de la classe, de l’enseignant et de la salle.
+        </p>
+      </Sheet>
 
       <Sheet
         open={addOpen}

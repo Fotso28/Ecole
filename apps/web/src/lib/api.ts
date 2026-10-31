@@ -147,11 +147,38 @@ async function request(path: string, options: RequestOptions = {}): Promise<Resp
   return res;
 }
 
+/**
+ * Demandes d'écriture en cours, par méthode, chemin et contenu. Un double appui, fréquent sur un
+ * réseau lent avant que le bouton ne passe « en cours », reçoit la réponse de la première demande
+ * au lieu d'enregistrer deux fois la même séance, le même élève ou le même paiement.
+ */
+const inFlight = new Map<string, Promise<unknown>>();
+
+/** Clé d'une demande d'écriture identique ; `null` pour une lecture (jamais regroupée). */
+export function writeKey(path: string, options: RequestOptions): string | null {
+  const method = options.method ?? 'GET';
+  if (method === 'GET') return null;
+  return `${method} ${path} ${options.body === undefined ? '' : JSON.stringify(options.body)}`;
+}
+
+/** Exécute `run` une seule fois tant qu'une demande de même clé est en cours. */
+export function once<T>(key: string | null, run: () => Promise<T>): Promise<T> {
+  if (key === null) return run();
+  const running = inFlight.get(key);
+  if (running) return running as Promise<T>;
+  const promise = run().finally(() => inFlight.delete(key));
+  inFlight.set(key, promise);
+  return promise;
+}
+
 export async function api<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const res = await request(path, options);
-  if (res.status === 204) return undefined as T;
-  const text = await res.text();
-  return (text ? JSON.parse(text) : null) as T;
+  const key = options.body instanceof FormData ? null : writeKey(path, options);
+  return once(key, async () => {
+    const res = await request(path, options);
+    if (res.status === 204) return undefined as T;
+    const text = await res.text();
+    return (text ? JSON.parse(text) : null) as T;
+  });
 }
 
 /** Ouvre un PDF protégé (bulletin, reçu) dans un nouvel onglet. */
@@ -188,7 +215,9 @@ export async function uploadFile<T>(
   const form = new FormData();
   for (const [k, v] of Object.entries(fields)) if (v !== undefined) form.append(k, v);
   form.append('file', file, file.name);
-  return api<T>(path, { method: 'POST', body: form });
+  // Même fichier, mêmes champs : un double appui n'envoie le fichier qu'une fois.
+  const key = `UPLOAD ${path} ${JSON.stringify(fields)} ${file.name} ${file.size} ${file.lastModified}`;
+  return once(key, () => api<T>(path, { method: 'POST', body: form }));
 }
 
 export interface FileLink {

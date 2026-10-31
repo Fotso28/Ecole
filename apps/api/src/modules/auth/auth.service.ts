@@ -170,6 +170,7 @@ export class AuthService {
       action: 'auth.login',
       entity: 'User',
       entityId: user.id,
+      actorId: user.id,
       schoolId: membership?.schoolId ?? null,
     });
     return this.issueSession(
@@ -597,6 +598,7 @@ export class AuthService {
       action: 'auth.parent_login',
       entity: 'User',
       entityId: userId,
+      actorId: userId,
       schoolId: null,
     });
     return this.issueSession(userId, 'PARENT', null, randomUUID(), userAgent);

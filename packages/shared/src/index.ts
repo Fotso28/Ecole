@@ -1,4 +1,5 @@
 export * from './accounting';
+export * from './audit';
 export * from './payroll-accounting';
 export * from './billing';
 export * from './files';

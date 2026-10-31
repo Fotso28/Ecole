@@ -89,4 +89,19 @@ test('encaissement en espèces, reçu, annulation et clôture de caisse', async 
   await expect(page.getByText(/^Clôture approuvée/)).toBeVisible();
   await expect(closure()).toHaveCount(0);
   await expectNoHorizontalOverflow(page);
+
+  // Journal d'audit : l'annulation et l'approbation se retrouvent par type d'action et personne,
+  // avec des libellés en français.
+  await page.goto('/parametres');
+  const audit = page.locator('#audit');
+  await audit.getByLabel('Type d’action').selectOption('finance');
+  await audit.getByLabel('Personne').selectOption({ label: 'Ngo Bassa Alice' });
+  await expect(
+    audit.getByText(/Ngo Bassa Alice · Clôture de caisse approuvée/).first(),
+  ).toBeVisible();
+  await expect(
+    audit.getByText(/Paiement annulé · motif : Erreur de saisie au guichet/).first(),
+  ).toBeVisible();
+  await expect(audit.getByText('finance.payment_reversed')).toHaveCount(0);
+  await expectNoHorizontalOverflow(page);
 });

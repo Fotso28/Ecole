@@ -18,6 +18,7 @@ import { Sheet } from '@/components/ui/sheet';
 import { useToast } from '@/components/ui/toast';
 import { api, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { ofName } from '@/lib/format';
 import { ADVANCE_STATUS, nextMonths, type AdvanceRow, type EmployeeRow } from '@/lib/hr';
 
 function RequestSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -43,8 +44,19 @@ function RequestSheet({ open, onClose }: { open: boolean; onClose: () => void })
       toast(e instanceof Error ? e.message : 'Erreur', 'error');
     },
   });
-  // Première retenue : le mois en cours ou un mois à venir, jamais un mois passé.
-  const months = nextMonths(3);
+  // Première retenue : le mois en cours ou un mois à venir, jamais un mois passé ni un mois dont
+  // la paie est déjà préparée ou validée (elle ne peut plus recevoir la retenue).
+  const runs = useQuery({
+    queryKey: ['hr', 'payroll-runs'],
+    queryFn: () => api<{ month: string; status: string }[]>('/hr/payroll'),
+    enabled: open,
+  });
+  const closedMonths = new Set(
+    (runs.data ?? []).filter((r) => r.status !== 'DRAFT').map((r) => r.month),
+  );
+  const months = nextMonths(4)
+    .filter((m) => !closedMonths.has(m))
+    .slice(0, 3);
   const [employeeId, setEmployeeId] = useState('');
   const [amount, setAmount] = useState('');
   const [installments, setInstallments] = useState('1');
@@ -111,7 +123,12 @@ function RequestSheet({ open, onClose }: { open: boolean; onClose: () => void })
               </option>
             ))}
           </SelectField>
-          <SelectField label="Première retenue" name="firstMonth" defaultValue={months[0]}>
+          <SelectField
+            key={months[0]}
+            label="Première retenue"
+            name="firstMonth"
+            defaultValue={months[0]}
+          >
             {months.map((m) => (
               <option key={m} value={m}>
                 {formatPayrollMonth(m)}
@@ -286,7 +303,7 @@ export default function AdvancesPage() {
         amount={paying?.amount ?? 0}
         debitAccount="421 (avances au personnel)"
         success="Avance versée"
-        intro={`Avance de ${paying?.lastName ?? ''} ${paying?.firstName ?? ''}, remboursée ensuite par retenue sur les paies.`}
+        intro={`Avance ${ofName(`${paying?.lastName ?? ''} ${paying?.firstName ?? ''}`)}, remboursée ensuite par retenue sur les paies.`}
       />
     </>
   );

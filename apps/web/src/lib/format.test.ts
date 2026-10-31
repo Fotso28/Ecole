@@ -5,6 +5,7 @@ import {
   formatShortDate,
   formatSignedFcfa,
   formatWeekday,
+  ofName,
   plural,
 } from './format';
 
@@ -18,6 +19,12 @@ describe('formats français', () => {
   it('accorde au pluriel', () => {
     expect(plural(1, 'élève', 'élèves')).toBe('1 élève');
     expect(plural(3, 'élève', 'élèves')).toBe('3 élèves');
+  });
+
+  it('élide « de » devant une voyelle', () => {
+    expect(ofName('Etoa Robert')).toBe('d’Etoa Robert');
+    expect(ofName('Mbarga Paul')).toBe('de Mbarga Paul');
+    expect(ofName(' Owona')).toBe('d’Owona');
   });
 
   it('accorde au sexe de l’élève quand il est connu', () => {

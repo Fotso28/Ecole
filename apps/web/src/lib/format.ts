@@ -63,6 +63,11 @@ export function plural(n: number, one: string, many: string): string {
   return `${n} ${n > 1 ? many : one}`;
 }
 
+/** « de Mbarga », « d’Etoa » : « de » élidé devant une voyelle. */
+export function ofName(name: string): string {
+  return /^[aeiouyâàéèêëîïôöûüœ]/i.test(name.trim()) ? `d’${name.trim()}` : `de ${name.trim()}`;
+}
+
 /** Accord au sexe de l'élève quand il est connu (« absente », « montée »), forme épicène sinon. */
 export function agree(gender: 'F' | 'M' | null | undefined, word: string): string {
   return gender === 'F' ? `${word}e` : gender === 'M' ? word : `${word}(e)`;

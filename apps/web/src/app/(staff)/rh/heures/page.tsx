@@ -1,6 +1,6 @@
 'use client';
 
-import { formatMinutes, formatPayrollMonth } from '@ecole/shared';
+import { formatMinutes, formatPayrollMonth, ofPayrollMonth } from '@ecole/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, CheckCheck, Plus, Trash2, UserX } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -166,8 +166,7 @@ export default function HoursPage() {
         <>
           {q.data.locked ? (
             <p role="status" className="rounded-[12px] bg-info-soft p-3 text-sm text-info">
-              La paie de {formatPayrollMonth(month)} est validée : les heures de ce mois sont
-              figées.
+              La paie {ofPayrollMonth(month)} est validée : les heures de ce mois sont figées.
             </p>
           ) : null}
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">

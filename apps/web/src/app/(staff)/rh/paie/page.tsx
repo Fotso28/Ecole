@@ -34,7 +34,7 @@ import { Sheet } from '@/components/ui/sheet';
 import { useToast } from '@/components/ui/toast';
 import { api, downloadFile, openPdf } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import { formatDateTime } from '@/lib/format';
+import { formatDateTime, ofName } from '@/lib/format';
 import { currentMonth, monthOptions, type PayrollRunView, type PayslipView } from '@/lib/hr';
 
 const STATUS_TONE = { DRAFT: 'neutral', PREPARED: 'warn', VALIDATED: 'success' } as const;
@@ -87,7 +87,7 @@ function ElementsSheet({
     <Sheet
       open={!!slip}
       onClose={onClose}
-      title={slip ? `Éléments de ${slip.lastName} ${slip.firstName}` : 'Éléments'}
+      title={slip ? `Éléments ${ofName(`${slip.lastName} ${slip.firstName}`)}` : 'Éléments'}
       footer={
         <Button block onClick={() => save.mutate()} loading={save.isPending}>
           Enregistrer et recalculer
@@ -484,9 +484,7 @@ export default function PayrollPage() {
               </ul>
               <div className="hidden overflow-x-auto rounded-[14px] border border-line bg-white md:block">
                 <table className="w-full min-w-[820px] text-sm">
-                  <caption className="sr-only">
-                    Bulletins de paie de {formatPayrollMonth(month)}
-                  </caption>
+                  <caption className="sr-only">Bulletins de paie {ofPayrollMonth(month)}</caption>
                   <thead className="bg-paper text-left text-xs tracking-[0.06em] text-muted uppercase">
                     <tr>
                       <th className="px-4 py-3 font-semibold">Nom</th>
@@ -555,7 +553,7 @@ export default function PayrollPage() {
         title="Valider la paie"
         footer={
           <Button block onClick={() => validate.mutate()} loading={validate.isPending}>
-            Je valide la paie de {formatPayrollMonth(month)}
+            Je valide la paie {ofPayrollMonth(month)}
           </Button>
         }
       >

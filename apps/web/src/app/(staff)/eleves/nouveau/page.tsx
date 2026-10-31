@@ -10,7 +10,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Check, Info, Link2, Plus, Trash2, TriangleAlert, X } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Checkbox, InputField, SelectField } from '@/components/ui/field';
@@ -670,10 +670,33 @@ function KnownGuardianNotice({
         </span>
       </p>
     );
+  return <PhoneTakenAlert known={known} onLink={onLink} onFix={onFix} />;
+}
+
+/**
+ * Numéro déjà connu sous un autre nom : l'alerte est amenée au centre de l'écran (au-dessus de la
+ * barre « Précédent / Continuer » du téléphone) et reçoit le focus, pour qu'on ne la manque pas.
+ */
+function PhoneTakenAlert({
+  known,
+  onLink,
+  onFix,
+}: {
+  known: KnownGuardian;
+  onLink: () => void;
+  onFix: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    ref.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    ref.current?.focus({ preventScroll: true });
+  }, []);
   return (
     <div
+      ref={ref}
+      tabIndex={-1}
       role="alert"
-      className="flex flex-col gap-3 rounded-[12px] border border-[#f1d99a] bg-warn-soft p-3 text-sm"
+      className="flex flex-col gap-3 rounded-[12px] border border-[#f1d99a] bg-warn-soft p-3 text-sm outline-none"
     >
       <p className="flex gap-2">
         <TriangleAlert className="mt-0.5 size-4 shrink-0 text-warn" aria-hidden />

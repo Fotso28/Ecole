@@ -36,6 +36,19 @@ test.describe('portail parents', () => {
     await expect(page.getByRole('heading', { name: 'Paiement reçu' })).toBeVisible();
     await expect(page.getByText(/R-\d{4}-\d{6}/)).toBeVisible();
     await expectNoHorizontalOverflow(page);
+    const receipt = /R-\d{4}-\d{6}/.exec(
+      (await page.getByText(/R-\d{4}-\d{6}/).textContent()) ?? '',
+    )?.[0];
+
+    // Historique des paiements de l'enfant sur l'accueil, avec le reçu.
+    await page
+      .getByRole('navigation', { name: 'Navigation' })
+      .getByRole('link', { name: 'Accueil' })
+      .click();
+    const history = page.getByRole('list', { name: 'Derniers paiements' });
+    await expect(history.getByText(`reçu ${receipt}`, { exact: false })).toBeVisible();
+    await expect(history.getByRole('button', { name: `Reçu ${receipt}` })).toBeVisible();
+    await expectNoHorizontalOverflow(page);
   });
 
   test('le parent justifie une absence signalée par l’enseignant', async ({

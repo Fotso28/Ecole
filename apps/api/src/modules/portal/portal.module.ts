@@ -235,13 +235,20 @@ export class PortalService {
                 totals: account.totals,
                 nextDue: account.nextDue,
                 lines: account.lines,
-                // Le téléphone payeur, la référence de l'opérateur et l'agent de caisse ne
-                // regardent pas l'autre tuteur : seul `GET /portal/payments/:id` les montre, à
-                // l'auteur du paiement.
+                // Le téléphone payeur, les références (opérateur, bordereau bancaire) et l'agent de
+                // caisse ne regardent pas l'autre tuteur : seul `GET /portal/payments/:id` les
+                // montre, à l'auteur du paiement.
                 payments: account.payments
                   .slice(0, 10)
                   .map(
-                    ({ payerPhone: _phone, operatorReference: _ref, receivedById: _by, ...p }) => p,
+                    ({
+                      payerPhone: _phone,
+                      operatorReference: _ref,
+                      bankReference: _slip,
+                      bankName: _bank,
+                      receivedById: _by,
+                      ...p
+                    }) => p,
                   ),
               }
             : null,

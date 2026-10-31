@@ -15,6 +15,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import {
   advanceCreateSchema,
   advanceDecisionSchema,
+  advanceRejectSchema,
   contractCreateSchema,
   contractEndSchema,
   employeeCreateSchema,
@@ -208,7 +209,7 @@ export class HrController {
   @Post('advances/:id/reject')
   rejectAdvance(
     @Param('id') id: string,
-    @Body(new ZodPipe(advanceDecisionSchema)) body: z.infer<typeof advanceDecisionSchema>,
+    @Body(new ZodPipe(advanceRejectSchema)) body: z.infer<typeof advanceRejectSchema>,
   ) {
     return this.payroll.decideAdvance(id, false, body.reason);
   }

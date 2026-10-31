@@ -22,7 +22,7 @@ import {
   expenseNeedsApproval,
   expensePostings,
   formatFcfa,
-  formatPayrollMonth,
+  ofPayrollMonth,
   fiscalYearsOverlap,
   incomeStatement,
   isPostable,
@@ -1160,7 +1160,7 @@ export class AccountingService {
             where: { id: payout.sourceId },
             select: { month: true },
           });
-          label = `Versement des salaires de ${run ? formatPayrollMonth(run.month) : ''}`;
+          label = `Versement des salaires${run ? ` ${ofPayrollMonth(run.month)}` : ''}`;
         } else {
           const advance = await tx.salaryAdvance.findUnique({
             where: { id: payout.sourceId },

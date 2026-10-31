@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
-  formatPayrollMonth,
+  ofPayrollMonth,
   payrollMonthBounds,
   plannedLessons,
   type lessonMarkSchema,
@@ -43,7 +43,7 @@ export class HoursService {
     });
     if (run?.status === 'VALIDATED')
       throw new ConflictException(
-        `La paie de ${formatPayrollMonth(month)} est validée : les heures de ce mois sont figées`,
+        `La paie ${ofPayrollMonth(month)} est validée : les heures de ce mois sont figées`,
       );
   }
 

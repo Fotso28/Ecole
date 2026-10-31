@@ -8,12 +8,14 @@ import {
 import {
   absenceDeduction,
   advanceInstallment,
+  advanceShareTooHigh,
   allocateAdvanceDeduction,
   computePayslip,
   contractDaysInMonth,
   DEFAULT_PAYROLL_SCALE,
   daysInMonth,
   formatPayrollMonth,
+  ofPayrollMonth,
   payForMinutes,
   payrollMonthBounds,
   prorateMonthly,
@@ -32,7 +34,7 @@ import { AccessService } from '../../common/access.service';
 import { AuditService } from '../../common/audit.service';
 import { sha256 } from '../../common/crypto';
 import { currentSchoolId, staffContext } from '../../common/context';
-import { fromDbDate, toDbDate } from '../../common/dates';
+import { fromDbDate, todayInCameroon, toDbDate } from '../../common/dates';
 import { Db, InjectDb, Tx } from '../../common/prisma';
 import { AccountingService, translateAccountingError } from '../accounting/accounting.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -72,6 +74,17 @@ export interface PayslipInputs {
 
 /** Empreinte d'un état des virements (liste triée des bulletins et de leurs coordonnées). */
 const payoutFingerprintOf = (items: string[]) => sha256(items.join('|'));
+
+/** Salaire de base du contrat mensualisé en vigueur aujourd'hui (aucun pour un vacataire). */
+function currentBaseSalary(contracts: EmploymentContract[]): number | null {
+  const today = todayInCameroon();
+  const current = contracts
+    .filter(
+      (c) => fromDbDate(c.startDate) <= today && (!c.endDate || fromDbDate(c.endDate) >= today),
+    )
+    .sort((a, b) => b.startDate.getTime() - a.startDate.getTime())[0];
+  return current && current.type !== 'HOURLY' ? (current.baseSalary ?? null) : null;
+}
 
 interface PayoutView {
   id: string;
@@ -152,7 +165,7 @@ export class PayrollService {
 
   async advances() {
     const rows = await this.db.salaryAdvance.findMany({
-      include: { employee: true, repayments: true },
+      include: { employee: { include: { contracts: true } }, repayments: true },
       orderBy: { createdAt: 'desc' },
     });
     const users = await this.db.user.findMany({
@@ -175,6 +188,12 @@ export class PayrollService {
         amount: a.amount,
         installments: a.installments,
         monthly: advanceInstallment(a.amount, a.installments, 0),
+        // Salaire de base du contrat mensualisé en cours (aucun pour un vacataire).
+        baseSalary: currentBaseSalary(a.employee.contracts),
+        shareAlert: advanceShareTooHigh(
+          advanceInstallment(a.amount, a.installments, 0),
+          currentBaseSalary(a.employee.contracts),
+        ),
         firstMonth: a.firstMonth,
         reason: a.reason,
         status: a.status,
@@ -193,6 +212,12 @@ export class PayrollService {
   async requestAdvance(input: z.infer<typeof advanceCreateSchema>) {
     const file = await this.db.employeeFile.findUnique({ where: { id: input.employeeId } });
     if (!file) throw new NotFoundException('Dossier introuvable');
+    // Pas de première retenue sur une paie déjà soumise ou validée (mois passé ou figé).
+    const run = await this.findRun(input.firstMonth);
+    if (run && run.status !== 'DRAFT')
+      throw new ConflictException(
+        `La paie ${ofPayrollMonth(input.firstMonth)} est déjà ${run.status === 'VALIDATED' ? 'validée' : 'soumise à validation'} : choisissez un mois suivant pour la première retenue`,
+      );
     const advance = await this.db.salaryAdvance.create({
       data: {
         schoolId: currentSchoolId(),
@@ -638,8 +663,8 @@ export class PayrollService {
             schoolId,
             contact: c,
             template: 'payrollSubmitted',
-            subject: `Paie de ${formatPayrollMonth(month)} à valider`,
-            body: `${school.name} : la paie de ${formatPayrollMonth(month)} est prête et attend votre validation dans Ecole.`,
+            subject: `Paie ${ofPayrollMonth(month)} à valider`,
+            body: `${school.name} : la paie ${ofPayrollMonth(month)} est prête et attend votre validation dans Ecole.`,
             payload: { month },
           },
           tx,
@@ -749,8 +774,8 @@ export class PayrollService {
             schoolId,
             contact: c,
             template: 'payrollValidated',
-            subject: `Paie de ${formatPayrollMonth(month)} validée`,
-            body: `${school.name} : la paie de ${formatPayrollMonth(month)} est validée. Bulletins et état des virements sont disponibles dans Ecole.`,
+            subject: `Paie ${ofPayrollMonth(month)} validée`,
+            body: `${school.name} : la paie ${ofPayrollMonth(month)} est validée. Bulletins et état des virements sont disponibles dans Ecole.`,
             payload: { month },
           },
           tx,
@@ -819,8 +844,8 @@ export class PayrollService {
             schoolId,
             contact: c,
             template: 'payrollRejected',
-            subject: `Paie de ${formatPayrollMonth(month)} à revoir`,
-            body: `${school.name} : la direction a renvoyé la paie de ${formatPayrollMonth(month)}. Motif : ${reason}`,
+            subject: `Paie ${ofPayrollMonth(month)} à revoir`,
+            body: `${school.name} : la direction a renvoyé la paie ${ofPayrollMonth(month)}. Motif : ${reason}`,
             payload: { month },
           },
           tx,

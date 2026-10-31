@@ -128,6 +128,14 @@ test('dossier du personnel et fenêtres du module RH', async ({ page }) => {
   await page.getByRole('button', { name: 'Nouvelle demande' }).click();
   await expect(page.getByRole('dialog', { name: 'Demande d’avance sur salaire' })).toBeVisible();
   await expectAccessible(page, '/rh/avances (demande)');
+  // Première retenue : le mois en cours ou un mois à venir, jamais un mois passé.
+  const firstMonth = page
+    .getByRole('dialog', { name: 'Demande d’avance sur salaire' })
+    .getByLabel('Première retenue');
+  await expect(firstMonth.locator('option').first()).toHaveAttribute(
+    'value',
+    new Date(Date.now() + 3_600_000).toISOString().slice(0, 7),
+  );
   await page.goto('/rh/baremes');
   await page.getByRole('button', { name: 'Nouvelle version' }).click();
   await expect(page.getByRole('dialog', { name: 'Nouvelle version du barème' })).toBeVisible();

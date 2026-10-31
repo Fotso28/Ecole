@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import {
   computeSubscriptionInvoice,
+  formatFcfa,
   subscriptionInvoiceState,
   type SubscriptionLine,
   subscriptionPaymentSchema,
@@ -417,7 +418,9 @@ export class BillingService {
       throw new BadRequestException('Facture annulée : aucun règlement possible');
     const current = presentInvoice(invoice);
     if (input.amount > current.due)
-      throw new BadRequestException(`Le règlement dépasse le reste à payer (${current.due} FCFA)`);
+      throw new BadRequestException(
+        `Le règlement dépasse le reste à payer (${formatFcfa(current.due)})`,
+      );
     return runAsSystem(
       'billing-payment',
       () =>
@@ -435,7 +438,7 @@ export class BillingService {
             throw new BadRequestException('Facture annulée : aucun règlement possible');
           if (input.amount > fresh.due)
             throw new BadRequestException(
-              `Le règlement dépasse le reste à payer (${fresh.due} FCFA)`,
+              `Le règlement dépasse le reste à payer (${formatFcfa(fresh.due)})`,
             );
           const payment = await tx.subscriptionPayment.create({
             data: {

@@ -1,6 +1,11 @@
 'use client';
 
-import { formatFcfa, formatPayrollMonth } from '@ecole/shared';
+import {
+  advanceInstallment,
+  advanceShareTooHigh,
+  formatFcfa,
+  formatPayrollMonth,
+} from '@ecole/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Banknote, Check, Plus, X } from 'lucide-react';
 import { useState } from 'react';
@@ -13,13 +18,7 @@ import { Sheet } from '@/components/ui/sheet';
 import { useToast } from '@/components/ui/toast';
 import { api, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import {
-  ADVANCE_STATUS,
-  currentMonth,
-  monthOptions,
-  type AdvanceRow,
-  type EmployeeRow,
-} from '@/lib/hr';
+import { ADVANCE_STATUS, nextMonths, type AdvanceRow, type EmployeeRow } from '@/lib/hr';
 
 function RequestSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const toast = useToast();
@@ -44,7 +43,19 @@ function RequestSheet({ open, onClose }: { open: boolean; onClose: () => void })
       toast(e instanceof Error ? e.message : 'Erreur', 'error');
     },
   });
-  const months = monthOptions().slice(0, 3).reverse();
+  // Première retenue : le mois en cours ou un mois à venir, jamais un mois passé.
+  const months = nextMonths(3);
+  const [employeeId, setEmployeeId] = useState('');
+  const [amount, setAmount] = useState('');
+  const [installments, setInstallments] = useState('1');
+  const employee = employees.data?.find((e) => e.id === employeeId);
+  const baseSalary =
+    employee?.contract && employee.contract.type !== 'HOURLY' ? employee.contract.baseSalary : null;
+  const monthly =
+    Number(amount) > 0 && Number.isSafeInteger(Number(amount))
+      ? advanceInstallment(Number(amount), Number(installments), 0)
+      : 0;
+  const tooHigh = monthly > 0 && advanceShareTooHigh(monthly, baseSalary);
   return (
     <Sheet open={open} onClose={onClose} title="Demande d’avance sur salaire">
       <form
@@ -61,7 +72,14 @@ function RequestSheet({ open, onClose }: { open: boolean; onClose: () => void })
           });
         }}
       >
-        <SelectField label="Bénéficiaire" name="employeeId" required error={errors.employeeId}>
+        <SelectField
+          label="Bénéficiaire"
+          name="employeeId"
+          required
+          error={errors.employeeId}
+          value={employeeId}
+          onChange={(e) => setEmployeeId(e.target.value)}
+        >
           <option value="">Choisir…</option>
           {(employees.data ?? []).map((e) => (
             <option key={e.id} value={e.id}>
@@ -77,16 +95,23 @@ function RequestSheet({ open, onClose }: { open: boolean; onClose: () => void })
           min={1}
           required
           error={errors.amount}
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
         />
         <div className="grid gap-3 sm:grid-cols-2">
-          <SelectField label="Nombre de mensualités" name="installments" defaultValue="1">
+          <SelectField
+            label="Nombre de mensualités"
+            name="installments"
+            value={installments}
+            onChange={(e) => setInstallments(e.target.value)}
+          >
             {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => (
               <option key={n} value={n}>
                 {n}
               </option>
             ))}
           </SelectField>
-          <SelectField label="Première retenue" name="firstMonth" defaultValue={currentMonth()}>
+          <SelectField label="Première retenue" name="firstMonth" defaultValue={months[0]}>
             {months.map((m) => (
               <option key={m} value={m}>
                 {formatPayrollMonth(m)}
@@ -94,6 +119,13 @@ function RequestSheet({ open, onClose }: { open: boolean; onClose: () => void })
             ))}
           </SelectField>
         </div>
+        {tooHigh && baseSalary ? (
+          <p role="alert" className="rounded-[10px] bg-warn-soft p-3 text-sm">
+            <strong>Retenue élevée :</strong> {formatFcfa(monthly)} par mois, soit plus du tiers du
+            salaire de base ({formatFcfa(baseSalary)}). Augmentez le nombre de mensualités ou
+            réduisez le montant ; sinon, la direction l’accordera en connaissance de cause.
+          </p>
+        ) : null}
         <InputField label="Motif" name="reason" required maxLength={300} error={errors.reason} />
         <p className="text-[13px] text-muted">
           Une fois accordée par la direction, l’avance est retenue automatiquement sur les paies
@@ -117,11 +149,16 @@ export default function AdvancesPage() {
     queryKey: ['hr', 'advances'],
     queryFn: () => api<AdvanceRow[]>('/hr/advances'),
   });
+  const [rejecting, setRejecting] = useState<AdvanceRow | null>(null);
   const decide = useMutation({
-    mutationFn: ({ id, approve }: { id: string; approve: boolean }) =>
-      api(`/hr/advances/${id}/${approve ? 'approve' : 'reject'}`, { method: 'POST', body: {} }),
+    mutationFn: ({ id, approve, reason }: { id: string; approve: boolean; reason?: string }) =>
+      api(`/hr/advances/${id}/${approve ? 'approve' : 'reject'}`, {
+        method: 'POST',
+        body: reason ? { reason } : {},
+      }),
     onSuccess: (_, v) => {
       toast(v.approve ? 'Avance accordée' : 'Avance refusée');
+      setRejecting(null);
       void queryClient.invalidateQueries({ queryKey: ['hr'] });
     },
     onError: (e) => toast(e instanceof Error ? e.message : 'Erreur', 'error'),
@@ -166,6 +203,15 @@ export default function AdvancesPage() {
                 <span className="tabular">{formatFcfa(a.monthly)}</span> dès{' '}
                 {formatPayrollMonth(a.firstMonth)}
               </p>
+              {a.shareAlert && a.status === 'REQUESTED' ? (
+                <p className="rounded-[10px] bg-warn-soft px-3 py-2 text-[13px]">
+                  Retenue de {formatFcfa(a.monthly)} par mois : plus du tiers du salaire de base
+                  {a.baseSalary ? ` (${formatFcfa(a.baseSalary)})` : ''}.
+                </p>
+              ) : null}
+              {a.status === 'REJECTED' && a.decisionNote ? (
+                <p className="text-[13px]">Motif du refus : {a.decisionNote}</p>
+              ) : null}
               <p className="text-[13px] text-muted">
                 {a.reason}
                 {a.status !== 'REQUESTED' && a.status !== 'REJECTED'
@@ -197,11 +243,7 @@ export default function AdvancesPage() {
                     <Check className="size-4" aria-hidden />
                     Accorder<span className="sr-only"> l’avance de {a.lastName}</span>
                   </Button>
-                  <Button
-                    size="sm"
-                    variant="danger"
-                    onClick={() => decide.mutate({ id: a.id, approve: false })}
-                  >
+                  <Button size="sm" variant="danger" onClick={() => setRejecting(a)}>
                     <X className="size-4" aria-hidden />
                     Refuser<span className="sr-only"> l’avance de {a.lastName}</span>
                   </Button>
@@ -211,7 +253,31 @@ export default function AdvancesPage() {
           ))}
         </ul>
       )}
-      <RequestSheet open={open} onClose={() => setOpen(false)} />
+      <RequestSheet key={open ? 'ouvert' : 'ferme'} open={open} onClose={() => setOpen(false)} />
+      <Sheet open={!!rejecting} onClose={() => setRejecting(null)} title="Refuser cette avance ?">
+        <form
+          className="flex flex-col gap-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!rejecting) return;
+            decide.mutate({
+              id: rejecting.id,
+              approve: false,
+              reason: String(new FormData(e.currentTarget).get('reason') ?? ''),
+            });
+          }}
+        >
+          <p className="text-sm text-muted">
+            Avance de {rejecting ? formatFcfa(rejecting.amount) : ''} demandée pour{' '}
+            {rejecting?.lastName} {rejecting?.firstName}. Le motif est conservé et communiqué à la
+            comptabilité.
+          </p>
+          <InputField label="Motif du refus" name="reason" required minLength={5} maxLength={300} />
+          <Button type="submit" variant="danger" loading={decide.isPending}>
+            Refuser l’avance
+          </Button>
+        </form>
+      </Sheet>
       <PayoutSheet
         open={!!paying}
         onClose={() => setPaying(null)}

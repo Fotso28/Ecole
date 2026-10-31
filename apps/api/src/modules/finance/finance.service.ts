@@ -328,7 +328,7 @@ export class FinanceService {
     const before = toLineState(line, todayInCameroon());
     if (input.strict && input.amount > before.outstanding)
       throw new ConflictException(
-        `L’avoir dépasse le reste dû sur cette échéance (${before.outstanding} FCFA)`,
+        `L’avoir dépasse le reste dû sur cette échéance (${formatFcfa(before.outstanding)})`,
       );
     const applied = Math.min(Math.max(0, input.amount), before.outstanding);
     if (applied > 0) {

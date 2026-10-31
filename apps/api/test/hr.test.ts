@@ -654,6 +654,63 @@ describe('paie mensuelle', () => {
     expect(slipOf(nov.body, teacherFile).result.advanceDeduction).toBe(25_000);
   });
 
+  it('avances : alerte au-delà du tiers du salaire, refus motivé, pas de retenue sur une paie figée', async () => {
+    const ask = (body: Record<string, unknown>) =>
+      http()
+        .post('/hr/advances')
+        .set(s.compta.auth)
+        .send({
+          employeeId: teacherFile,
+          installments: 3,
+          firstMonth: '2026-11',
+          reason: 'Travaux',
+          ...body,
+        });
+    // 900 000 FCFA en 3 mensualités de 300 000 sur un salaire de 200 000 : alerte.
+    const big = await ask({ amount: 900_000 }).expect(201);
+    const small = await ask({ amount: 90_000 }).expect(201);
+    const listed = (await http().get('/hr/advances').set(s.direction.auth).expect(200)).body as {
+      id: string;
+      shareAlert: boolean;
+      baseSalary: number | null;
+    }[];
+    expect(listed.find((a) => a.id === big.body.id)).toMatchObject({
+      shareAlert: true,
+      baseSalary: 200_000,
+    });
+    expect(listed.find((a) => a.id === small.body.id)?.shareAlert).toBe(false);
+
+    // Refus : motif obligatoire, conservé et journalisé.
+    const noReason = await http()
+      .post(`/hr/advances/${big.body.id}/reject`)
+      .set(s.direction.auth)
+      .send({})
+      .expect(400);
+    expect(noReason.body.message).toBe('Motif : Champ obligatoire');
+    await http()
+      .post(`/hr/advances/${big.body.id}/reject`)
+      .set(s.direction.auth)
+      .send({ reason: 'Retenue trop lourde pour le salaire' })
+      .expect(201);
+    expect(
+      await prisma.salaryAdvance.findUniqueOrThrow({ where: { id: big.body.id } }),
+    ).toMatchObject({ status: 'REJECTED', decisionNote: 'Retenue trop lourde pour le salaire' });
+    expect(
+      (await prisma.auditLog.findFirstOrThrow({ where: { action: 'hr.advance_rejected' } })).reason,
+    ).toBe('Retenue trop lourde pour le salaire');
+
+    // Paie d'octobre validée : la première retenue ne peut plus y tomber.
+    await http().post('/hr/payroll/2026-10/compute').set(s.compta.auth).expect(201);
+    await http().post('/hr/payroll/2026-10/submit').set(s.compta.auth).expect(201);
+    const submitted = await ask({ amount: 30_000, firstMonth: '2026-10' }).expect(409);
+    expect(submitted.body.message).toBe(
+      'La paie d’octobre 2026 est déjà soumise à validation : choisissez un mois suivant pour la première retenue',
+    );
+    await http().post('/hr/payroll/2026-10/validate').set(s.direction.auth).expect(201);
+    const validated = await ask({ amount: 30_000, firstMonth: '2026-10' }).expect(409);
+    expect(validated.body.message).toMatch(/^La paie d’octobre 2026 est déjà validée/);
+  });
+
   it('refuse que la même personne prépare et valide', async () => {
     await http().post('/hr/payroll/2026-10/compute').set(s.direction.auth).expect(201);
     await http().post('/hr/payroll/2026-10/submit').set(s.direction.auth).expect(201);

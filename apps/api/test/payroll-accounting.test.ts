@@ -111,7 +111,7 @@ describe('écritures de paie', () => {
     const { entry, by } = await lines('PAYROLL', run.id);
     expect(entry.journalCode).toBe('OD');
     expect(entry.date.toISOString().slice(0, 10)).toBe('2026-10-31');
-    expect(entry.label).toBe('Paie de octobre 2026 (2 bulletins)');
+    expect(entry.label).toBe('Paie d’octobre 2026 (2 bulletins)');
     expect(entry.total).toBe(summary.employerCost);
     expect((by.get('661') ?? 0) + (by.get('663') ?? 0)).toBe(summary.gross);
     expect(by.get('664')).toBe(summary.employer.total);

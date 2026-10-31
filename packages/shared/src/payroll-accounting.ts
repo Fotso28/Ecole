@@ -15,7 +15,7 @@ import {
   type TuitionPosting,
 } from './accounting';
 import { PAYMENT_METHODS, type PaymentMethod } from './finance';
-import { formatPayrollMonth } from './payroll';
+import { ofPayrollMonth } from './payroll';
 import { isoDate } from './schemas';
 
 export type AutomaticPosting = TuitionPosting;
@@ -155,7 +155,7 @@ export function payrollPosting(month: string, slips: readonly PayslipAccountingI
   const total = assertBalancedEntry(lines);
   return {
     journal: 'OD' as const,
-    label: `Paie de ${formatPayrollMonth(month)} (${slips.length} bulletin${slips.length > 1 ? 's' : ''})`,
+    label: `Paie ${ofPayrollMonth(month)} (${slips.length} bulletin${slips.length > 1 ? 's' : ''})`,
     lines,
     total,
   };

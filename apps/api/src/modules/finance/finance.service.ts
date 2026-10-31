@@ -28,7 +28,14 @@ import { AuditService } from '../../common/audit.service';
 import { currentContext, currentSchoolId, runAsSystem, staffContext } from '../../common/context';
 import { CountersService } from '../../common/counters.service';
 import { verificationCode } from '../../common/crypto';
-import { addDays, fromDbDate, todayInCameroon, toDbDate } from '../../common/dates';
+import {
+  addDays,
+  doualaDateTime,
+  doualaDayStart,
+  fromDbDate,
+  todayInCameroon,
+  toDbDate,
+} from '../../common/dates';
 import { Db, InjectDb, Tx } from '../../common/prisma';
 import { AccountingService, translateAccountingError } from '../accounting/accounting.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -466,6 +473,8 @@ export class FinanceService {
       reversed: p.reversedAt !== null,
       reversalReason: p.reversalReason,
       operatorReference: p.operatorReference,
+      bankName: p.bankName,
+      bankReference: p.bankReference,
       payerPhone: p.payerPhone,
       failureReason: p.failureReason,
       receivedById: p.receivedById,
@@ -1104,9 +1113,10 @@ export class FinanceService {
       where: {
         method: filters.method,
         status: filters.status,
+        // Jours calendaires de Douala, comme à l'écran et sur les reçus.
         createdAt: {
-          gte: filters.from ? toDbDate(filters.from) : undefined,
-          lt: filters.to ? toDbDate(addDays(filters.to, 1)) : undefined,
+          gte: filters.from ? doualaDayStart(filters.from) : undefined,
+          lt: filters.to ? doualaDayStart(addDays(filters.to, 1)) : undefined,
         },
       },
       // Export comptable : toute la période, sans troncature silencieuse.
@@ -1139,9 +1149,10 @@ export class FinanceService {
     const where: Prisma.PaymentWhereInput = {
       method: filters.method,
       status: filters.status,
+      // Jours calendaires de Douala, comme à l'écran et sur les reçus.
       createdAt: {
-        gte: filters.from ? toDbDate(filters.from) : undefined,
-        lt: filters.to ? toDbDate(addDays(filters.to, 1)) : undefined,
+        gte: filters.from ? doualaDayStart(filters.from) : undefined,
+        lt: filters.to ? doualaDayStart(addDays(filters.to, 1)) : undefined,
       },
     };
     // Total encaissé sur toute la période (pas seulement la page), calculé à la première page.
@@ -1177,20 +1188,25 @@ export class FinanceService {
     };
   }
 
-  async exportCsv(from: string, to: string): Promise<string> {
-    const rows = await this.journal({ from, to, status: 'SUCCESS' });
-    const header = 'date;recu;matricule;eleve;moyen;montant;annule;reference';
+  /**
+   * Export CSV du journal : mêmes filtres que l'écran (période et moyen), heure de Douala,
+   * référence de l'opérateur ou n° de bordereau bancaire.
+   */
+  async exportCsv(from: string, to: string, method?: PaymentMethod): Promise<string> {
+    const rows = await this.journal({ from, to, method, status: 'SUCCESS' });
+    const header = 'date;recu;matricule;eleve;moyen;montant;annule;reference;banque';
     const esc = (v: string) => (/[;"\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
     const lines = rows.map((r) =>
       [
-        (r.confirmedAt ?? r.createdAt).toISOString(),
+        doualaDateTime(r.confirmedAt ?? r.createdAt),
         r.receipt?.number ?? '',
         r.student?.matricule ?? '',
         r.student ? `${r.student.lastName} ${r.student.firstName}` : '',
         r.methodLabel,
         String(r.amount),
         r.reversed ? 'oui' : 'non',
-        r.operatorReference ?? '',
+        r.operatorReference ?? r.bankReference ?? '',
+        r.bankName ?? '',
       ]
         .map(esc)
         .join(';'),

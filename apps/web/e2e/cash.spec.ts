@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { readFileSync } from 'node:fs';
 import { expectNoHorizontalOverflow, loginStaff, navigate } from './helpers';
 
 test('encaissement en espèces, reçu, annulation et clôture de caisse', async ({ page }, info) => {
@@ -34,6 +35,19 @@ test('encaissement en espèces, reçu, annulation et clôture de caisse', async 
     page.locator('li').filter({ hasText: student }).filter({ hasText: 'Encaissé' }).first();
   await expect(row()).toBeVisible();
   await expect(row().getByRole('button', { name: 'Annuler' })).toHaveCount(0);
+  // Export CSV avec le filtre « Moyen » : espèces seulement, heure de Douala.
+  await page.getByLabel('Moyen').selectOption('CASH');
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Exporter (CSV)' }).click();
+  const file = await download;
+  expect(file.suggestedFilename()).toMatch(/^paiements-.*-cash\.csv$/);
+  const rows = readFileSync(await file.path(), 'utf8')
+    .trim()
+    .split('\n')
+    .slice(1);
+  expect(rows.length).toBeGreaterThan(0);
+  expect(rows.every((r) => r.includes(';Espèces;'))).toBe(true);
+  expect(rows[0]).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2};/);
   await page.evaluate(() => fetch('/api/auth/logout', { method: 'POST' }));
   await loginStaff(page, 'direction@demo.cm');
   await page.goto('/caisse/journal');

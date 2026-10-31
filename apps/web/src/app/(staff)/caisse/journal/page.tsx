@@ -68,9 +68,10 @@ export default function JournalPage() {
           <Button
             variant="secondary"
             onClick={() =>
+              // Mêmes filtres que la liste affichée (période et moyen de paiement).
               downloadFile(
-                `/finance/payments/export.csv?from=${from}&to=${to}`,
-                `paiements-${from}-${to}.csv`,
+                `/finance/payments/export.csv?${qs}`,
+                `paiements-${from}-${to}${method ? `-${method.toLowerCase()}` : ''}.csv`,
               ).catch((e) => toast(e instanceof Error ? e.message : 'Erreur', 'error'))
             }
           >

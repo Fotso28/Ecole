@@ -67,7 +67,11 @@ const unpaidSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(200).default(50),
 });
-const exportSchema = z.object({ from: isoDate, to: isoDate });
+const exportSchema = z.object({
+  from: isoDate,
+  to: isoDate,
+  method: z.enum(['CASH', 'BANK', 'MTN_MOMO', 'ORANGE_MONEY']).optional(),
+});
 const webhookSchema = z
   .object({
     /** Référence de l'opérateur ; à défaut, notre identifiant de paiement (externalId). */
@@ -154,7 +158,7 @@ export class FinanceController {
     @Query(new ZodPipe(exportSchema)) q: z.infer<typeof exportSchema>,
     @Res() res: Response,
   ) {
-    const csv = await this.finance.exportCsv(q.from, q.to);
+    const csv = await this.finance.exportCsv(q.from, q.to, q.method);
     res.setHeader('content-type', 'text/csv; charset=utf-8');
     res.setHeader('content-disposition', `attachment; filename="paiements-${q.from}-${q.to}.csv"`);
     res.send(String.fromCharCode(0xfeff) + csv);

@@ -9,9 +9,9 @@ import {
   type IncidentType,
   type SanctionType,
 } from '@ecole/shared';
-import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Pencil, Plus, Trash2 } from 'lucide-react';
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -45,6 +45,8 @@ interface IncidentRow {
   student: { id: string; firstName: string; lastName: string; matricule: string } | null;
   class: { id: string; name: string } | null;
   reportedBy: string | null;
+  /** Correction et suppression : auteur du signalement, vie scolaire ou direction. */
+  canEdit: boolean;
 }
 
 interface Stats {
@@ -96,35 +98,47 @@ function sanctionTone(s: SanctionType) {
   return 'danger' as const;
 }
 
-function NewIncidentSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+/** Signalement d'un incident, ou correction d'un incident existant (`incident`). */
+function IncidentSheet({
+  open,
+  onClose,
+  incident,
+}: {
+  open: boolean;
+  onClose: () => void;
+  incident?: IncidentRow | null;
+}) {
   const toast = useToast();
   const queryClient = useQueryClient();
-  const empty = {
-    date: todayIso(),
-    type: 'INDISCIPLINE' as IncidentType,
-    description: '',
-    sanctionType: 'NONE' as SanctionType,
-    sanction: '',
-  };
-  const [student, setStudent] = useState<PickedStudent | null>(null);
-  const [form, setForm] = useState(empty);
+  const initial = () => ({
+    date: incident?.date ?? todayIso(),
+    type: incident?.type ?? ('INDISCIPLINE' as IncidentType),
+    description: incident?.description ?? '',
+    sanctionType: incident?.sanctionType ?? ('NONE' as SanctionType),
+    sanction: incident?.sanction ?? '',
+  });
+  const initialStudent = (): PickedStudent | null =>
+    incident?.student ? { ...incident.student, className: incident.class?.name ?? null } : null;
+  const [student, setStudent] = useState<PickedStudent | null>(initialStudent);
+  const [form, setForm] = useState(initial);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const reset = () => {
-    setStudent(null);
-    setForm({ ...empty, date: todayIso() });
+  // Chaque ouverture repart d'un formulaire neuf (ou de l'incident à corriger).
+  useEffect(() => {
+    if (!open) return;
+    setStudent(initialStudent());
+    setForm(initial());
     setErrors({});
-  };
-  const create = useMutation({
+  }, [open, incident?.id]);
+  const save = useMutation({
     mutationFn: () =>
-      api('/discipline/incidents', {
-        method: 'POST',
+      api(incident ? `/discipline/incidents/${incident.id}` : '/discipline/incidents', {
+        method: incident ? 'PATCH' : 'POST',
         body: { ...form, studentId: student?.id, sanction: form.sanction || undefined },
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['incidents'] });
       void queryClient.invalidateQueries({ queryKey: ['incident-stats'] });
-      toast('Incident enregistré au registre');
-      reset();
+      toast(incident ? 'Incident corrigé' : 'Incident enregistré au registre');
       onClose();
     },
     onError: (e) => {
@@ -133,19 +147,20 @@ function NewIncidentSheet({ open, onClose }: { open: boolean; onClose: () => voi
       toast(e instanceof Error ? e.message : 'Erreur', 'error');
     },
   });
+  const future = form.date > todayIso();
   return (
     <Sheet
       open={open}
       onClose={onClose}
-      title="Signaler un incident"
+      title={incident ? 'Corriger l’incident' : 'Signaler un incident'}
       footer={
         <Button
           block
-          onClick={() => create.mutate()}
-          loading={create.isPending}
-          disabled={!student || form.description.trim().length < 3}
+          onClick={() => save.mutate()}
+          loading={save.isPending}
+          disabled={!student || form.description.trim().length < 3 || !form.date || future}
         >
-          Enregistrer l’incident
+          {incident ? 'Enregistrer la correction' : 'Enregistrer l’incident'}
         </Button>
       }
     >
@@ -157,8 +172,11 @@ function NewIncidentSheet({ open, onClose }: { open: boolean; onClose: () => voi
             type="date"
             value={form.date}
             max={todayIso()}
-            onChange={(e) => setForm({ ...form, date: e.target.value })}
-            error={errors.date}
+            onChange={(e) => {
+              setForm({ ...form, date: e.target.value });
+              setErrors(({ date: _date, ...rest }) => rest);
+            }}
+            error={future ? 'La date ne peut pas être dans le futur' : errors.date}
           />
           <SelectField
             label="Type d’incident"
@@ -206,6 +224,66 @@ function NewIncidentSheet({ open, onClose }: { open: boolean; onClose: () => voi
   );
 }
 
+/** Suppression d'un incident saisi par erreur, après confirmation. */
+function DeleteIncidentSheet({
+  incident,
+  onClose,
+}: {
+  incident: IncidentRow | null;
+  onClose: () => void;
+}) {
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const remove = useMutation({
+    mutationFn: (id: string) => api(`/discipline/incidents/${id}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['incidents'] });
+      void queryClient.invalidateQueries({ queryKey: ['incident-stats'] });
+      toast('Incident supprimé du registre');
+      onClose();
+    },
+    onError: (e) => toast(e instanceof Error ? e.message : 'Erreur', 'error'),
+  });
+  return (
+    <Sheet
+      open={!!incident}
+      onClose={onClose}
+      title="Supprimer l’incident ?"
+      footer={
+        <div className="grid grid-cols-2 gap-2">
+          <Button variant="secondary" onClick={onClose}>
+            Annuler
+          </Button>
+          <Button
+            variant="danger"
+            loading={remove.isPending}
+            onClick={() => incident && remove.mutate(incident.id)}
+          >
+            Supprimer
+          </Button>
+        </div>
+      }
+    >
+      {incident ? (
+        <div className="flex flex-col gap-2 text-sm">
+          <p>
+            <strong>
+              {incident.student?.lastName} {incident.student?.firstName}
+            </strong>{' '}
+            · {formatShortDate(incident.date)} · {incident.typeLabel}
+          </p>
+          <p className="rounded-[10px] bg-paper p-3 [overflow-wrap:anywhere]">
+            {incident.description}
+          </p>
+          <p className="text-muted">
+            L’incident disparaît du registre et des statistiques. Sa trace reste au journal d’audit.
+          </p>
+        </div>
+      ) : null}
+    </Sheet>
+  );
+}
+
 export default function IncidentsPage() {
   const { can } = useAuth();
   const classes = useClasses();
@@ -218,6 +296,8 @@ export default function IncidentsPage() {
   });
   const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<IncidentRow | null>(null);
+  const [deleting, setDeleting] = useState<IncidentRow | null>(null);
   const setFilter = (k: keyof typeof filters, v: string) => {
     setFilters((f) => ({ ...f, [k]: v }));
     setPage(1);
@@ -287,6 +367,7 @@ export default function IncidentsPage() {
           label="Type"
           value={filters.type}
           onChange={(e) => setFilter('type', e.target.value)}
+          containerClassName="col-span-2 lg:col-span-1"
         >
           <option value="">Tous les types</option>
           {INCIDENT_TYPES.map((t) => (
@@ -299,6 +380,7 @@ export default function IncidentsPage() {
           label="Sanction"
           value={filters.sanctionType}
           onChange={(e) => setFilter('sanctionType', e.target.value)}
+          containerClassName="col-span-2 lg:col-span-1"
         >
           <option value="">Toutes les sanctions</option>
           {SANCTION_TYPES.map((t) => (
@@ -313,7 +395,7 @@ export default function IncidentsPage() {
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <Stat label="Incidents" value={stats.data.total} />
           <Stat label="Élèves concernés" value={stats.data.students} />
-          <Stat label="Sanctionnés" value={stats.data.sanctioned} />
+          <Stat label="Élèves sanctionnés" value={stats.data.sanctioned} />
           <Stat
             label="Type le plus fréquent"
             value={topType ? (INCIDENT_TYPE_LABELS[topType.type] ?? topType.type) : '—'}
@@ -323,7 +405,7 @@ export default function IncidentsPage() {
       ) : null}
 
       {stats.data && stats.data.total > 0 ? (
-        <div className="grid gap-4 lg:grid-cols-3">
+        <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
           <Card>
             <CardHeader title="Par type" />
             <Bars
@@ -345,7 +427,7 @@ export default function IncidentsPage() {
             />
           </Card>
           <Card>
-            <CardHeader title="Par mois" subtitle="Élèves signalés plusieurs fois ci-dessous." />
+            <CardHeader title="Par mois" />
             <Bars
               rows={stats.data.byMonth.map((r) => ({
                 key: r.month,
@@ -353,8 +435,13 @@ export default function IncidentsPage() {
                 count: r.count,
               }))}
             />
-            {stats.data.repeatStudents.length > 0 ? (
-              <ul className="mt-4 flex flex-col gap-1 border-t border-line pt-3 text-sm">
+          </Card>
+          <Card>
+            <CardHeader title="Élèves signalés plusieurs fois" />
+            {stats.data.repeatStudents.length === 0 ? (
+              <p className="text-sm text-muted">Aucun élève signalé plus d’une fois.</p>
+            ) : (
+              <ul className="flex flex-col gap-1 text-sm">
                 {stats.data.repeatStudents.map((r) => (
                   <li key={r.studentId} className="flex justify-between gap-2">
                     {r.student ? (
@@ -368,12 +455,12 @@ export default function IncidentsPage() {
                       <span>—</span>
                     )}
                     <span className="text-muted tabular">
-                      {r.class?.name ?? ''} · {r.count}
+                      {r.class?.name ?? ''} · {plural(r.count, 'incident', 'incidents')}
                     </span>
                   </li>
                 ))}
               </ul>
-            ) : null}
+            )}
           </Card>
         </div>
       ) : null}
@@ -415,6 +502,18 @@ export default function IncidentsPage() {
                   <Badge tone={sanctionTone(i.sanctionType)}>{i.sanctionLabel}</Badge>
                   {i.sanction ? <span className="text-muted">{i.sanction}</span> : null}
                 </div>
+                {i.canEdit ? (
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button variant="secondary" size="sm" onClick={() => setEditing(i)}>
+                      <Pencil className="size-4" aria-hidden />
+                      Corriger
+                    </Button>
+                    <Button variant="secondary" size="sm" onClick={() => setDeleting(i)}>
+                      <Trash2 className="size-4" aria-hidden />
+                      Supprimer
+                    </Button>
+                  </div>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -429,6 +528,9 @@ export default function IncidentsPage() {
                   <th className="px-3 py-3 font-semibold">Description</th>
                   <th className="px-3 py-3 font-semibold">Sanction</th>
                   <th className="px-4 py-3 font-semibold">Signalé par</th>
+                  <th className="px-4 py-3 font-semibold">
+                    <span className="sr-only">Actions</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -471,6 +573,28 @@ export default function IncidentsPage() {
                       </div>
                     </td>
                     <td className="px-4 py-2.5 text-muted">{i.reportedBy ?? '—'}</td>
+                    <td className="px-4 py-1.5">
+                      {i.canEdit ? (
+                        <div className="flex justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label={`Corriger l’incident de ${i.student?.lastName ?? ''} ${i.student?.firstName ?? ''} du ${formatShortDate(i.date)}`}
+                            onClick={() => setEditing(i)}
+                          >
+                            <Pencil className="size-4" aria-hidden />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label={`Supprimer l’incident de ${i.student?.lastName ?? ''} ${i.student?.firstName ?? ''} du ${formatShortDate(i.date)}`}
+                            onClick={() => setDeleting(i)}
+                          >
+                            <Trash2 className="size-4" aria-hidden />
+                          </Button>
+                        </div>
+                      ) : null}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -503,7 +627,9 @@ export default function IncidentsPage() {
           </nav>
         </>
       )}
-      <NewIncidentSheet open={creating} onClose={() => setCreating(false)} />
+      <IncidentSheet open={creating} onClose={() => setCreating(false)} />
+      <IncidentSheet open={!!editing} incident={editing} onClose={() => setEditing(null)} />
+      <DeleteIncidentSheet incident={deleting} onClose={() => setDeleting(null)} />
     </>
   );
 }

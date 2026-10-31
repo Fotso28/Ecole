@@ -1,5 +1,6 @@
 import { Controller, Get, Injectable, Module, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import type { Permission } from '@ecole/shared';
 import type { Response } from 'express';
 import { AuditService } from '../../common/audit.service';
 import { currentSchoolId, staffContext } from '../../common/context';
@@ -12,25 +13,45 @@ import { FinanceService } from '../finance/finance.service';
 import { indicatorsPdf, indicatorsWorkbook, type IndicatorsExport } from './exports';
 import { ResultsService } from './results.service';
 
-const ACTION_LABELS: Record<string, string> = {
-  'finance.payment_received': 'a encaissé un paiement',
-  'finance.payment_reversed': 'a annulé un paiement',
-  'finance.mobile_money_requested': 'a lancé une demande Mobile Money',
-  'grades.submitted': 'a soumis une grille de notes',
-  'grades.validated': 'a validé une grille de notes',
-  'grades.updated': 'a saisi des notes',
-  'attendance.submitted': 'a fait l’appel',
-  'students.created': 'a inscrit un élève',
-  'students.updated': 'a modifié une fiche élève',
-  'enrollments.class_changed': 'a changé un élève de classe',
-  'enrollments.transferred': 'a enregistré le transfert d’un élève',
-  'enrollments.left': 'a enregistré la sortie d’un élève',
-  'enrollments.reinstated': 'a réintégré un élève',
-  'reportcards.published': 'a publié des bulletins',
-  'reportcards.generated': 'a préparé des bulletins',
-  'finance.cash_closed': 'a clôturé sa caisse',
-  'academic.subject_updated': 'a modifié une matière de classe',
+/** Actions montrées dans « Activité récente », et la permission nécessaire pour les voir. */
+const ACTIVITY: Record<string, { label: string; permission: Permission }> = {
+  'finance.payment_received': { label: 'a encaissé un paiement', permission: 'finance.read' },
+  'finance.payment_reversed': { label: 'a annulé un paiement', permission: 'finance.read' },
+  'finance.mobile_money_requested': {
+    label: 'a lancé une demande Mobile Money',
+    permission: 'finance.read',
+  },
+  'finance.cash_closed': { label: 'a clôturé sa caisse', permission: 'finance.read' },
+  'grades.submitted': { label: 'a soumis une grille de notes', permission: 'grades.read' },
+  'grades.validated': { label: 'a validé une grille de notes', permission: 'grades.read' },
+  'grades.updated': { label: 'a saisi des notes', permission: 'grades.read' },
+  'attendance.submitted': { label: 'a fait l’appel', permission: 'attendance.read' },
+  'students.created': { label: 'a inscrit un élève', permission: 'students.read' },
+  'students.updated': { label: 'a modifié une fiche élève', permission: 'students.read' },
+  'enrollments.class_changed': {
+    label: 'a changé un élève de classe',
+    permission: 'students.read',
+  },
+  'enrollments.transferred': {
+    label: 'a enregistré le transfert d’un élève',
+    permission: 'students.read',
+  },
+  'enrollments.left': { label: 'a enregistré la sortie d’un élève', permission: 'students.read' },
+  'enrollments.reinstated': { label: 'a réintégré un élève', permission: 'students.read' },
+  'reportcards.published': { label: 'a publié des bulletins', permission: 'reportcards.read' },
+  'reportcards.generated': { label: 'a préparé des bulletins', permission: 'reportcards.read' },
+  'academic.subject_updated': {
+    label: 'a modifié une matière de classe',
+    permission: 'academic.read',
+  },
 };
+
+/** Actions que la personne a le droit de voir (le surveillant ne voit pas la caisse). */
+export function visibleActivity(permissions: ReadonlySet<Permission>): string[] {
+  return Object.entries(ACTIVITY)
+    .filter(([, a]) => permissions.has(a.permission))
+    .map(([action]) => action);
+}
 
 @Injectable()
 export class DashboardService {
@@ -47,6 +68,8 @@ export class DashboardService {
     const weekday = (new Date(`${today}T00:00:00Z`).getUTCDay() + 6) % 7;
     const monday = addDays(today, -weekday);
     const canFinance = ctx.permissions.has('finance.read');
+    const can = (p: Permission) => ctx.permissions.has(p);
+    const none = Promise.resolve(0);
 
     const [
       byGender,
@@ -80,20 +103,29 @@ export class DashboardService {
         },
         select: { studentId: true, justification: { select: { status: true } } },
       }),
-      this.db.justification.count({ where: { status: 'PENDING' } }),
+      // Tâches : seulement celles que la personne peut traiter.
+      can('attendance.justify')
+        ? this.db.justification.count({ where: { status: 'PENDING' } })
+        : none,
       canFinance
         ? this.db.payment.count({
             where: { status: 'PENDING', createdAt: { lt: new Date(Date.now() - 2 * 3600_000) } },
           })
-        : Promise.resolve(0),
-      canFinance ? this.db.cashSession.count({ where: { status: 'CLOSED' } }) : Promise.resolve(0),
-      this.db.evaluation.groupBy({
-        by: ['classSubjectId', 'sequenceId'],
-        where: { status: 'SUBMITTED' },
-      }),
-      this.db.reportCard.groupBy({ by: ['classId', 'termId'], where: { status: 'DRAFT' } }),
+        : none,
+      can('finance.cash.approve')
+        ? this.db.cashSession.count({ where: { status: 'CLOSED' } })
+        : none,
+      can('grades.validate')
+        ? this.db.evaluation.groupBy({
+            by: ['classSubjectId', 'sequenceId'],
+            where: { status: 'SUBMITTED' },
+          })
+        : Promise.resolve([]),
+      can('reportcards.publish')
+        ? this.db.reportCard.groupBy({ by: ['classId', 'termId'], where: { status: 'DRAFT' } })
+        : Promise.resolve([]),
       this.db.auditLog.findMany({
-        where: { schoolId: ctx.schoolId, action: { in: Object.keys(ACTION_LABELS) } },
+        where: { schoolId: ctx.schoolId, action: { in: visibleActivity(ctx.permissions) } },
         orderBy: { createdAt: 'desc' },
         take: 8,
       }),
@@ -152,7 +184,7 @@ export class DashboardService {
           id: a.id,
           at: a.createdAt,
           actor: actor ? `${actor.lastName} ${actor.firstName.charAt(0)}.` : 'Système',
-          label: ACTION_LABELS[a.action] ?? a.action,
+          label: ACTIVITY[a.action]?.label ?? a.action,
           action: a.action,
         };
       }),

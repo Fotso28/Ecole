@@ -269,7 +269,12 @@ function WeeklyChart({ weeks }: { weeks: Weekly }) {
 export default function DashboardPage() {
   const { me, can } = useAuth();
   const toast = useToast();
-  const q = useQuery({ queryKey: ['dashboard'], queryFn: () => api<Dashboard>('/dashboard') });
+  // Compteurs à jour à chaque retour sur l'accueil (après avoir traité un justificatif…).
+  const q = useQuery({
+    queryKey: ['dashboard'],
+    queryFn: () => api<Dashboard>('/dashboard'),
+    refetchOnMount: 'always',
+  });
   const fail = (e: unknown) => toast(e instanceof Error ? e.message : 'Erreur', 'error');
   if (q.isPending) return <LoadingBlock />;
   if (q.isError) return <ErrorBlock error={q.error} onRetry={() => q.refetch()} />;
@@ -277,31 +282,34 @@ export default function DashboardPage() {
   const todos = [
     {
       n: d.todo.gradeSheetsToValidate,
-      label: 'grilles de notes à valider',
+      label: ['grille de notes à valider', 'grilles de notes à valider'],
       href: '/notes',
       icon: FileText,
     },
     {
       n: d.todo.reportCardBatchesToPublish,
-      label: 'lots de bulletins à publier',
+      label: ['lot de bulletins à publier', 'lots de bulletins à publier'],
       href: '/bulletins',
       icon: FileText,
     },
     {
       n: d.todo.pendingJustifications,
-      label: 'justificatifs d’absence',
+      label: ['justificatif d’absence à traiter', 'justificatifs d’absence à traiter'],
       href: '/presences/justificatifs',
       icon: ShieldCheck,
     },
     {
       n: d.todo.pendingMobileMoney,
-      label: 'paiements Mobile Money en attente depuis plus de 2 h',
+      label: [
+        'paiement Mobile Money en attente depuis plus de 2 h',
+        'paiements Mobile Money en attente depuis plus de 2 h',
+      ],
       href: '/caisse/journal',
       icon: Receipt,
     },
     {
       n: d.todo.cashSessionsToApprove,
-      label: 'clôtures de caisse à approuver',
+      label: ['clôture de caisse à approuver', 'clôtures de caisse à approuver'],
       href: '/caisse',
       icon: Wallet,
     },
@@ -348,7 +356,7 @@ export default function DashboardPage() {
         <Stat
           label="Effectif"
           value={d.enrollment.total.toLocaleString('fr-FR')}
-          hint={`${d.enrollment.girls} filles · ${d.enrollment.boys} garçons`}
+          hint={`${plural(d.enrollment.girls, 'fille', 'filles')} · ${plural(d.enrollment.boys, 'garçon', 'garçons')}`}
         />
         {d.finance ? (
           <>
@@ -381,13 +389,13 @@ export default function DashboardPage() {
           ) : (
             <ul className="flex flex-col">
               {todos.map((t) => (
-                <li key={t.href + t.label} className="border-t border-line first:border-t-0">
+                <li key={t.href + t.label[1]} className="border-t border-line first:border-t-0">
                   <Link href={t.href} className="flex min-h-14 items-center gap-3 py-2">
                     <span className="flex size-9 shrink-0 items-center justify-center rounded-[9px] bg-primary-soft text-primary">
                       <t.icon className="size-4" aria-hidden />
                     </span>
                     <span className="flex-1 text-[15px] lg:text-sm">
-                      <strong className="tabular">{t.n}</strong> {t.label}
+                      <strong className="tabular">{t.n}</strong> {t.n > 1 ? t.label[1] : t.label[0]}
                     </span>
                     <ChevronRight className="size-4 text-muted" aria-hidden />
                   </Link>

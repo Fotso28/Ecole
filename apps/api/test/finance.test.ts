@@ -682,6 +682,15 @@ describe('pilotage', () => {
     const dash = await http().get('/dashboard').set(s.direction.auth).expect(200);
     expect(dash.body.finance.weekly.at(-1).amount).toBe(105000);
     expect(dash.body.enrollment).toMatchObject({ total: 2, girls: 2 });
+    // Activité récente : la caisse n'apparaît qu'à qui a le droit de voir les finances.
+    const actions = (body: { activity: { action: string }[] }) =>
+      body.activity.map((a) => a.action);
+    expect(actions(dash.body)).toContain('finance.payment_received');
+    const supervisor = await http().get('/dashboard').set(s.surveillant.auth).expect(200);
+    expect(actions(supervisor.body)).toContain('students.created');
+    expect(actions(supervisor.body).filter((a) => a.startsWith('finance.'))).toEqual([]);
+    expect(supervisor.body.finance).toBeNull();
+    expect(supervisor.body.todo).toMatchObject({ cashSessionsToApprove: 0, pendingMobileMoney: 0 });
     const csv = await http()
       .get(`/finance/payments/export.csv?from=${addDays(today(), -1)}&to=${addDays(today(), 1)}`)
       .set(s.compta.auth)

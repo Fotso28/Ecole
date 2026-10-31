@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { hasPermission } from './permissions';
 import { YEAR_END_DECISIONS, type YearEndDecision } from './results';
 import {
+  cameroonToday,
   documentCounterKey,
   documentTemplateSchema,
   formatDocumentNumber,
+  incidentCreateSchema,
   incidentFilterSchema,
   reenrollmentSchema,
   suggestPromotionClass,
@@ -132,6 +134,25 @@ describe('reenrollmentSchema', () => {
   });
 });
 
+describe('incidentCreateSchema', () => {
+  const base = { studentId: 's1', description: 'Bavardages en classe' };
+  it('accepte la date du jour et refuse une date future', () => {
+    expect(incidentCreateSchema.safeParse({ ...base, date: cameroonToday() }).success).toBe(true);
+    expect(incidentCreateSchema.safeParse({ ...base, date: '2026-01-05' }).success).toBe(true);
+    const tomorrow = new Date(Date.now() + 25 * 3_600_000).toISOString().slice(0, 10);
+    const res = incidentCreateSchema.safeParse({ ...base, date: tomorrow });
+    expect(res.success).toBe(false);
+    expect(res.error?.issues[0]).toMatchObject({
+      path: ['date'],
+      message: 'La date ne peut pas être dans le futur',
+    });
+  });
+  it('compte la journée à l’heure du Cameroun (UTC+1)', () => {
+    expect(cameroonToday(new Date('2026-10-31T22:59:59Z'))).toBe('2026-10-31');
+    expect(cameroonToday(new Date('2026-10-31T23:00:00Z'))).toBe('2026-11-01');
+  });
+});
+
 describe('summarizeIncidents', () => {
   it('compte par type, sanction et mois, et repère les récidives', () => {
     const stats = summarizeIncidents([
@@ -143,7 +164,9 @@ describe('summarizeIncidents', () => {
     ]);
     expect(stats.total).toBe(5);
     expect(stats.students).toBe(3);
-    expect(stats.sanctioned).toBe(3);
+    // Élèves sanctionnés (a deux fois, b une fois), jamais plus que les élèves concernés.
+    expect(stats.sanctioned).toBe(2);
+    expect(stats.sanctioned).toBeLessThanOrEqual(stats.students);
     expect(stats.byType).toEqual([
       { type: 'VIOLENCE', count: 3 },
       { type: 'FRAUD', count: 1 },

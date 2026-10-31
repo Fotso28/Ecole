@@ -1,4 +1,15 @@
-import { Body, Controller, Get, Injectable, Module, NotFoundException, Post } from '@nestjs/common';
+import {
+  Body,
+  ConflictException,
+  Controller,
+  Delete,
+  Get,
+  Injectable,
+  Module,
+  NotFoundException,
+  Param,
+  Post,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { announcementCreateSchema } from '@ecole/shared';
 import { Prisma } from '@prisma/client';
@@ -52,8 +63,86 @@ export class CommunicationService {
     private readonly audit: AuditService,
   ) {}
 
-  list() {
-    return this.db.announcement.findMany({ orderBy: { publishedAt: 'desc' }, take: 50 });
+  /** Annonces récentes, avec leurs destinataires en clair et leur éventuel retrait. */
+  async list() {
+    const items = await this.db.announcement.findMany({
+      orderBy: { publishedAt: 'desc' },
+      take: 50,
+    });
+    const ids = (scope: string) =>
+      items.filter((a) => a.scope === scope && a.targetId).map((a) => a.targetId as string);
+    const [classes, levels, cycles, students] = await Promise.all([
+      this.db.class.findMany({
+        where: { id: { in: ids('CLASS') } },
+        select: { id: true, name: true },
+      }),
+      this.db.level.findMany({
+        where: { id: { in: ids('LEVEL') } },
+        select: { id: true, name: true },
+      }),
+      this.db.cycle.findMany({
+        where: { id: { in: ids('CYCLE') } },
+        select: { id: true, name: true },
+      }),
+      this.db.student.findMany({
+        where: { id: { in: [...new Set(items.flatMap((a) => a.studentIds))] } },
+        select: { id: true, firstName: true, lastName: true },
+      }),
+    ]);
+    const name = (rows: { id: string; name: string }[], id: string | null) =>
+      rows.find((r) => r.id === id)?.name ?? 'Cible supprimée';
+    return items.map((a) => ({
+      ...a,
+      audience:
+        a.scope === 'SCHOOL'
+          ? 'Toute l’école'
+          : a.scope === 'CLASS'
+            ? `Classe ${name(classes, a.targetId)}`
+            : a.scope === 'LEVEL'
+              ? `Niveau ${name(levels, a.targetId)}`
+              : a.scope === 'CYCLE'
+                ? `Cycle ${name(cycles, a.targetId)}`
+                : students
+                    .filter((st) => a.studentIds.includes(st.id))
+                    .map((st) => `${st.lastName} ${st.firstName}`)
+                    .join(', '),
+    }));
+  }
+
+  /**
+   * Retrait d'une annonce (erreur de destinataire…) : elle disparaît du portail des parents, les
+   * notifications pas encore parties sont annulées, et le retrait est journalisé.
+   */
+  async withdraw(id: string) {
+    const announcement = await this.db.announcement.findUnique({ where: { id } });
+    if (!announcement) throw new NotFoundException('Annonce introuvable');
+    if (announcement.withdrawnAt) throw new ConflictException('Cette annonce est déjà retirée');
+    return this.db.$transaction(async (tx) => {
+      const updated = await tx.announcement.update({
+        where: { id },
+        data: { withdrawnAt: new Date(), withdrawnById: staffContext().userId },
+      });
+      const cancelled = await tx.$executeRaw`
+        UPDATE "NotificationOutbox" SET "status" = 'FAILED', "lastError" = 'Annulé : annonce retirée'
+        WHERE "status" = 'PENDING' AND "template" = 'announcement'
+          AND "payload"->>'announcementId' = ${id}`;
+      await this.audit.log(
+        {
+          action: 'communication.announcement_withdrawn',
+          entity: 'Announcement',
+          entityId: id,
+          before: {
+            title: announcement.title,
+            scope: announcement.scope,
+            targetId: announcement.targetId,
+            studentIds: announcement.studentIds,
+          },
+          after: { withdrawnAt: updated.withdrawnAt, cancelledNotifications: cancelled },
+        },
+        tx,
+      );
+      return { ...updated, cancelledNotifications: cancelled };
+    });
   }
 
   /**
@@ -154,6 +243,12 @@ export class CommunicationController {
     @Body(new ZodPipe(announcementCreateSchema)) body: z.infer<typeof announcementCreateSchema>,
   ) {
     return this.communication.create(body);
+  }
+
+  @RequirePermissions('communication.write')
+  @Delete(':id')
+  withdraw(@Param('id') id: string) {
+    return this.communication.withdraw(id);
   }
 }
 

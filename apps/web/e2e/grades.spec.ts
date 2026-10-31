@@ -1,5 +1,6 @@
-import { expect, test } from '@playwright/test';
-import { expectNoHorizontalOverflow, isMobile, loginStaff } from './helpers';
+import { expect, test, type APIRequestContext } from '@playwright/test';
+import { API_URL } from '../playwright.config';
+import { expectNoHorizontalOverflow, isMobile, loginStaff, PASSWORD } from './helpers';
 
 test('saisie des notes : validation immédiate, enregistrement automatique, moyennes', async ({
   page,
@@ -72,4 +73,84 @@ test('saisie des notes : validation immédiate, enregistrement automatique, moye
     await expect(page.locator('tbody tr').first().locator('input').last()).toHaveValue(/\d/);
     await expect(page.locator('tbody tr').first().locator('td[title]')).toHaveText(/^\d+,\d{2}$/);
   }
+});
+
+async function auth(request: APIRequestContext, email: string) {
+  const res = await request.post(`${API_URL}/auth/login`, { data: { email, password: PASSWORD } });
+  return { Authorization: `Bearer ${((await res.json()) as { accessToken: string }).accessToken}` };
+}
+
+test('saisie verrouillée : l’enseignant voit pourquoi les notes sont figées', async ({
+  page,
+  request,
+}) => {
+  // Préparation par l'API (une seule fois) : grille de 3e B, séquence 2, soumise puis validée.
+  const prof = await auth(request, 'prof.maths@demo.cm');
+  const mine = (await (
+    await request.get(`${API_URL}/grades/class-subjects`, { headers: prof })
+  ).json()) as {
+    classSubjects: { id: string; className: string; subjectName: string }[];
+    sequences: { id: string; name: string }[];
+  };
+  const cs = mine.classSubjects.find(
+    (c) => c.className === '3e B' && c.subjectName === 'Mathématiques',
+  )!;
+  const seq = mine.sequences.find((x) => x.name === 'Séquence 2')!;
+  const query = `classSubjectId=${cs.id}&sequenceId=${seq.id}`;
+  const sheet = (await (
+    await request.get(`${API_URL}/grades/sheet?${query}`, { headers: prof })
+  ).json()) as { status: string; evaluations: unknown[]; rows: { student: { id: string } }[] };
+  if (sheet.status !== 'LOCKED') {
+    if (sheet.evaluations.length === 0) {
+      const ev = (await (
+        await request.post(`${API_URL}/grades/evaluations`, {
+          headers: prof,
+          data: {
+            classSubjectId: cs.id,
+            sequenceId: seq.id,
+            name: 'Interrogation',
+            type: 'QUIZ',
+            weight: 1,
+          },
+        })
+      ).json()) as { id: string };
+      const saved = await request.put(`${API_URL}/grades/evaluations/${ev.id}/grades`, {
+        headers: prof,
+        data: {
+          grades: sheet.rows.map((r, i) => ({
+            studentId: r.student.id,
+            value: String(9 + (i % 8)),
+          })),
+        },
+      });
+      expect(saved.ok()).toBeTruthy();
+    }
+    const body = { classSubjectId: cs.id, sequenceId: seq.id };
+    expect(
+      (await request.post(`${API_URL}/grades/sheet/submit`, { headers: prof, data: body })).ok(),
+    ).toBeTruthy();
+    const censor = await auth(request, 'censeur@demo.cm');
+    expect(
+      (
+        await request.post(`${API_URL}/grades/sheet/validate`, { headers: censor, data: body })
+      ).ok(),
+    ).toBeTruthy();
+  }
+
+  await loginStaff(page, 'prof.maths@demo.cm');
+  await page.goto('/notes');
+  const select = page.getByLabel('Classe et matière');
+  await select.selectOption(
+    (await select.locator('option', { hasText: '3e B · Mathématiques' }).getAttribute('value')) ??
+      '',
+  );
+  const sequence = page.getByLabel('Séquence');
+  await sequence.selectOption(
+    (await sequence.locator('option', { hasText: 'Séquence 2' }).getAttribute('value')) ?? '',
+  );
+  await expect(page.getByRole('status').filter({ hasText: 'Notes validées' })).toHaveText(
+    'Notes validées par le censeur : elles sont figées. Pour une correction, adressez-vous au censeur.',
+  );
+  await expect(page.getByText('Enregistrement automatique')).toHaveCount(0);
+  await expectNoHorizontalOverflow(page);
 });

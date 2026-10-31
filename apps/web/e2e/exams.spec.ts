@@ -66,12 +66,29 @@ test('parcours complet d’une session d’examen', async ({ page, request }, in
 
   // 2. Salles et répartition des candidats.
   await page.getByRole('tab', { name: 'Salles et places' }).click();
+  // Sans salle choisie ni nommée : un message clair sous le champ.
+  await page.getByRole('button', { name: 'Salle', exact: true }).click();
+  const roomDialog = page.getByRole('dialog', { name: 'Ajouter une salle' });
+  await roomDialog.getByLabel('Places en configuration d’examen').fill('6');
+  await roomDialog.getByRole('button', { name: 'Ajouter', exact: true }).click();
+  await expect(
+    roomDialog.getByText('Choisissez une salle existante ou donnez le nom de la nouvelle salle.'),
+  ).toBeVisible();
+  await expect(roomDialog.getByLabel('Nom de la nouvelle salle')).toHaveAttribute(
+    'aria-invalid',
+    'true',
+  );
   for (const room of ['B12', 'B14']) {
-    await page.getByRole('button', { name: 'Salle', exact: true }).click();
-    const dialog = page.getByRole('dialog', { name: 'Ajouter une salle' });
-    await selectByText(page, 'Salle existante (facultatif)', room);
-    await dialog.getByLabel('Places en configuration d’examen (facultatif)').fill('6');
-    await dialog.getByRole('button', { name: 'Ajouter', exact: true }).click();
+    if (!(await roomDialog.isVisible()))
+      await page.getByRole('button', { name: 'Salle', exact: true }).click();
+    const select = roomDialog.getByLabel('Salle', { exact: true });
+    await select.selectOption(
+      (await select.locator('option', { hasText: room }).first().getAttribute('value')) ?? '',
+    );
+    // Salle sans capacité enregistrée : le nombre de places est demandé.
+    await expect(roomDialog.getByText(/pas de capacité enregistrée/)).toBeVisible();
+    await roomDialog.getByLabel('Places en configuration d’examen').fill('6');
+    await roomDialog.getByRole('button', { name: 'Ajouter', exact: true }).click();
     await expect(page.getByRole('button', { name: `Retirer la salle ${room}` })).toBeVisible();
   }
   await page.getByRole('button', { name: 'Répartir les candidats' }).click();
@@ -208,4 +225,53 @@ test('parcours complet d’une session d’examen', async ({ page, request }, in
   await expect(results.getByText(name)).toBeVisible();
   await expect(results.getByText('Mathématiques').first()).toBeVisible();
   await expectNoHorizontalOverflow(page, '/portail/notes (examens)');
+});
+
+test('un enseignant qui ne surveille pas ne voit que les volets permis', async ({
+  page,
+  request,
+}, info) => {
+  // Session de 4e B sans surveillant (une par projet, à des dates différentes).
+  const censor = await headers(request, 'censeur@demo.cm');
+  const classes = (await (
+    await request.get(`${API_URL}/academic/classes`, { headers: censor })
+  ).json()) as { id: string; name: string }[];
+  const subjects = (await (
+    await request.get(`${API_URL}/academic/subjects`, { headers: censor })
+  ).json()) as { id: string; name: string }[];
+  const day = isMobile(info) ? '2027-01-11' : '2027-01-18';
+  const created = await request.post(`${API_URL}/exams/sessions`, {
+    headers: censor,
+    data: {
+      name: `Contrôle sans surveillant ${info.project.name}`,
+      kind: 'MOCK',
+      startDate: day,
+      endDate: day,
+      classIds: [classes.find((c) => c.name === '4e B')!.id],
+    },
+  });
+  expect(created.ok()).toBeTruthy();
+  const { id } = (await created.json()) as { id: string };
+  const paper = await request.post(`${API_URL}/exams/sessions/${id}/papers`, {
+    headers: censor,
+    data: {
+      subjectId: subjects.find((x) => x.name === 'Mathématiques')!.id,
+      date: day,
+      startTime: '08:00',
+      durationMinutes: 120,
+    },
+  });
+  expect(paper.ok()).toBeTruthy();
+
+  await loginStaff(page, 'prof.maths@demo.cm');
+  await page.goto(`/examens/${id}`);
+  const tabs = page.getByRole('tablist', { name: 'Volets de la session' });
+  await expect(tabs.getByRole('tab', { name: 'Calendrier' })).toBeVisible();
+  await expect(tabs.getByRole('tab', { name: 'Salles et places' })).toHaveCount(0);
+  await expect(tabs.getByRole('tab', { name: 'Résultats' })).toHaveCount(0);
+  await tabs.getByRole('tab', { name: 'Documents' }).click();
+  await expect(page.getByRole('heading', { name: 'Listes d’émargement' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Émargement / })).toHaveCount(0);
+  await expect(page.getByText('Impossible d’afficher cette page')).toHaveCount(0);
+  await expectNoHorizontalOverflow(page);
 });

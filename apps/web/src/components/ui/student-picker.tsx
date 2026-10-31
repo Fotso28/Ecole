@@ -98,15 +98,18 @@ export function StudentPicker({
               <li key={s.id}>
                 <button
                   type="button"
-                  onClick={() =>
+                  onClick={() => {
+                    // Recherche vidée : « Changer » ou une nouvelle saisie repart de zéro.
+                    setSearch('');
+                    setTerm('');
                     onChange({
                       id: s.id,
                       firstName: s.firstName,
                       lastName: s.lastName,
                       matricule: s.matricule,
                       className: s.class?.name ?? null,
-                    })
-                  }
+                    });
+                  }}
                   className="flex min-h-12 w-full items-center gap-3 rounded-[10px] border border-line px-3 text-left hover:bg-paper"
                 >
                   <span className="flex min-w-0 flex-1 flex-col">

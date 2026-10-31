@@ -91,7 +91,8 @@ describe('appel et notification des parents', () => {
       where: { template: 'absence' },
     });
     expect(pending.recipient).toBe('+237677123456');
-    expect(pending.body).toContain('Marie-Claire Ngono était absent(e)');
+    // Accordé au sexe de l'élève.
+    expect(pending.body).toContain('Marie-Claire Ngono était absente le');
     expect(pending.availableAt.getTime()).toBeGreaterThan(Date.now() + 30 * 60_000);
 
     // Correction de l'appel : l'élève arrivait en retard.
@@ -214,13 +215,14 @@ describe('justificatifs', () => {
     await http()
       .patch(`/attendance/justifications/${list.body[0].id}`)
       .set(s.surveillant.auth)
-      .send({ decision: 'REJECTED' })
+      .send({ decision: 'REJECTED', note: 'Déjà accepté' })
       .expect(409);
 
     const outbox = await prisma.notificationOutbox.findFirstOrThrow({
       where: { template: 'absence' },
     });
     expect(outbox.status).toBe('FAILED');
+    expect(outbox.lastError).toBe('Annulé : absence justifiée');
     const records = await http()
       .get(`/attendance/students/${ngono}`)
       .set(s.surveillant.auth)
@@ -248,10 +250,144 @@ describe('justificatifs', () => {
     await http()
       .patch(`/attendance/justifications/${j.body.id}`)
       .set(s.surveillant.auth)
-      .send({ decision: 'REJECTED' })
+      .send({ decision: 'REJECTED', note: 'Motif insuffisant' })
       .expect(200);
     const after = await prisma.attendanceRecord.findUniqueOrThrow({ where: { id: record.id } });
     expect(after.justificationId).toBeNull();
+  });
+});
+
+describe('justificatif refusé', () => {
+  async function parentSession() {
+    const code = await requestOtp(app, '677123456');
+    return toSession(
+      await http().post('/auth/otp/verify').send({ phone: '677123456', code }).expect(200),
+    );
+  }
+
+  it('exige un motif, garde les absences visées, prévient le parent et permet un nouvel envoi', async () => {
+    await http()
+      .post('/attendance/sessions')
+      .set(s.prof.auth)
+      .send(appel(today(), '10:20', { [ngono]: 'ABSENT', [bilong]: 'PRESENT' }))
+      .expect(201);
+    const record = await prisma.attendanceRecord.findFirstOrThrow({ where: { studentId: ngono } });
+    const parent = await parentSession();
+    const sent = await http()
+      .post('/portal/justifications')
+      .set(parent.auth)
+      .send({ studentId: ngono, recordIds: [record.id], reason: 'Fatigué' })
+      .expect(201);
+
+    // Pas de refus sans motif.
+    await http()
+      .patch(`/attendance/justifications/${sent.body.id}`)
+      .set(s.surveillant.auth)
+      .send({ decision: 'REJECTED' })
+      .expect(400);
+    await http()
+      .patch(`/attendance/justifications/${sent.body.id}`)
+      .set(s.surveillant.auth)
+      .send({ decision: 'REJECTED', note: 'La fatigue ne justifie pas une absence' })
+      .expect(200);
+
+    // L'absence redevient « à justifier »…
+    const after = await prisma.attendanceRecord.findUniqueOrThrow({ where: { id: record.id } });
+    expect(after.justificationId).toBeNull();
+    // … mais l'onglet « Refusés » montre toujours l'absence concernée et le motif.
+    const rejected = await http()
+      .get('/attendance/justifications?status=REJECTED')
+      .set(s.surveillant.auth)
+      .expect(200);
+    expect(rejected.body).toHaveLength(1);
+    expect(rejected.body[0]).toMatchObject({
+      status: 'REJECTED',
+      reason: 'Fatigué',
+      reviewNote: 'La fatigue ne justifie pas une absence',
+      records: [{ id: record.id, status: 'ABSENT', startTime: '10:20' }],
+    });
+
+    // Le parent est prévenu par la table d'envoi, avec le motif.
+    const sms = await prisma.notificationOutbox.findFirstOrThrow({
+      where: { template: 'justificationRejected' },
+    });
+    expect(sms.recipient).toBe('+237677123456');
+    expect(sms.status).toBe('PENDING');
+    expect(sms.body).toContain('Marie-Claire Ngono');
+    expect(sms.body).toContain('Motif : La fatigue ne justifie pas une absence.');
+    expect(sms.body).toContain(today().split('-').reverse().join('/'));
+
+    // Le parent voit « Refusé » et le motif dans l'historique.
+    const overview = await http().get(`/portal/children/${ngono}`).set(parent.auth).expect(200);
+    expect(overview.body.absences[0]).toMatchObject({
+      id: record.id,
+      justification: null,
+      rejection: { note: 'La fatigue ne justifie pas une absence' },
+    });
+
+    // Journal d'audit : décision et motif.
+    const audit = await prisma.auditLog.findFirstOrThrow({
+      where: { action: 'attendance.justification_reviewed', entityId: sent.body.id },
+    });
+    expect(audit.after).toMatchObject({
+      decision: 'REJECTED',
+      note: 'La fatigue ne justifie pas une absence',
+    });
+
+    // Un nouveau justificatif reste possible ; l'ancien garde sa trace.
+    const second = await http()
+      .post('/portal/justifications')
+      .set(parent.auth)
+      .send({ studentId: ngono, recordIds: [record.id], reason: 'Certificat médical du Dr Abena' })
+      .expect(201);
+    const again = await http().get(`/portal/children/${ngono}`).set(parent.auth).expect(200);
+    expect(again.body.absences[0]).toMatchObject({ justification: 'PENDING', rejection: null });
+    const pending = await http()
+      .get('/attendance/justifications?status=PENDING')
+      .set(s.surveillant.auth)
+      .expect(200);
+    expect(pending.body.map((j: { id: string }) => j.id)).toEqual([second.body.id]);
+    const stillRejected = await http()
+      .get('/attendance/justifications?status=REJECTED')
+      .set(s.surveillant.auth)
+      .expect(200);
+    expect(stillRejected.body[0].records.map((r: { id: string }) => r.id)).toEqual([record.id]);
+  });
+
+  it('ne crée jamais de justificatif rattaché à aucune absence (double envoi simultané)', async () => {
+    await http()
+      .post('/attendance/sessions')
+      .set(s.prof.auth)
+      .send(appel(today(), '10:20', { [ngono]: 'ABSENT', [bilong]: 'PRESENT' }))
+      .expect(201);
+    const record = await prisma.attendanceRecord.findFirstOrThrow({ where: { studentId: ngono } });
+    const parent = await parentSession();
+    const send = () =>
+      http()
+        .post('/portal/justifications')
+        .set(parent.auth)
+        .send({ studentId: ngono, recordIds: [record.id], reason: 'Consultation médicale' });
+    const results = await Promise.all([send(), send(), send()]);
+    expect(results.map((r) => r.status).sort()).toEqual([201, 409, 409]);
+    const all = await prisma.justification.findMany({ where: { studentId: ngono } });
+    expect(all).toHaveLength(1);
+    const linked = await prisma.attendanceRecord.findUniqueOrThrow({ where: { id: record.id } });
+    expect(linked.justificationId).toBe(all[0]?.id);
+    expect(all[0]?.recordIds).toEqual([record.id]);
+
+    // Une absence d'un autre élève, ou aucune absence : refusé.
+    const other = await prisma.attendanceRecord.findFirstOrThrow({ where: { studentId: bilong } });
+    await http()
+      .post('/attendance/justifications')
+      .set(s.surveillant.auth)
+      .send({ studentId: ngono, recordIds: [other.id], reason: 'Malade' })
+      .expect(400);
+    await http()
+      .post('/attendance/justifications')
+      .set(s.surveillant.auth)
+      .send({ studentId: ngono, recordIds: [], reason: 'Malade' })
+      .expect(400);
+    expect(await prisma.justification.count()).toBe(1);
   });
 });
 

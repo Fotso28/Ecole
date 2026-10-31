@@ -90,14 +90,38 @@ test.describe('portail parents', () => {
     await expectNoHorizontalOverflow(page);
   });
 
-  test('la page de connexion parent passe en anglais', async ({ page }) => {
+  test('la page de connexion parent passe en anglais', async ({ page }, info) => {
     await page.goto('/parent/connexion');
-    await page.getByRole('button', { name: 'EN' }).click();
+    const languages = page.getByRole('group', { name: 'Langue' });
+    await expect(languages.getByRole('button', { name: 'Français', exact: true })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await languages.getByRole('button', { name: 'English', exact: true }).click();
     await expect(
       page.getByRole('heading', { name: 'Follow your children’s schooling' }),
     ).toBeVisible();
+    // La langue du document suit le choix (lecteurs d'écran).
+    await expect(page.locator('html')).toHaveAttribute('lang', 'en');
     await page.getByLabel('Your phone number').fill('12');
     await page.getByRole('button', { name: 'Get a code by SMS' }).click();
     await expect(page.getByText('A 9-digit Cameroon number is expected.')).toBeVisible();
+
+    // Code refusé : message en anglais aussi (numéro inconnu, un par projet).
+    await page
+      .getByLabel('Your phone number')
+      .fill(info.project.name === 'mobile' ? '690000011' : '690000012');
+    await page.getByRole('button', { name: 'Get a code by SMS' }).click();
+    await page.getByLabel('6-digit code').fill('000000');
+    await page.getByRole('button', { name: 'Sign in' }).click();
+    await expect(page.getByText('Incorrect or expired code.')).toBeVisible();
+    await expect(page.getByText('Code incorrect ou expiré')).toHaveCount(0);
+
+    // Retour au français : la langue du document aussi.
+    await page
+      .getByRole('group', { name: 'Language' })
+      .getByRole('button', { name: 'Français' })
+      .click();
+    await expect(page.locator('html')).toHaveAttribute('lang', 'fr');
   });
 });

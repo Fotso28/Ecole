@@ -146,6 +146,74 @@ describe('annonces', () => {
       .send({ title: 'Titre', body: 'Message', scope: 'STUDENTS', studentIds: [foreign.id] })
       .expect(404);
   });
+
+  it('indique les destinataires et retire une annonce envoyée par erreur, avec audit', async () => {
+    const { awa } = await enrollFamilies();
+    // Erreur de destinataire : la sortie de la 4e A part aux parents de 6e A.
+    const res = await http()
+      .post('/announcements')
+      .set(s.direction.auth)
+      .send({
+        title: 'Sortie pédagogique de la 4e A',
+        body: 'Départ à 8 h devant le collège.',
+        scope: 'CLASS',
+        targetId: f.class6AId,
+        sendSms: true,
+      })
+      .expect(201);
+    expect(res.body.sms).toBe(1);
+    await http()
+      .post('/announcements')
+      .set(s.direction.auth)
+      .send({ title: 'Rentrée', body: 'Lundi 7 h 30.', scope: 'SCHOOL' })
+      .expect(201);
+    const list = await http().get('/announcements').set(s.direction.auth).expect(200);
+    expect(
+      list.body.map((a: { title: string; audience: string }) => [a.title, a.audience]),
+    ).toEqual([
+      ['Rentrée', 'Toute l’école'],
+      ['Sortie pédagogique de la 4e A', 'Classe 6e A'],
+    ]);
+
+    const parent = await parentLogin('699887766');
+    const before = await http().get(`/portal/children/${awa.id}`).set(parent.auth).expect(200);
+    expect(before.body.announcements.map((a: { title: string }) => a.title)).toContain(
+      'Sortie pédagogique de la 4e A',
+    );
+
+    // Retrait : réservé à qui publie les annonces.
+    await http().delete(`/announcements/${res.body.id}`).set(s.prof.auth).expect(403);
+    const withdrawn = await http()
+      .delete(`/announcements/${res.body.id}`)
+      .set(s.direction.auth)
+      .expect(200);
+    expect(withdrawn.body).toMatchObject({ cancelledNotifications: 1 });
+    expect(withdrawn.body.withdrawnAt).toBeTruthy();
+    await http().delete(`/announcements/${res.body.id}`).set(s.direction.auth).expect(409);
+
+    // Disparue du portail ; le SMS pas encore parti est annulé ; le retrait est journalisé.
+    const after = await http().get(`/portal/children/${awa.id}`).set(parent.auth).expect(200);
+    expect(after.body.announcements.map((a: { title: string }) => a.title)).toEqual(['Rentrée']);
+    const sms = await prisma.notificationOutbox.findFirstOrThrow({
+      where: { template: 'announcement', recipient: '+237699887766' },
+    });
+    expect(sms).toMatchObject({ status: 'FAILED', lastError: 'Annulé : annonce retirée' });
+    const audit = await prisma.auditLog.findFirstOrThrow({
+      where: { action: 'communication.announcement_withdrawn', entityId: res.body.id },
+    });
+    expect(audit.before).toMatchObject({ title: 'Sortie pédagogique de la 4e A', scope: 'CLASS' });
+    const listed = await http().get('/announcements').set(s.direction.auth).expect(200);
+    expect(listed.body.find((a: { id: string }) => a.id === res.body.id).withdrawnAt).toBeTruthy();
+
+    // Une autre école ne peut pas retirer cette annonce.
+    await seedSchool('autre', 'AU');
+    const so = await sessions(app, 'autre');
+    const school = await prisma.announcement.findFirstOrThrow({ where: { title: 'Rentrée' } });
+    await http().delete(`/announcements/${school.id}`).set(so.direction.auth).expect(404);
+    expect(
+      (await prisma.announcement.findUniqueOrThrow({ where: { id: school.id } })).withdrawnAt,
+    ).toBeNull();
+  });
 });
 
 describe('canal e-mail', () => {

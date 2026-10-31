@@ -169,7 +169,19 @@ export class GradesService {
     const statuses = new Set(evaluations.map((e) => e.status));
     const status =
       evaluations.length === 0 ? 'DRAFT' : statuses.size === 1 ? [...statuses][0] : 'MIXED';
+    // Bulletins publiés sur ces notes : la grille est figée (message explicite à l'enseignant).
+    const published =
+      status === 'LOCKED' &&
+      (await this.db.reportCard.count({
+        where: {
+          classId: cs.classId,
+          termId: { in: await this.publicationTerms(sequenceId) },
+          status: 'PUBLISHED',
+          needsRepublish: false,
+        },
+      })) > 0;
     return {
+      published,
       classSubject: {
         id: cs.id,
         coefficient: cs.coefficient,

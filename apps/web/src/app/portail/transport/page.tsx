@@ -6,7 +6,7 @@ import { Bus, Check, MapPin, X } from 'lucide-react';
 import { Card, CardHeader, EmptyState, ErrorBlock, LoadingBlock } from '@/components/ui/card';
 import { ChildSwitcher, useChildren } from '@/components/shell/parent-shell';
 import { api } from '@/lib/api';
-import { formatTime } from '@/lib/format';
+import { agree, formatTime } from '@/lib/format';
 
 interface ChildTransport {
   enabled: boolean;
@@ -27,7 +27,8 @@ interface ChildTransport {
   }[];
 }
 
-const TRIP = { OUTBOUND: 'Ce matin', RETURN: 'Ce soir' } as const;
+/** Trajet, et non moment de la journée : un appel peut être fait tard (montée à 11 h 44). */
+const TRIP = { OUTBOUND: 'Trajet aller', RETURN: 'Trajet retour' } as const;
 
 export default function PortalTransport() {
   const { selected } = useChildren();
@@ -39,12 +40,13 @@ export default function PortalTransport() {
   if (!selected || q.isPending) return <LoadingBlock />;
   if (q.isError) return <ErrorBlock error={q.error} onRetry={() => q.refetch()} />;
   const sub = q.data.subscription;
+  const g = selected.gender;
   return (
     <>
       <ChildSwitcher />
       <h2 className="font-display text-xl font-bold">Transport scolaire</h2>
       {!sub ? (
-        <EmptyState title={`${selected.firstName} n’est pas inscrit(e) au transport`}>
+        <EmptyState title={`${selected.firstName} n’est pas ${agree(g, 'inscrit')} au transport`}>
           {q.data.enabled
             ? 'Pour un abonnement, adressez-vous au secrétariat de l’école.'
             : 'L’école ne propose pas ce service dans l’application.'}
@@ -92,17 +94,17 @@ export default function PortalTransport() {
                     {t.boarded === false ? (
                       <span className="flex items-center gap-1 font-semibold text-danger">
                         <X className="size-4" aria-hidden />
-                        Pas monté(e)
+                        Pas {agree(g, 'monté')}
                       </span>
                     ) : t.boarded ? (
                       <span className="flex items-center gap-1 font-semibold text-primary">
                         <Check className="size-4" aria-hidden />
                         {t.alighted
-                          ? `Déposé(e)${t.alightedAt ? ` à ${formatTime(t.alightedAt)}` : ''}`
-                          : `Monté(e)${t.boardedAt ? ` à ${formatTime(t.boardedAt)}` : ''}`}
+                          ? `${agree(g, 'Déposé')}${t.alightedAt ? ` à ${formatTime(t.alightedAt)}` : ''}`
+                          : `${agree(g, 'Monté')}${t.boardedAt ? ` à ${formatTime(t.boardedAt)}` : ''}`}
                       </span>
                     ) : (
-                      <span className="text-muted">Non pointé(e)</span>
+                      <span className="text-muted">Non {agree(g, 'pointé')}</span>
                     )}
                   </li>
                 ))}

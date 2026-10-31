@@ -1,8 +1,10 @@
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { ROLE_PERMISSIONS } from '@ecole/shared';
+import { addDays, todayInCameroon } from '../src/common/dates';
 import { enrollStudent, seedSchool, sessions, type SchoolFixture } from './fixtures';
-import { createTestApp, prisma, resetDb } from './helpers';
+import { createTestApp, prisma, requestOtp, resetDb, toSession } from './helpers';
 
 let app: INestApplication;
 let f: SchoolFixture;
@@ -80,15 +82,15 @@ describe('registre des incidents', () => {
   });
 
   it('filtre par classe, période, type et sanction', async () => {
-    await report(a.id, '2026-09-20', 'INSOLENCE');
-    await report(a.id, '2026-10-02', 'VIOLENCE', 'BLAME');
-    await report(b.id, '2026-10-15', 'VIOLENCE', 'DETENTION');
-    await report(c.id, '2026-11-03', 'FRAUD', 'WARNING');
+    await report(a.id, '2026-07-20', 'INSOLENCE');
+    await report(a.id, '2026-08-02', 'VIOLENCE', 'BLAME');
+    await report(b.id, '2026-08-15', 'VIOLENCE', 'DETENTION');
+    await report(c.id, '2026-09-03', 'FRAUD', 'WARNING');
 
     const all = await http().get('/discipline/incidents').set(s.surveillant.auth).expect(200);
     expect(all.body.total).toBe(4);
     expect(all.body.items[0]).toMatchObject({
-      date: '2026-11-03',
+      date: '2026-09-03',
       typeLabel: 'Fraude',
       sanctionLabel: 'Avertissement',
       class: { name: '6e A' },
@@ -114,7 +116,7 @@ describe('registre des incidents', () => {
       bySanction.body.items.map((i: { student: { lastName: string } }) => i.student.lastName),
     ).toEqual(['Bello']);
     const byPeriod = await http()
-      .get('/discipline/incidents?from=2026-10-01&to=2026-10-31')
+      .get('/discipline/incidents?from=2026-08-01&to=2026-08-31')
       .set(s.surveillant.auth)
       .expect(200);
     expect(byPeriod.body.total).toBe(2);
@@ -125,12 +127,16 @@ describe('registre des incidents', () => {
   });
 
   it('calcule des statistiques simples', async () => {
-    await report(a.id, '2026-09-20', 'INSOLENCE');
-    await report(a.id, '2026-10-02', 'VIOLENCE', 'BLAME');
-    await report(b.id, '2026-10-15', 'VIOLENCE', 'DETENTION');
-    await report(c.id, '2026-11-03', 'FRAUD', 'WARNING');
+    await report(a.id, '2026-07-20', 'INSOLENCE');
+    await report(a.id, '2026-08-02', 'VIOLENCE', 'BLAME');
+    await report(b.id, '2026-08-15', 'VIOLENCE', 'DETENTION');
+    await report(c.id, '2026-09-03', 'FRAUD', 'WARNING');
     const stats = await http().get('/discipline/stats').set(s.surveillant.auth).expect(200);
+    // « Élèves sanctionnés » : des élèves, jamais plus que les élèves concernés.
     expect(stats.body).toMatchObject({ total: 4, students: 3, sanctioned: 3 });
+    await report(a.id, '2026-08-20', 'INSOLENCE', 'WARNING');
+    const again = await http().get('/discipline/stats').set(s.surveillant.auth).expect(200);
+    expect(again.body).toMatchObject({ total: 5, students: 3, sanctioned: 3 });
     expect(stats.body.byType[0]).toEqual({ type: 'VIOLENCE', count: 2 });
     expect(stats.body.byClass).toEqual([
       { classId: f.class4AId, className: '4e A', count: 3 },
@@ -175,9 +181,158 @@ describe('registre des incidents', () => {
   });
 });
 
+describe('correction et suppression des incidents', () => {
+  it('refuse une date future, depuis le registre comme depuis la fiche élève', async () => {
+    const tomorrow = addDays(todayInCameroon(), 1);
+    const res = await http()
+      .post('/discipline/incidents')
+      .set(s.surveillant.auth)
+      .send({ studentId: a.id, date: tomorrow, type: 'OTHER', description: 'Bavardages' })
+      .expect(400);
+    expect(res.body.errors[0]).toMatchObject({
+      path: 'date',
+      message: 'La date ne peut pas être dans le futur',
+    });
+    await http()
+      .post('/attendance/incidents')
+      .set(s.surveillant.auth)
+      .send({ studentId: a.id, date: tomorrow, description: 'Bavardages' })
+      .expect(400);
+    await report(a.id, todayInCameroon(), 'OTHER');
+    expect(await prisma.incident.count()).toBe(1);
+  });
+
+  it('le déclarant, la vie scolaire et la direction corrigent ou suppriment, avec audit', async () => {
+    const incident = await report(a.id, '2026-10-12', 'INDISCIPLINE');
+    const list = await http().get('/discipline/incidents').set(s.surveillant.auth).expect(200);
+    expect(list.body.items[0].canEdit).toBe(true);
+
+    // Correction par le déclarant : mauvais élève, sanction ajoutée.
+    const fixed = await http()
+      .patch(`/discipline/incidents/${incident.id}`)
+      .set(s.surveillant.auth)
+      .send({
+        studentId: b.id,
+        date: '2026-10-12',
+        type: 'INSOLENCE',
+        description: 'Insolence envers le professeur',
+        sanctionType: 'DETENTION',
+        sanction: 'Mercredi 14 h',
+      })
+      .expect(200);
+    expect(fixed.body).toMatchObject({ studentId: b.id, sanctionType: 'DETENTION' });
+    const updated = await prisma.auditLog.findFirstOrThrow({
+      where: { action: 'discipline.incident_updated', entityId: incident.id },
+    });
+    expect(updated.before).toMatchObject({ studentId: a.id, type: 'INDISCIPLINE' });
+    expect(updated.after).toMatchObject({ studentId: b.id, sanction: 'Mercredi 14 h' });
+    await http()
+      .patch(`/discipline/incidents/${incident.id}`)
+      .set(s.surveillant.auth)
+      .send({
+        studentId: b.id,
+        date: addDays(todayInCameroon(), 3),
+        type: 'INSOLENCE',
+        description: 'Insolence',
+      })
+      .expect(400);
+
+    // Un secrétariat à qui l'école a donné le droit de signaler ne corrige que ses signalements.
+    await http()
+      .put('/roles/builtin/SECRETARY')
+      .set(s.direction.auth)
+      .send({
+        permissions: [...ROLE_PERMISSIONS.SECRETARY, 'discipline.read', 'discipline.write'],
+      })
+      .expect(200);
+    const others = await http().get('/discipline/incidents').set(s.secretariat.auth).expect(200);
+    expect(others.body.items[0].canEdit).toBe(false);
+    await http()
+      .patch(`/discipline/incidents/${incident.id}`)
+      .set(s.secretariat.auth)
+      .send({ studentId: b.id, date: '2026-10-12', type: 'OTHER', description: 'Autre' })
+      .expect(403);
+    await http().delete(`/discipline/incidents/${incident.id}`).set(s.secretariat.auth).expect(403);
+    const own = await http()
+      .post('/discipline/incidents')
+      .set(s.secretariat.auth)
+      .send({ studentId: c.id, date: '2026-10-13', type: 'OTHER', description: 'Retard répété' })
+      .expect(201);
+    await http()
+      .patch(`/discipline/incidents/${own.body.id}`)
+      .set(s.secretariat.auth)
+      .send({ studentId: c.id, date: '2026-10-13', type: 'TRUANCY', description: 'Absent' })
+      .expect(200);
+
+    // La direction supprime l'incident du surveillant ; le contenu reste au journal d'audit.
+    await http().delete(`/discipline/incidents/${incident.id}`).set(s.direction.auth).expect(204);
+    expect(await prisma.incident.findUnique({ where: { id: incident.id } })).toBeNull();
+    const deleted = await prisma.auditLog.findFirstOrThrow({
+      where: { action: 'discipline.incident_deleted', entityId: incident.id },
+    });
+    expect(deleted.before).toMatchObject({
+      studentId: b.id,
+      description: 'Insolence envers le professeur',
+      reportedById: f.users.supervisor,
+    });
+    await http().delete(`/discipline/incidents/${incident.id}`).set(s.direction.auth).expect(404);
+    // Sans droit de signaler : ni correction ni suppression.
+    await http().delete(`/discipline/incidents/${own.body.id}`).set(s.censeur.auth).expect(403);
+  });
+});
+
+describe('exclusion temporaire', () => {
+  it('prévient le parent par la table d’envoi et apparaît sur son portail', async () => {
+    const date = addDays(todayInCameroon(), -1);
+    // Un avertissement reste interne à l'école.
+    await report(a.id, date, 'INSOLENCE', 'WARNING');
+    expect(
+      await prisma.notificationOutbox.count({ where: { template: 'temporaryExclusion' } }),
+    ).toBe(0);
+    const incident = await report(a.id, date, 'VIOLENCE', 'TEMPORARY_EXCLUSION', '2 jours.');
+    const guardian = await prisma.guardian.findFirstOrThrow({
+      where: { students: { some: { studentId: a.id } } },
+    });
+    const sms = await prisma.notificationOutbox.findFirstOrThrow({
+      where: { template: 'temporaryExclusion' },
+    });
+    expect(sms).toMatchObject({ recipient: guardian.phone, status: 'PENDING' });
+    expect(sms.body).toContain('Awa Bello est exclue temporairement');
+    expect(sms.body).toContain(`(2 jours)`);
+    expect(sms.payload).toMatchObject({ incidentId: incident.id });
+
+    const code = await requestOtp(app, guardian.phone);
+    const parent = toSession(
+      await http().post('/auth/otp/verify').send({ phone: guardian.phone, code }).expect(200),
+    );
+    const overview = await http().get(`/portal/children/${a.id}`).set(parent.auth).expect(200);
+    expect(overview.body.exclusions).toEqual([{ id: incident.id, date, details: '2 jours.' }]);
+
+    // Exclusion ajoutée par une correction : le parent de l'élève (garçon) est prévenu.
+    const other = await report(b.id, date, 'FRAUD', 'NONE');
+    await http()
+      .patch(`/discipline/incidents/${other.id}`)
+      .set(s.surveillant.auth)
+      .send({
+        studentId: b.id,
+        date,
+        type: 'FRAUD',
+        description: 'Fraude à la composition',
+        sanctionType: 'TEMPORARY_EXCLUSION',
+      })
+      .expect(200);
+    const second = await prisma.notificationOutbox.findMany({
+      where: { template: 'temporaryExclusion' },
+      orderBy: { createdAt: 'asc' },
+    });
+    expect(second).toHaveLength(2);
+    expect(second[1]?.body).toContain('Jean Mvondo est exclu temporairement');
+  });
+});
+
 describe('isolation du registre entre écoles', () => {
   it('une école ne voit ni ne crée d’incident pour une autre', async () => {
-    await report(a.id, '2026-10-02', 'VIOLENCE', 'BLAME');
+    await report(a.id, '2026-08-02', 'VIOLENCE', 'BLAME');
     await seedSchool('autre', 'AU');
     const o = await sessions(app, 'autre');
     const list = await http().get('/discipline/incidents').set(o.surveillant.auth).expect(200);
@@ -189,6 +344,14 @@ describe('isolation du registre entre écoles', () => {
       .set(o.surveillant.auth)
       .send({ studentId: a.id, date: '2026-10-12', type: 'OTHER', description: 'Test' })
       .expect(404);
+    const [mine] = await prisma.incident.findMany();
+    await http()
+      .patch(`/discipline/incidents/${mine?.id}`)
+      .set(o.surveillant.auth)
+      .send({ studentId: a.id, date: '2026-10-12', type: 'OTHER', description: 'Piratage' })
+      .expect(404);
+    await http().delete(`/discipline/incidents/${mine?.id}`).set(o.surveillant.auth).expect(404);
     expect(await prisma.incident.count()).toBe(1);
+    expect(await prisma.incident.findFirst()).toMatchObject({ description: 'Incident VIOLENCE' });
   });
 });

@@ -521,11 +521,20 @@ async function main(): Promise<void> {
       authorId: staff['prof.maths@demo.cm'] ?? '',
     },
   });
+  // Réunion des parents : le samedi d'au moins une semaine plus tard, même jour dans l'annonce et
+  // dans le calendrier.
+  const meetingOffset = 7 + ((6 - new Date(`${addDays(today, 7)}T00:00:00Z`).getUTCDay()) % 7);
+  const meetingDay = new Intl.DateTimeFormat('fr-FR', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    timeZone: 'UTC',
+  }).format(new Date(`${addDays(today, meetingOffset)}T00:00:00Z`));
   await base.announcement.create({
     data: {
       schoolId,
       title: 'Réunion des parents',
-      body: 'Samedi 7 novembre à 9 h, salle polyvalente : remise des résultats de la séquence 1.',
+      body: `${meetingDay.replace(/^./, (c) => c.toUpperCase())} à 9 h, salle polyvalente : remise des résultats de la séquence 1.`,
       scope: 'SCHOOL',
       authorId: staff['direction@demo.cm'] ?? '',
     },
@@ -555,8 +564,15 @@ async function main(): Promise<void> {
     string | null,
     'SCHOOL' | 'CLASS',
   ][] = [
-    ['Réunion des parents (séquence 1)', 'PARENT_MEETING', 8, 8, '09:00', 'SCHOOL'],
-    ['Sortie pédagogique au musée national', 'OUTING', 12, 12, '08:00', 'CLASS'],
+    [
+      'Réunion des parents (séquence 1)',
+      'PARENT_MEETING',
+      meetingOffset,
+      meetingOffset,
+      '09:00',
+      'SCHOOL',
+    ],
+    ['Sortie pédagogique au musée national', 'OUTING', 16, 16, '08:00', 'CLASS'],
     ['Fête de fin de trimestre', 'CELEBRATION', 45, 45, '14:00', 'SCHOOL'],
     ['Congés de Noël', 'HOLIDAY', 50, 65, null, 'SCHOOL'],
   ];

@@ -159,8 +159,36 @@ test('registre des incidents : saisie, filtres et statistiques', async ({ page }
   await expect(page.getByText('Incident enregistré au registre')).toBeVisible();
   await expect(page.getByText(description).filter({ visible: true })).toBeVisible();
 
+  // Le formulaire rouvert repart de zéro ; une date future est refusée.
+  await page.getByRole('button', { name: 'Signaler un incident' }).click();
+  await expect(dialog.getByLabel('Élève', { exact: true })).toHaveValue('');
+  await expect(dialog.getByRole('button', { name: /Ngono Marie-Claire/ })).toHaveCount(0);
+  const tomorrow = new Date(Date.now() + 25 * 3600_000).toISOString().slice(0, 10);
+  await dialog.getByLabel('Date', { exact: true }).fill(tomorrow);
+  await expect(dialog.getByText('La date ne peut pas être dans le futur')).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Enregistrer l’incident' })).toBeDisabled();
+  await dialog.getByRole('button', { name: 'Fermer' }).click();
+
+  // Statistiques : des élèves sanctionnés, les récidives sous leur propre titre.
+  await expect(page.getByText('Élèves sanctionnés')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Élèves signalés plusieurs fois' })).toBeVisible();
+
+  // Correction par le déclarant.
+  const row = page.locator('li, tr').filter({ hasText: description }).filter({ visible: true });
+  await row.getByRole('button', { name: /^Corriger/ }).click();
+  const edit = page.getByRole('dialog', { name: 'Corriger l’incident' });
+  await expect(edit.getByLabel('Description')).toHaveValue(description);
+  await expect(edit.getByText('Ngono Marie-Claire')).toBeVisible();
+  await edit.getByLabel('Sanction', { exact: true }).selectOption({ label: 'Avertissement' });
+  await edit.getByRole('button', { name: 'Enregistrer la correction' }).click();
+  await expect(page.getByText('Incident corrigé')).toBeVisible();
+  await expect(row).toContainText('Avertissement');
+
   const filter = (label: string) =>
     page.getByLabel(label, { exact: true }).filter({ visible: true });
+  // Filtre « Toutes les sanctions » lisible en entier sur téléphone (toute la largeur).
+  if (isMobile(info))
+    expect((await filter('Sanction').boundingBox())?.width ?? 0).toBeGreaterThan(250);
   await filter('Type').selectOption({ label: 'Violence' });
   await filter('Classe').selectOption({ label: '4e A' });
   await expect(page.getByText(description).filter({ visible: true })).toBeVisible();
@@ -168,6 +196,15 @@ test('registre des incidents : saisie, filtres et statistiques', async ({ page }
   await filter('Sanction').selectOption({ label: 'Exclusion définitive' });
   await expect(page.getByText('Aucun incident sur ces critères')).toBeVisible();
   await expectNoHorizontalOverflow(page);
+
+  // Suppression après confirmation.
+  await filter('Sanction').selectOption({ label: 'Toutes les sanctions' });
+  await row.getByRole('button', { name: /^Supprimer/ }).click();
+  const confirm = page.getByRole('dialog', { name: 'Supprimer l’incident ?' });
+  await expect(confirm).toContainText(description);
+  await confirm.getByRole('button', { name: 'Supprimer', exact: true }).click();
+  await expect(page.getByText('Incident supprimé du registre')).toBeVisible();
+  await expect(page.getByText(description).filter({ visible: true })).toHaveCount(0);
 
   // Le secrétariat n'a pas accès au registre.
   await switchUser(page, 'secretariat@demo.cm');

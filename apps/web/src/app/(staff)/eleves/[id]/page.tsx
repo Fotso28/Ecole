@@ -735,7 +735,7 @@ export default function StudentPage({ params }: { params: Promise<{ id: string }
                     {r.status === 'ABSENT' ? (s.gender === 'F' ? 'Absente' : 'Absent') : 'Retard'}
                   </Badge>
                   {r.justification === 'ACCEPTED' ? (
-                    <Badge tone="info">Justifié</Badge>
+                    <Badge tone="info">{r.status === 'ABSENT' ? 'Justifiée' : 'Justifié'}</Badge>
                   ) : r.justification === 'PENDING' ? (
                     <Badge>Justificatif en attente</Badge>
                   ) : null}

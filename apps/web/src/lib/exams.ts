@@ -40,6 +40,13 @@ export interface ExamPaperDetail {
 }
 
 export interface ExamSessionDetail {
+  /** Volets accessibles : un enseignant non surveillant ne voit pas les listes nominatives. */
+  access?: {
+    seating: boolean;
+    results: boolean;
+    /** Émargement : salles surveillées par la personne ; null : toutes les salles. */
+    attendanceRooms: { paperId: string; roomId: string }[] | null;
+  };
   id: string;
   name: string;
   kind: ExamSessionSummary['kind'];

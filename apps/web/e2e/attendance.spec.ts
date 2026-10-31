@@ -107,9 +107,12 @@ test('la vie scolaire saisit un justificatif papier, le refuse avec un motif ; l
   // Tableau de bord : compteur accordé, rafraîchi à chaque retour sur l'accueil.
   const home = mobile ? 'Accueil' : 'Tableau de bord';
   const todo = page.getByRole('link', { name: /\d+ justificatifs? d’absence à traiter/ });
-  await navigate(page, info, home);
-  const pending = Number(/(\d+)/.exec((await todo.textContent()) ?? '')?.[1]);
+  const dashboard = (await (await request.get(`${API_URL}/dashboard`, { headers })).json()) as {
+    todo: { pendingJustifications: number };
+  };
+  const pending = dashboard.todo.pendingJustifications;
   expect(pending).toBeGreaterThan(0);
+  await navigate(page, info, home);
   await expect(todo).toHaveText(
     pending === 1
       ? /1 justificatif d’absence à traiter/

@@ -167,7 +167,7 @@ export default function AnnouncementsPage() {
         <div className="flex flex-col gap-3">
           {list.data?.length === 0 ? <EmptyState title="Aucune annonce" /> : null}
           {list.data?.map((a) => (
-            <Card key={a.id} className={a.withdrawnAt ? 'opacity-80' : undefined}>
+            <Card key={a.id}>
               <article className="flex flex-col gap-1" aria-label={a.title}>
                 <div className="flex items-start justify-between gap-2">
                   <strong className="[overflow-wrap:anywhere]">{a.title}</strong>

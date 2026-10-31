@@ -5,6 +5,7 @@ import {
   fitsCapacity,
   missedBoarding,
   occupancy,
+  rollCallTimestamp,
   subscriptionFee,
   transportRollCallSchema,
   transportVehicleSchema,
@@ -103,6 +104,27 @@ describe('appel dans le car', () => {
         records: [],
       }).success,
     ).toBe(false);
+  });
+
+  it('garde l’heure du pointage sur le téléphone, bornée aux valeurs plausibles', () => {
+    // Pointé à 6 h 44 (Douala) sans réseau, reçu à 11 h 44 au retour du réseau.
+    const received = new Date('2026-10-31T10:44:00Z');
+    expect(rollCallTimestamp('2026-10-31T05:44:00Z', received, '2026-10-31')).toEqual(
+      new Date('2026-10-31T05:44:00Z'),
+    );
+    // Absente ou illisible : heure de réception.
+    expect(rollCallTimestamp(undefined, received, '2026-10-31')).toBe(received);
+    expect(rollCallTimestamp('hier matin', received, '2026-10-31')).toBe(received);
+    // Horloge du téléphone en avance : tolérance de 5 minutes, ramenée à la réception.
+    expect(rollCallTimestamp('2026-10-31T10:47:00Z', received, '2026-10-31')).toBe(received);
+    expect(rollCallTimestamp('2026-10-31T12:00:00Z', received, '2026-10-31')).toBe(received);
+    // Hors du jour du trajet (heure de Douala) : téléphone mal réglé.
+    expect(rollCallTimestamp('2020-01-01T07:00:00Z', received, '2026-10-31')).toBe(received);
+    expect(rollCallTimestamp('2026-10-30T22:30:00Z', received, '2026-10-31')).toBe(received);
+    // 23 h 30 UTC le 30 = 0 h 30 le 31 à Douala : même jour de trajet.
+    expect(rollCallTimestamp('2026-10-30T23:30:00Z', received, '2026-10-31')).toEqual(
+      new Date('2026-10-30T23:30:00Z'),
+    );
   });
 
   it('normalise l’immatriculation', () => {

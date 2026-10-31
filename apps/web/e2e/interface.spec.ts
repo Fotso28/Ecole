@@ -306,6 +306,13 @@ test.describe('hors connexion', () => {
     await page.reload();
     await expect(page.getByText(/Hors connexion, données du/)).toBeVisible();
     await expect(page.locator('main h1').first()).toBeVisible();
+    // Page non prévue hors connexion : message juste, retour à « Ma journée » (pas au portail).
+    await page.goto('/notes');
+    await expect(page.getByText('Cette page n’est pas disponible hors connexion.')).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Retour à l’accueil' })).toHaveAttribute(
+      'href',
+      '/enseignant',
+    );
     await context.setOffline(false);
   });
 });

@@ -93,10 +93,28 @@ test.describe('transport scolaire', () => {
     );
     await expect(page.getByRole('status').filter({ hasText: 'Appel enregistré' })).toBeVisible();
 
-    // Coupure réseau : l'appel est gardé sur le téléphone puis envoyé au retour du réseau.
+    // Le service worker garde la page et la feuille d'appel pour une réouverture sans réseau.
+    await page.evaluate(() => navigator.serviceWorker.ready.then(() => undefined));
+    await page.reload();
+    await page.getByLabel('Trajet', { exact: true }).selectOption('OUTBOUND');
+    await expect(list.getByRole('listitem').first()).toBeVisible();
+    await page.waitForLoadState('networkidle');
+
+    // Coupure réseau : l'appel continue, gardé sur le téléphone, même si la page est rechargée.
     await context.setOffline(true);
     const second = list.getByRole('listitem').nth(1);
     await second.getByRole('button', { name: /: absent$/ }).click();
+    await expect(page.getByText(/Appel gardé sur le téléphone/)).toBeVisible();
+    await expect(page.getByText(/L’appel continue sans réseau/)).toBeVisible();
+    await expect(page.getByText(/Lecture seule/)).toHaveCount(0);
+    await page.reload();
+    await expect(page.getByRole('heading', { name: 'Appel du car' })).toBeVisible();
+    await expect(page.getByText(/pas encore été|pas disponible hors connexion/)).toHaveCount(0);
+    await page.getByLabel('Trajet', { exact: true }).selectOption('OUTBOUND');
+    await expect(second.getByRole('button', { name: /: absent$/ })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
     await expect(page.getByText(/Appel gardé sur le téléphone/)).toBeVisible();
     await context.setOffline(false);
     await expect(page.getByRole('status').filter({ hasText: 'Appel enregistré' })).toBeVisible({

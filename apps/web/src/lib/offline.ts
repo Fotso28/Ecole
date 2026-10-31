@@ -56,9 +56,28 @@ export function formatCachedAt(iso: string): string {
   return `${pad(d.getDate())}/${pad(d.getMonth() + 1)} à ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-/** Profil gardé pour rouvrir l'application hors connexion (parents et enseignants seulement). */
+/**
+ * Profil gardé pour rouvrir l'application hors connexion : parents, enseignants (« Ma journée »)
+ * et chauffeurs ou accompagnateurs (appel du car, qui continue sans réseau).
+ */
 export function offlineEligible(me: Me): boolean {
-  return me.kind === 'parent' || me.roles.includes('TEACHER');
+  return (
+    me.kind === 'parent' ||
+    me.roles.includes('TEACHER') ||
+    me.roles.includes('TRANSPORT') ||
+    !!me.scopes?.lines
+  );
+}
+
+/** Pages où la saisie continue sans réseau (gardée sur l'appareil, envoyée au retour du réseau). */
+const OFFLINE_ENTRY_PAGES: Record<string, string> = {
+  '/transport/appel':
+    'L’appel continue sans réseau : il est gardé sur le téléphone et envoyé au retour du réseau.',
+};
+
+/** Consigne du bandeau hors connexion pour la page ouverte. */
+export function offlineEntryNote(pathname: string): string | null {
+  return OFFLINE_ENTRY_PAGES[pathname] ?? null;
 }
 
 export function saveOfflineProfile(me: Me): void {

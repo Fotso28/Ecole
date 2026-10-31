@@ -458,6 +458,52 @@ describe('appel dans le car', () => {
     expect(after.status).toBe('CANCELLED');
   });
 
+  it('garde l’heure du pointage sur le téléphone (appel envoyé au retour du réseau), bornée', async () => {
+    const n = await prepared();
+    // Pointé sans réseau plus tôt dans la journée, reçu maintenant.
+    const dayStart = new Date(`${today}T00:00:00+01:00`).getTime();
+    const pointed = new Date(Math.max(dayStart + 60_000, Date.now() - 3_600_000));
+    const before = Date.now();
+    await http()
+      .put('/transport/trips')
+      .set(driver.auth)
+      .send({
+        lineId: n.lineA,
+        date: today,
+        direction: 'OUTBOUND',
+        records: [
+          { studentId: a.id, boarded: true, alighted: null, boardedAt: pointed.toISOString() },
+          // Téléphone mal réglé : heure absurde remplacée par l'heure de réception.
+          { studentId: b.id, boarded: true, alighted: null, boardedAt: '2020-01-01T07:00:00Z' },
+        ],
+      })
+      .expect(200);
+    const after = Date.now();
+    const recA = await prisma.transportTripRecord.findFirstOrThrow({ where: { studentId: a.id } });
+    // Heure du téléphone (sauf juste après minuit, où elle serait postérieure à la réception).
+    expect(recA.boardedAt!.toISOString()).toBe(
+      pointed.getTime() <= before ? pointed.toISOString() : recA.boardedAt!.toISOString(),
+    );
+    expect(recA.boardedAt!.getTime()).toBeLessThanOrEqual(after + 1000);
+    const recB = await prisma.transportTripRecord.findFirstOrThrow({ where: { studentId: b.id } });
+    expect(recB.boardedAt!.getTime()).toBeGreaterThanOrEqual(before - 1000);
+    expect(recB.boardedAt!.getTime()).toBeLessThanOrEqual(after + 1000);
+    // Un renvoi du même appel ne change pas l'heure déjà enregistrée.
+    await http()
+      .put('/transport/trips')
+      .set(driver.auth)
+      .send({
+        lineId: n.lineA,
+        date: today,
+        direction: 'OUTBOUND',
+        records: [{ studentId: a.id, boarded: true, alighted: null }],
+      })
+      .expect(200);
+    expect(
+      (await prisma.transportTripRecord.findFirstOrThrow({ where: { studentId: a.id } })).boardedAt,
+    ).toEqual(recA.boardedAt);
+  });
+
   it('n’envoie pas de SMS sans le réglage de l’école ni pour un élève non abonné', async () => {
     const n = await prepared();
     await http()

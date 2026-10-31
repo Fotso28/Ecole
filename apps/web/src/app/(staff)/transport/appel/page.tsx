@@ -32,6 +32,9 @@ interface TripSheet {
 interface Mark {
   boarded: boolean | null;
   alighted: boolean | null;
+  /** Heures du pointage sur le téléphone, envoyées avec l'appel (montré au parent). */
+  boardedAt?: string | null;
+  alightedAt?: string | null;
 }
 interface Pending {
   lineId: string;
@@ -121,7 +124,12 @@ export default function BusRollCallPage() {
     for (const s of sheet.data.students)
       next[s.studentId] = { boarded: s.boarded, alighted: s.alighted };
     for (const r of local?.records ?? [])
-      next[r.studentId] = { boarded: r.boarded, alighted: r.alighted };
+      next[r.studentId] = {
+        boarded: r.boarded,
+        alighted: r.alighted,
+        boardedAt: r.boardedAt,
+        alightedAt: r.alightedAt,
+      };
     setMarks(next);
     setPending(Object.keys(readQueue()).length);
   }, [sheet.data, lineId, date, direction]);
@@ -147,9 +155,17 @@ export default function BusRollCallPage() {
   }, [flush]);
 
   const mark = (studentId: string, patch: Partial<Mark>) => {
+    const prev = marks[studentId] ?? { boarded: null, alighted: null };
+    const at = new Date().toISOString();
+    // L'heure retenue est celle du pointage sur le téléphone, même si l'envoi a lieu plus tard.
+    const stamps: Partial<Mark> = {};
+    if (patch.boarded !== undefined)
+      stamps.boardedAt = patch.boarded ? (prev.boarded ? (prev.boardedAt ?? at) : at) : null;
+    if (patch.alighted !== undefined)
+      stamps.alightedAt = patch.alighted ? (prev.alighted ? (prev.alightedAt ?? at) : at) : null;
     const next = {
       ...marks,
-      [studentId]: { ...(marks[studentId] ?? { boarded: null, alighted: null }), ...patch },
+      [studentId]: { ...prev, ...patch, ...stamps },
     };
     setMarks(next);
     const payload: Pending = {

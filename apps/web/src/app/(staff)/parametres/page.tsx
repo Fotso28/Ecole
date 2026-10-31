@@ -17,7 +17,7 @@ import { useToast } from '@/components/ui/toast';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import type { BillingWarning, Invoice, Plan } from '@/lib/billing';
-import { formatDate, formatDateTime, formatFcfa } from '@/lib/format';
+import { formatDate, formatDateTime, formatFcfa, plural } from '@/lib/format';
 
 interface SchoolSettings {
   id: string;
@@ -206,7 +206,8 @@ function SubscriptionCard() {
                   {inv.number} · {inv.period}
                 </strong>
                 <span className="text-[13px] text-muted">
-                  {inv.studentCount} élèves · échéance le {formatDate(inv.dueDate)}
+                  {plural(inv.studentCount, 'élève', 'élèves')} · échéance le{' '}
+                  {formatDate(inv.dueDate)}
                 </span>
               </span>
               <span className="tabular">

@@ -164,7 +164,7 @@ export default function ImportPage() {
         <Card aria-live="polite">
           <CardHeader
             title={report.created > 0 ? 'Import terminé' : 'Rapport de vérification'}
-            subtitle={`${report.valid} ligne(s) valide(s) sur ${report.total}`}
+            subtitle={`${plural(report.valid, 'ligne valide', 'lignes valides')} sur ${report.total}`}
           />
           {report.errors.length > 0 ? (
             <ul className="flex flex-col gap-2">

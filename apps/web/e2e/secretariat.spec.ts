@@ -48,12 +48,34 @@ test.describe('documents administratifs', () => {
     await expect(row.first()).toContainText('Valide');
     // Le secrétariat délivre mais n'annule pas.
     await expect(page.getByRole('button', { name: `Annuler le n° ${number}` })).toHaveCount(0);
+    // Un duplicata consomme un numéro : confirmation demandée, rien sans accord.
+    let question = '';
+    page.once('dialog', (d) => {
+      question = d.message();
+      void d.dismiss();
+    });
+    await page.getByRole('button', { name: `Duplicata du n° ${number}` }).click();
+    await expect.poll(() => question).toContain('nouveau numéro du registre');
+    await expect(page.getByText(/Duplicata n° .* délivré/)).toHaveCount(0);
 
-    await page.goto(`/verifier/${code}`);
+    // Code recopié en minuscules : document authentique, adresse normalisée.
+    await page.goto(`/verifier/${code.toLowerCase()}`);
     await expect(
       page.getByRole('heading', { name: 'Certificat de scolarité authentique' }),
     ).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/verifier/${code}$`));
     await expect(page.getByText(number)).toBeVisible();
+    // Page de saisie du code, avec espaces et minuscules.
+    await page.goto('/verifier');
+    await expect(page.getByRole('heading', { name: 'Vérifier l’authenticité' })).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+    await page
+      .getByLabel('Code du document')
+      .fill(`${code.slice(0, 4).toLowerCase()} ${code.slice(4, 8)} ${code.slice(8)}`);
+    await page.getByRole('button', { name: 'Vérifier le document' }).click();
+    await expect(
+      page.getByRole('heading', { name: 'Certificat de scolarité authentique' }),
+    ).toBeVisible();
 
     await switchUser(page, 'direction@demo.cm');
     await page.goto('/documents');
@@ -67,7 +89,7 @@ test.describe('documents administratifs', () => {
 
     await page.goto(`/verifier/${code}`);
     await expect(
-      page.getByRole('heading', { name: 'Certificat de scolarité annulé(e)' }),
+      page.getByRole('heading', { name: 'Certificat de scolarité annulé', exact: true }),
     ).toBeVisible();
   });
 
@@ -80,6 +102,16 @@ test.describe('documents administratifs', () => {
       .locator('section')
       .filter({ has: page.getByRole('heading', { name: 'Carte d’élève' }) });
     await card.getByLabel('Nom du signataire').fill('Alice Ngo Bassa');
+    await card.getByLabel('En-tête officiel').fill('MINESEC\nDélégation régionale du Centre');
+    // Aperçu du modèle saisi, sans délivrer de document numéroté.
+    const preview = page.waitForResponse(
+      (r) =>
+        r.url().endsWith('/api/documents/templates/STUDENT_CARD/preview') && r.status() === 200,
+    );
+    const popup = page.waitForEvent('popup');
+    await card.getByRole('button', { name: 'Aperçu : Carte d’élève' }).click();
+    expect((await preview).headers()['content-type']).toBe('application/pdf');
+    await (await popup).close();
     await card.getByRole('button', { name: 'Enregistrer le modèle' }).click();
     await expect(page.getByText('Modèle « Carte d’élève » enregistré')).toBeVisible();
     await expect(card.getByText('Personnalisé')).toBeVisible();
@@ -105,7 +137,7 @@ test('importe un classeur Excel à partir du modèle téléchargé', async ({ pa
   });
   await expect(page.getByText('eleves-rentree.xlsx')).toBeVisible();
   await page.getByRole('button', { name: 'Vérifier sans importer' }).click();
-  await expect(page.getByText('1 ligne(s) valide(s) sur 1')).toBeVisible();
+  await expect(page.getByText('1 ligne valide sur 1')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Importer 1 élève' })).toBeVisible();
   await expectNoHorizontalOverflow(page);
 });

@@ -15,7 +15,7 @@ import {
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { useMySupervisions } from '@/lib/exams';
-import { formatShortDate, formatWeekday } from '@/lib/format';
+import { formatShortDate, formatWeekday, plural } from '@/lib/format';
 
 interface TeacherDay {
   today: string;
@@ -129,7 +129,8 @@ export default function TeacherPage() {
                   <div>
                     <strong className="text-[17px]">{c.className}</strong>
                     <p className="text-sm text-muted">
-                      {c.subjectName} · coef. {c.coefficient} · {c.students} élèves
+                      {c.subjectName} · coef. {c.coefficient} ·{' '}
+                      {plural(c.students, 'élève', 'élèves')}
                     </p>
                   </div>
                   <div className="grid grid-cols-3 gap-2">

@@ -40,6 +40,13 @@ export interface RenderableDocument {
   data: AdminDocumentData;
   /** Photo d'identité en clair (JPEG ou PNG), absente si retirée ou sans consentement. */
   photo?: Buffer | null;
+  /** Aperçu d'un modèle : filigrane « SPÉCIMEN », aucun numéro du registre consommé. */
+  specimen?: boolean;
+}
+
+/** Qualité du signataire au milieu d'une phrase : « Je soussigné(e), le Chef d'établissement ». */
+export function titleInSentence(title: string): string {
+  return title.replace(/^(Le |La |Les |L’|L')/, (article) => article.toLowerCase());
 }
 
 function toBuffer(doc: PDFKit.PDFDocument): Promise<Buffer> {
@@ -153,8 +160,8 @@ export class DocumentsPdf {
     y += 16;
 
     const signatory = data.template.signatoryName
-      ? `${data.template.signatoryName}, ${data.template.signatoryTitle}`
-      : data.template.signatoryTitle;
+      ? `${data.template.signatoryName}, ${titleInSentence(data.template.signatoryTitle)}`
+      : titleInSentence(data.template.signatoryTitle);
     const name = `${s.lastName.toUpperCase()} ${s.firstName}`;
     const born = `${female ? 'née' : 'né'} le ${frDate(s.birthDate)}${s.birthPlace ? ` à ${s.birthPlace}` : ''}`;
     const repeating =
@@ -214,6 +221,7 @@ export class DocumentsPdf {
         { width: W - 70 },
       );
     if (d.status === 'CANCELLED') watermark(doc, 'ANNULÉ', 110, 0.16);
+    if (d.specimen) watermark(doc, 'SPÉCIMEN', 100, 0.14);
     return toBuffer(doc);
   }
 
@@ -228,12 +236,21 @@ export class DocumentsPdf {
     });
     const W = doc.page.width;
     const H = doc.page.height;
-    doc.rect(0, 0, W, 30).fill(NIGHT);
+    // En-tête officiel du modèle (ministère, délégation…), sur une ligne au-dessus du nom.
+    const header = data.template.headerLines.filter(Boolean);
+    const shift = header.length ? 8 : 0;
+    doc.rect(0, 0, W, 30 + shift).fill(NIGHT);
+    if (header.length)
+      doc
+        .fillColor('#FFFFFF')
+        .font('Helvetica')
+        .fontSize(5)
+        .text(t(header.join(' · ')), 8, 4, { width: W - 16, lineBreak: false, ellipsis: true });
     doc
       .fillColor('#FFFFFF')
       .font('Helvetica-Bold')
       .fontSize(8)
-      .text(t(data.school.name.toUpperCase()), 8, 6, {
+      .text(t(data.school.name.toUpperCase()), 8, 6 + shift, {
         width: W - 16,
         lineBreak: false,
         ellipsis: true,
@@ -244,13 +261,13 @@ export class DocumentsPdf {
       .text(
         t(`${data.template.title}${data.duplicateOf ? ' · DUPLICATA' : ''} · ${data.year.name}`),
         8,
-        18,
+        18 + shift,
         { width: W - 16, lineBreak: false, ellipsis: true },
       );
 
     // Photo d'identité, ou cadre vide sans consentement.
     const px = 8;
-    const py = 36;
+    const py = 36 + shift / 2;
     let photoDrawn = false;
     if (d.photo) {
       try {
@@ -269,7 +286,7 @@ export class DocumentsPdf {
         .text('PHOTO', px, py + 29, { width: 52, align: 'center' });
 
     const fx = 68;
-    let fy = 36;
+    let fy = 36 + shift / 2;
     const field = (label: string, value: string) => {
       doc.fillColor(MUTED).font('Helvetica').fontSize(5.5).text(label, fx, fy);
       doc
@@ -287,12 +304,12 @@ export class DocumentsPdf {
     field('Classe', data.class.name);
     field('Matricule', s.matricule);
 
-    doc.image(await this.qr(d.verificationCode, 120), W - 46, 38, { width: 40 });
+    doc.image(await this.qr(d.verificationCode, 120), W - 46, 38 + shift / 2, { width: 40 });
     doc
       .fillColor(MUTED)
       .font('Helvetica')
       .fontSize(5)
-      .text(d.verificationCode, W - 48, 79, { width: 44, align: 'center' });
+      .text(d.verificationCode, W - 48, 79 + shift / 2, { width: 44, align: 'center' });
 
     doc
       .moveTo(8, H - 26)
@@ -318,7 +335,15 @@ export class DocumentsPdf {
         width: W / 2 - 28,
         align: 'right',
       });
+    if (data.template.signatoryName)
+      doc.font('Helvetica').text(t(data.template.signatoryName), W / 2 + 20, H - 13, {
+        width: W / 2 - 28,
+        align: 'right',
+        lineBreak: false,
+        ellipsis: true,
+      });
     if (d.status === 'CANCELLED') watermark(doc, 'ANNULÉE', 40, 0.25);
+    if (d.specimen) watermark(doc, 'SPÉCIMEN', 36, 0.2);
     return toBuffer(doc);
   }
 }

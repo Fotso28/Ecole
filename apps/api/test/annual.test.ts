@@ -4,7 +4,15 @@ import { DEFAULT_COUNCIL_RULES, proposeYearEndDecision } from '@ecole/shared';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { enrollStudent, seedSchool, sessions, type SchoolFixture } from './fixtures';
-import { createTestApp, prisma, requestOtp, resetDb, type Session, toSession } from './helpers';
+import {
+  createTestApp,
+  pdfText,
+  prisma,
+  requestOtp,
+  resetDb,
+  type Session,
+  toSession,
+} from './helpers';
 
 let app: INestApplication;
 let f: SchoolFixture;
@@ -245,6 +253,14 @@ describe('bulletin de fin d’année', () => {
     expect(pdf.body.subarray(0, 4).toString()).toBe('%PDF');
 
     await publish(t3);
+    // Adresse de vérification imprimée à côté du QR, pour qui ne peut pas le scanner.
+    const published = await http()
+      .get(`/report-cards/${ngonoRow.id}/pdf`)
+      .set(s.direction.auth)
+      .expect(200);
+    expect(pdfText(published.body as Buffer).replace(/\s+/g, '')).toContain(
+      `/verifier/${card.body.verificationCode}`,
+    );
     const sms = await prisma.notificationOutbox.findMany({
       where: { template: 'annualReportCardPublished' },
     });
@@ -256,10 +272,15 @@ describe('bulletin de fin d’année', () => {
     await expect(
       prisma.reportCard.update({ where: { id: ngonoRow.id }, data: { annualAverageCenti: 2000 } }),
     ).rejects.toThrow(/figé/);
-    const verified = await http().get(`/verify/${card.body.verificationCode}`).expect(200);
+    // Code recopié en minuscules avec une espace : décision de fin d'année affichée.
+    const typed = ` ${(card.body.verificationCode as string).toLowerCase()}`;
+    const verified = await http()
+      .get(`/verify/${encodeURIComponent(typed)}`)
+      .expect(200);
     expect(verified.body).toMatchObject({
       valid: true,
       annualAverage: '13,36',
+      yearEndDecision: 'Admis en classe supérieure',
       term: '3e trimestre',
     });
 

@@ -6,10 +6,13 @@ import {
 } from '@nestjs/common';
 import {
   assessDuplicate,
+  describeGuardian,
+  enrollmentChangeSchema,
   formatMatricule,
   GUARDIAN_RELATIONSHIPS,
   guardianInputSchema,
   normalizeCameroonPhone,
+  sameGuardianName,
   studentCreateSchema,
   studentUpdateSchema,
   type GuardianInput,
@@ -25,6 +28,7 @@ import { decrypt, encrypt } from '../../common/crypto';
 import { fromDbDate, todayInCameroon, toDbDate } from '../../common/dates';
 import { Db, InjectDb, Tx } from '../../common/prisma';
 import { ScopeService } from '../../common/scope.service';
+import { matchStudentIds } from '../../common/student-search';
 import { FinanceService } from '../finance/finance.service';
 import { normalizeImportHeader, readStudentSheet } from './xlsx';
 import { FilesService, presentFile, type UploadedFile } from '../files/files.service';
@@ -37,6 +41,70 @@ export const DEFAULT_DOCUMENTS = [
 ];
 
 type StudentInput = z.infer<typeof studentCreateSchema>;
+type EnrollmentChange = z.infer<typeof enrollmentChangeSchema>;
+
+/** Parent déjà enregistré sous un numéro, avec ses enfants (pour le désigner sans ambiguïté). */
+export interface KnownGuardian {
+  phone: string;
+  id: string;
+  firstName: string;
+  lastName: string;
+  children: { firstName: string; lastName: string }[];
+  /** « Pierre Ngono (parent de Marie-Claire et Paul-Henri) ». */
+  label: string;
+}
+
+/** Numéro déjà attribué à un parent dont le nom diffère de celui saisi. */
+export interface GuardianConflict {
+  /** Rang du parent dans la saisie (0 pour le premier). */
+  index: number;
+  phone: string;
+  existing: KnownGuardian;
+  message: string;
+}
+
+const PHOTO_DOCUMENT = 'Photo d’identité';
+
+/** Champs du fichier d'import : libellé lisible et colonne lue, dans l'ordre du rapport. */
+const IMPORT_FIELDS = {
+  lastName: { label: 'Nom', columns: ['nom'] },
+  firstName: { label: 'Prénoms', columns: ['prenoms', 'prenom'] },
+  gender: { label: 'Sexe', columns: ['sexe'] },
+  birthDate: { label: 'Date de naissance', columns: ['date_naissance'] },
+  birthPlace: { label: 'Lieu de naissance', columns: ['lieu_naissance'] },
+  'parent.lastName': { label: 'Nom du parent', columns: ['parent_nom'] },
+  'parent.firstName': { label: 'Prénom du parent', columns: ['parent_prenom', 'parent_prenoms'] },
+  'parent.phone': {
+    label: 'Téléphone du parent',
+    columns: ['parent_telephone', 'telephone'],
+  },
+} as const;
+type ImportField = keyof typeof IMPORT_FIELDS;
+const IMPORT_ORDER = Object.keys(IMPORT_FIELDS) as ImportField[];
+
+/** Valeur lue dans la ligne pour un champ (première colonne renseignée). */
+function importValue(raw: Record<string, string>, field: ImportField): string {
+  for (const c of IMPORT_FIELDS[field].columns) {
+    const v = raw[c]?.trim();
+    if (v) return v;
+  }
+  return '';
+}
+
+/**
+ * Message du rapport d'import, en français clair : libellé de la colonne, explication et valeur
+ * lue (« Sexe : indiquez F ou M (valeur lue : X) »). Jamais de nom de champ technique.
+ */
+function importMessage(field: ImportField, value: string, message: string): string {
+  const label = IMPORT_FIELDS[field].label;
+  if (!value) return `${label} : champ obligatoire`;
+  let text = message.charAt(0).toLowerCase() + message.slice(1);
+  if (field === 'gender') text = 'indiquez F ou M';
+  if (field === 'birthDate') text = 'date invalide, attendue au format JJ/MM/AAAA';
+  if (field === 'parent.phone') text = 'numéro de téléphone camerounais invalide';
+  return `${label} : ${text} (valeur lue : ${value})`;
+}
+const ACTIVE_STATUSES: readonly EnrollmentStatus[] = ['ENROLLED', 'REPEATING'];
 
 export interface ListQuery {
   search?: string;
@@ -64,6 +132,8 @@ export class StudentsService {
     const teacherClassIds = teacherOnly ? await this.scope.teacherClassIds() : null;
     const search = q.search?.trim();
     const phone = search ? normalizeCameroonPhone(search) : null;
+    // Nom, prénoms ou matricule : sans accents ni casse, mots dans n'importe quel ordre.
+    const matching = search ? ((await matchStudentIds(this.db, search)) ?? []) : [];
     const where: Prisma.StudentWhereInput = {
       deletedAt: null,
       enrollments: {
@@ -83,9 +153,7 @@ export class StudentsService {
       ...(search
         ? {
             OR: [
-              { lastName: { contains: search, mode: 'insensitive' } },
-              { firstName: { contains: search, mode: 'insensitive' } },
-              { matricule: { contains: search, mode: 'insensitive' } },
+              { id: { in: matching } },
               ...(phone ? [{ guardians: { some: { guardian: { phone } } } }] : []),
             ],
           }
@@ -241,6 +309,7 @@ export class StudentsService {
         });
       }
     }
+    await this.assertNoGuardianConflict(input.guardians);
     const year = await this.scope.currentYear();
     if (input.classId) {
       const cls = await this.db.class.findUnique({ where: { id: input.classId } });
@@ -317,6 +386,80 @@ export class StudentsService {
     return student;
   }
 
+  /** Parents déjà enregistrés sous ces numéros (formats libres), avec leurs enfants. */
+  async knownGuardians(phones: readonly string[], db: Db | Tx = this.db): Promise<KnownGuardian[]> {
+    const normalized = [
+      ...new Set(phones.map(normalizeCameroonPhone).filter((p): p is string => !!p)),
+    ];
+    if (normalized.length === 0) return [];
+    const guardians = await db.guardian.findMany({
+      where: { phone: { in: normalized } },
+      include: {
+        students: {
+          where: { student: { deletedAt: null } },
+          orderBy: { student: { createdAt: 'asc' } },
+          include: { student: { select: { firstName: true, lastName: true } } },
+        },
+      },
+    });
+    return guardians.map((g) => {
+      const children = g.students.map((l) => ({
+        firstName: l.student.firstName,
+        lastName: l.student.lastName,
+      }));
+      return {
+        phone: g.phone,
+        id: g.id,
+        firstName: g.firstName,
+        lastName: g.lastName,
+        children,
+        label: describeGuardian({ firstName: g.firstName, lastName: g.lastName, children }),
+      };
+    });
+  }
+
+  /**
+   * Numéros saisis qui appartiennent déjà à un autre parent (nom différent), sans choix explicite
+   * de rattachement. Un même nom (accents, casse et ordre ignorés) désigne le même parent : le
+   * rattachement des frères et sœurs reste automatique.
+   */
+  async guardianConflicts(
+    guardians: readonly GuardianInput[],
+    db: Db | Tx = this.db,
+  ): Promise<GuardianConflict[]> {
+    const pending = guardians
+      .map((g, index) => ({ g, index }))
+      .filter(({ g }) => !g.linkExistingGuardian);
+    if (pending.length === 0) return [];
+    const known = await this.knownGuardians(
+      pending.map(({ g }) => g.phone),
+      db,
+    );
+    return pending.flatMap(({ g, index }) => {
+      const existing = known.find((k) => k.phone === g.phone);
+      if (!existing || sameGuardianName(g, existing)) return [];
+      return [
+        {
+          index,
+          phone: g.phone,
+          existing,
+          message: `Ce numéro appartient déjà à ${existing.label}`,
+        },
+      ];
+    });
+  }
+
+  private async assertNoGuardianConflict(guardians: readonly GuardianInput[]) {
+    const conflicts = await this.guardianConflicts(guardians);
+    if (conflicts.length === 0) return;
+    throw new ConflictException({
+      statusCode: 409,
+      code: 'GUARDIAN_PHONE_TAKEN',
+      message: `${conflicts[0]!.message}. Rattachez l’élève à ce parent ou corrigez le numéro.`,
+      conflicts,
+    });
+  }
+
   private async linkGuardian(tx: Tx, studentId: string, g: GuardianInput) {
     const schoolId = currentSchoolId();
     const guardian = await tx.guardian.upsert({
@@ -352,6 +495,7 @@ export class StudentsService {
 
   async addGuardian(studentId: string, g: GuardianInput) {
     await this.ensureStudent(studentId);
+    await this.assertNoGuardianConflict([g]);
     return this.db.$transaction(async (tx) => {
       if (g.isPrimary)
         await tx.studentGuardian.updateMany({ where: { studentId }, data: { isPrimary: false } });
@@ -498,6 +642,10 @@ export class StudentsService {
         academicYearId: e.academicYearId,
         isCurrent: e.academicYearId === year.id,
         class: { id: e.class.id, name: e.class.name, level: e.class.level.name },
+        exitDate: e.exitDate ? fromDbDate(e.exitDate) : null,
+        destinationSchool: e.destinationSchool,
+        // Le motif d'une sortie peut être personnel : réservé à qui gère les inscriptions.
+        exitReason: this.scope.can('enrollments.write') ? e.exitReason : null,
       })),
       documents: student.documents.map((d) => ({
         id: d.id,
@@ -532,22 +680,56 @@ export class StudentsService {
     };
   }
 
+  /**
+   * Correction de l'identité (nom, prénoms, sexe, date et lieu de naissance, nationalité). Le
+   * journal d'audit garde la valeur avant et après de chaque champ modifié. Les documents déjà
+   * délivrés et les bulletins publiés restent figés.
+   */
   async update(id: string, input: z.infer<typeof studentUpdateSchema>) {
     const before = await this.ensureStudent(id);
     const { photoConsent, ...rest } = input;
     // Le consentement à la photo passe par son propre circuit (date, auteur, retrait de la photo).
     if (photoConsent !== undefined && photoConsent !== before.photoConsent)
       await this.setPhotoConsent(id, photoConsent);
-    const after = await this.db.student.update({
-      where: { id },
-      data: { ...rest, birthDate: rest.birthDate ? toDbDate(rest.birthDate) : undefined },
-    });
-    await this.audit.log({
-      action: 'students.updated',
-      entity: 'Student',
-      entityId: id,
-      before,
-      after,
+    const identity = {
+      firstName: rest.firstName,
+      lastName: rest.lastName,
+      gender: rest.gender,
+      birthDate: rest.birthDate,
+      birthPlace: rest.birthPlace,
+      nationality: rest.nationality,
+    };
+    const current: Record<keyof typeof identity, string | null> = {
+      firstName: before.firstName,
+      lastName: before.lastName,
+      gender: before.gender,
+      birthDate: fromDbDate(before.birthDate),
+      birthPlace: before.birthPlace,
+      nationality: before.nationality,
+    };
+    const changed = (Object.keys(identity) as (keyof typeof identity)[]).filter(
+      (k) => identity[k] !== undefined && identity[k] !== current[k],
+    );
+    if (changed.length === 0) return before;
+    const after = await this.db.$transaction(async (tx) => {
+      const updated = await tx.student.update({
+        where: { id },
+        data: {
+          ...Object.fromEntries(changed.map((k) => [k, identity[k]])),
+          ...(changed.includes('birthDate') ? { birthDate: toDbDate(rest.birthDate!) } : {}),
+        },
+      });
+      await this.audit.log(
+        {
+          action: 'students.updated',
+          entity: 'Student',
+          entityId: id,
+          before: Object.fromEntries(changed.map((k) => [k, current[k]])),
+          after: Object.fromEntries(changed.map((k) => [k, identity[k]])),
+        },
+        tx,
+      );
+      return updated;
     });
     return after;
   }
@@ -681,6 +863,24 @@ export class StudentsService {
         },
         tx,
       );
+      // La photo déposée vaut pièce « Photo d'identité » fournie.
+      const piece = await tx.studentDocument.findFirst({
+        where: { studentId, type: PHOTO_DOCUMENT, status: 'MISSING' },
+      });
+      if (piece) {
+        await tx.studentDocument.update({ where: { id: piece.id }, data: { status: 'RECEIVED' } });
+        await this.audit.log(
+          {
+            action: 'students.document',
+            entity: 'StudentDocument',
+            entityId: piece.id,
+            before: 'MISSING',
+            after: 'RECEIVED',
+            reason: 'Photo d’identité déposée',
+          },
+          tx,
+        );
+      }
       return { consent: true, hasPhoto: true };
     });
   }
@@ -755,26 +955,105 @@ export class StudentsService {
     });
   }
 
-  async changeEnrollment(
-    enrollmentId: string,
-    input: { classId?: string; status?: EnrollmentStatus },
-  ) {
-    const before = await this.db.enrollment.findUnique({ where: { id: enrollmentId } });
+  /**
+   * Changement d'inscription en cours d'année : changement de classe (même année), transfert ou
+   * sortie (date dans l'année scolaire, motif, établissement d'accueil pour un transfert), ou
+   * réintégration. L'élève qui quitte l'établissement disparaît des listes d'appel et de notes ;
+   * son dossier et son historique restent consultables. Chaque changement est journalisé.
+   */
+  async changeEnrollment(enrollmentId: string, input: EnrollmentChange) {
+    const before = await this.db.enrollment.findUnique({
+      where: { id: enrollmentId },
+      include: { class: { select: { name: true } } },
+    });
     if (!before) throw new NotFoundException('Inscription introuvable');
-    if (input.classId) {
+    await this.ensureStudent(before.studentId);
+    await this.scope.assertYearOpen(before.academicYearId);
+    const status = input.status ?? before.status;
+    const leaving = status === 'TRANSFERRED' || status === 'LEFT';
+    let newClass: { id: string; name: string } | null = null;
+    if (input.classId && input.classId !== before.classId) {
       const cls = await this.db.class.findUnique({ where: { id: input.classId } });
       if (!cls || cls.academicYearId !== before.academicYearId)
         throw new BadRequestException('La classe doit appartenir à la même année');
+      if (leaving)
+        throw new ConflictException(
+          'L’élève a quitté l’établissement : réintégrez-le avant de changer de classe',
+        );
+      newClass = cls;
     }
-    const after = await this.db.enrollment.update({ where: { id: enrollmentId }, data: input });
-    await this.audit.log({
-      action: 'enrollments.changed',
-      entity: 'Enrollment',
-      entityId: enrollmentId,
-      before,
-      after,
+    if (input.status === 'TRANSFERRED' || input.status === 'LEFT') {
+      const year = await this.db.academicYear.findUniqueOrThrow({
+        where: { id: before.academicYearId },
+      });
+      const exitDate = input.exitDate!;
+      if (exitDate < fromDbDate(year.startDate) || exitDate > fromDbDate(year.endDate))
+        throw new BadRequestException({
+          statusCode: 400,
+          message: 'Données invalides',
+          errors: [
+            {
+              path: 'exitDate',
+              message: `La date de sortie doit se situer dans l’année scolaire ${year.name}`,
+            },
+          ],
+        });
+    }
+    const exit =
+      input.status === 'TRANSFERRED' || input.status === 'LEFT'
+        ? {
+            exitDate: toDbDate(input.exitDate!),
+            exitReason: input.exitReason!,
+            destinationSchool: input.status === 'TRANSFERRED' ? input.destinationSchool! : null,
+          }
+        : input.status
+          ? { exitDate: null, exitReason: null, destinationSchool: null }
+          : {};
+    const action =
+      input.status === 'TRANSFERRED'
+        ? 'enrollments.transferred'
+        : input.status === 'LEFT'
+          ? 'enrollments.left'
+          : input.status && !ACTIVE_STATUSES.includes(before.status)
+            ? 'enrollments.reinstated'
+            : newClass
+              ? 'enrollments.class_changed'
+              : 'enrollments.changed';
+    const snapshot = (e: {
+      classId: string;
+      status: EnrollmentStatus;
+      exitDate: Date | null;
+      exitReason: string | null;
+      destinationSchool: string | null;
+    }) => ({
+      classId: e.classId,
+      status: e.status,
+      exitDate: e.exitDate ? fromDbDate(e.exitDate) : null,
+      exitReason: e.exitReason,
+      destinationSchool: e.destinationSchool,
     });
-    return after;
+    return this.db.$transaction(async (tx) => {
+      const after = await tx.enrollment.update({
+        where: { id: enrollmentId },
+        data: {
+          ...(newClass ? { classId: newClass.id } : {}),
+          ...(input.status ? { status: input.status } : {}),
+          ...exit,
+        },
+      });
+      await this.audit.log(
+        {
+          action,
+          entity: 'Enrollment',
+          entityId: enrollmentId,
+          before: { ...snapshot(before), className: before.class.name },
+          after: { ...snapshot(after), className: newClass?.name ?? before.class.name },
+          reason: input.exitReason,
+        },
+        tx,
+      );
+      return after;
+    });
   }
 
   async health(studentId: string, reason: string) {
@@ -818,7 +1097,10 @@ export class StudentsService {
       transformHeader: normalizeImportHeader,
     });
     return this.importRecords(
-      parsed.data.map((raw, i) => ({ line: i + 2, raw })),
+      parsed.data
+        .map((raw, i) => ({ line: i + 2, raw }))
+        // Ligne sans aucune valeur (« ;;;; ») : ignorée, comme dans un classeur Excel.
+        .filter(({ raw }) => Object.values(raw).some((v) => (v ?? '').trim() !== '')),
       classId,
       dryRun,
     );
@@ -856,56 +1138,86 @@ export class StudentsService {
     const rows: { line: number; input?: StudentInput; errors: string[] }[] = [];
     const seen = new Map<string, number>();
     for (const { line, raw } of records) {
-      const errors: string[] = [];
+      const errors = new Map<ImportField, string>();
+      const value = (field: ImportField) => importValue(raw, field);
       const guardian = guardianInputSchema.safeParse({
-        firstName: raw.parent_prenom ?? raw.parent_prenoms ?? '',
-        lastName: raw.parent_nom ?? '',
-        phone: raw.parent_telephone ?? raw.telephone ?? '',
+        firstName: value('parent.firstName'),
+        lastName: value('parent.lastName'),
+        phone: value('parent.phone'),
         relationship: relationshipOf(raw.lien ?? ''),
         isPrimary: true,
       });
+      const sex = value('gender').toUpperCase();
       const candidate = studentCreateSchema.safeParse({
-        firstName: raw.prenoms ?? raw.prenom ?? '',
-        lastName: raw.nom ?? '',
-        gender: (raw.sexe ?? '').trim().toUpperCase().startsWith('F')
-          ? 'F'
-          : (raw.sexe ?? '').trim().toUpperCase().startsWith('M')
-            ? 'M'
-            : '',
-        birthDate: toIso(raw.date_naissance ?? ''),
-        birthPlace: raw.lieu_naissance || undefined,
+        firstName: value('firstName'),
+        lastName: value('lastName'),
+        // F (fille, féminin) ou M (masculin) ; G (garçon) vaut M. Toute autre valeur est signalée.
+        gender: sex.startsWith('F') ? 'F' : sex.startsWith('M') || sex.startsWith('G') ? 'M' : sex,
+        birthDate: toIso(value('birthDate')),
+        birthPlace: value('birthPlace') || undefined,
         guardians: guardian.success ? [guardian.data] : [],
         classId,
         confirmNotDuplicate: false,
       });
       if (!guardian.success)
-        errors.push(
-          ...guardian.error.issues.map((e) => `Parent (${e.path.join('.')}) : ${e.message}`),
-        );
+        for (const issue of guardian.error.issues) {
+          const field = `parent.${String(issue.path[0])}` as ImportField;
+          if (field in IMPORT_FIELDS && !errors.has(field))
+            errors.set(field, importMessage(field, value(field), issue.message));
+        }
       if (!candidate.success)
-        errors.push(
-          ...candidate.error.issues
-            .filter((e) => e.path[0] !== 'guardians')
-            .map((e) => `${e.path.join('.')} : ${e.message}`),
-        );
+        for (const issue of candidate.error.issues) {
+          const field = String(issue.path[0]) as ImportField;
+          if (issue.path[0] === 'guardians' || !(field in IMPORT_FIELDS) || errors.has(field))
+            continue;
+          errors.set(field, importMessage(field, value(field), issue.message));
+        }
+      const messages = IMPORT_ORDER.filter((f) => errors.has(f)).map((f) => errors.get(f)!);
+      // Ligne refusée sans champ identifié : jamais d'élève ignoré en silence.
+      if (!candidate.success && messages.length === 0)
+        messages.push(`Ligne invalide : ${candidate.error.issues[0]?.message ?? 'à vérifier'}`);
       if (candidate.success) {
         const key =
           `${candidate.data.lastName}|${candidate.data.firstName}|${candidate.data.birthDate}`.toUpperCase();
         const dup = seen.get(key);
-        if (dup) errors.push(`Doublon de la ligne ${dup}`);
+        if (dup) messages.push(`Doublon de la ligne ${dup}`);
         else seen.set(key, line);
-        if (errors.length === 0) {
+        if (messages.length === 0) {
           const existing = await this.findDuplicates({
             ...candidate.data,
             guardianPhones: candidate.data.guardians.map((g) => g.phone),
           });
           if (existing[0])
-            errors.push(
+            messages.push(
               `Existe déjà : ${existing[0].lastName} ${existing[0].firstName} (${existing[0].matricule})`,
             );
         }
       }
-      rows.push({ line, input: candidate.success ? candidate.data : undefined, errors });
+      rows.push({ line, input: candidate.success ? candidate.data : undefined, errors: messages });
+    }
+    // Numéro de parent déjà attribué à un autre parent (base ou ligne précédente du fichier) :
+    // jamais de rattachement silencieux à une autre famille.
+    const known = await this.knownGuardians(
+      rows.flatMap((r) => r.input?.guardians.map((g) => g.phone) ?? []),
+    );
+    const filePhones = new Map<string, { line: number; firstName: string; lastName: string }>();
+    for (const r of rows) {
+      const g = r.input?.guardians[0];
+      if (!g) continue;
+      const existing = known.find((k) => k.phone === g.phone);
+      if (existing) {
+        if (!sameGuardianName(g, existing))
+          r.errors.push(
+            `Téléphone du parent : ce numéro appartient déjà à ${existing.label} ; reprenez le nom de ce parent ou corrigez le numéro`,
+          );
+        continue;
+      }
+      const earlier = filePhones.get(g.phone);
+      if (!earlier) filePhones.set(g.phone, { line: r.line, ...g });
+      else if (!sameGuardianName(g, earlier))
+        r.errors.push(
+          `Téléphone du parent : même numéro qu’à la ligne ${earlier.line}, pour un autre parent (${earlier.firstName} ${earlier.lastName})`,
+        );
     }
     const invalid = rows.filter((r) => r.errors.length > 0);
     const report = {

@@ -1,4 +1,15 @@
-import { Body, Controller, Get, Module, Param, Post, Put, Query, Res } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Module,
+  Param,
+  Post,
+  Put,
+  Query,
+  Res,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import {
   documentCancelSchema,
@@ -47,6 +58,31 @@ export class DocumentsController {
     @Body(new ZodPipe(documentTemplateSchema)) body: z.infer<typeof documentTemplateSchema>,
   ) {
     return this.documents.saveTemplate(DocumentsService.assertType(type), body);
+  }
+
+  /** Aperçu PDF du modèle en cours de saisie, avec un élève fictif, sans numéro du registre. */
+  @RequirePermissions('documents.configure')
+  @Post('templates/:type/preview')
+  @HttpCode(200)
+  async preview(
+    @Param('type') type: string,
+    @Body(new ZodPipe(documentTemplateSchema)) body: z.infer<typeof documentTemplateSchema>,
+    @Res() res: Response,
+  ) {
+    const docType = DocumentsService.assertType(type);
+    const buffer = await this.pdf.render({
+      type: docType,
+      number: 'SPÉCIMEN',
+      verificationCode: 'SPECIMEN',
+      status: 'ISSUED',
+      issuedAt: new Date(),
+      data: await this.documents.previewData(docType, body),
+      photo: null,
+      specimen: true,
+    });
+    res.setHeader('content-type', 'application/pdf');
+    res.setHeader('content-disposition', 'inline; filename="apercu.pdf"');
+    res.send(buffer);
   }
 
   @RequirePermissions('documents.issue')

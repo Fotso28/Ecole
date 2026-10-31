@@ -35,6 +35,21 @@ export const ENROLLMENT_BADGE = {
   LEFT: { tone: 'neutral', label: 'Sorti' },
 } as const;
 
+const ENROLLMENT_FEMININE = {
+  ENROLLED: 'Inscrite',
+  REPEATING: 'Redoublante',
+  TRANSFERRED: 'Transférée',
+  LEFT: 'Sortie',
+} as const;
+
+/** Statut d'inscription accordé au sexe de l'élève : « Inscrite », « Transférée », « Sortie ». */
+export function enrollmentLabel(
+  status: keyof typeof ENROLLMENT_BADGE,
+  gender?: 'F' | 'M' | null,
+): string {
+  return gender === 'F' ? ENROLLMENT_FEMININE[status] : ENROLLMENT_BADGE[status].label;
+}
+
 export const LINE_BADGE = {
   PAID: { tone: 'success', label: 'Payé' },
   PARTIAL: { tone: 'warn', label: 'Partiel' },

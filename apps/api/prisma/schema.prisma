@@ -531,6 +531,10 @@ model Enrollment {
   academicYearId       String
   status               EnrollmentStatus @default(ENROLLED)
   previousEnrollmentId String?
+  /// Sortie en cours d'année (statut transféré ou sorti) : date, motif et établissement d'accueil.
+  exitDate             DateTime?        @db.Date
+  exitReason           String?
+  destinationSchool    String?
   createdAt            DateTime         @default(now())
 
   student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)

@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { inflateSync } from 'node:zlib';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { PrismaClient } from '@prisma/client';
@@ -146,4 +147,57 @@ export async function requestOtp(app: INestApplication, phone: string): Promise<
   const before = MemorySmsProvider.countTo(to);
   await request(app.getHttpServer()).post('/auth/otp/request').send({ phone }).expect(202);
   return /(\d{6})/.exec(await MemorySmsProvider.waitFor(to, before))?.[1] ?? '';
+}
+
+/**
+ * Texte d'un PDF produit par pdfkit (polices standard) : flux décompressés, chaînes des
+ * opérateurs de texte décodées. Suffisant pour vérifier qu'une mention est imprimée.
+ */
+export function pdfText(pdf: Buffer): string {
+  const raw = pdf.toString('latin1');
+  const out: string[] = [];
+  const re = /stream\r?\n([\s\S]*?)\r?\nendstream/g;
+  for (let m = re.exec(raw); m; m = re.exec(raw)) {
+    let content: string;
+    try {
+      content = inflateSync(Buffer.from(m[1]!, 'latin1')).toString('latin1');
+    } catch {
+      continue;
+    }
+    for (const tj of content.matchAll(/\[([^\]]*)\]\s*TJ/g))
+      out.push(
+        [...tj[1]!.matchAll(/<([0-9a-fA-F]*)>/g)]
+          .map((h) =>
+            [...Buffer.from(h[1]!, 'hex')]
+              .map((b) => WIN_ANSI[b] ?? String.fromCharCode(b))
+              .join(''),
+          )
+          .join(''),
+      );
+  }
+  return out.join('\n');
+}
+
+/** Caractères WinAnsi des polices standard PDF qui diffèrent du latin-1. */
+const WIN_ANSI: Record<number, string> = {
+  0x80: '€',
+  0x85: '…',
+  0x8c: 'Œ',
+  0x91: '‘',
+  0x92: '’',
+  0x93: '“',
+  0x94: '”',
+  0x96: '–',
+  0x97: '—',
+  0x9c: 'œ',
+};
+
+/** Corps binaire d'une réponse (PDF, classeur). */
+export function binary(
+  res: NodeJS.EventEmitter,
+  cb: (err: Error | null, body: Buffer) => void,
+): void {
+  const chunks: Buffer[] = [];
+  res.on('data', (c: Buffer) => chunks.push(c));
+  res.on('end', () => cb(null, Buffer.concat(chunks)));
 }

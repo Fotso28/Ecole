@@ -24,6 +24,7 @@ import { verificationCode } from '../../common/crypto';
 import { fromDbDate } from '../../common/dates';
 import { Db, InjectDb, Tx } from '../../common/prisma';
 import { ScopeService } from '../../common/scope.service';
+import { matchStudentIds } from '../../common/student-search';
 
 /** Instantané figé d'un document délivré : il ne dépend plus de la fiche élève ensuite. */
 export interface AdminDocumentData {
@@ -123,6 +124,55 @@ export class DocumentsService {
       label: ADMIN_DOCUMENT_LABELS[type],
       customized: true,
       ...this.merge(type, after),
+    };
+  }
+
+  /**
+   * Données d'aperçu d'un modèle (enregistré ou non) : établissement et année réels, élève
+   * fictif. Rien n'est enregistré et aucun numéro du registre n'est consommé.
+   */
+  async previewData(type: AdminDocumentType, input: TemplateInput): Promise<AdminDocumentData> {
+    const year = await this.scope.currentYear();
+    const [school, cls] = await Promise.all([
+      this.db.school.findUniqueOrThrow({ where: { id: currentSchoolId() } }),
+      this.db.class.findFirst({
+        where: { academicYearId: year.id },
+        orderBy: { name: 'asc' },
+        include: { level: true },
+      }),
+    ]);
+    return {
+      school: {
+        name: school.name,
+        city: school.city,
+        address: school.address,
+        phone: school.phone,
+      },
+      template: this.merge(type, {
+        title: input.title ?? null,
+        headerLines: input.headerLines.filter((l) => l.length > 0),
+        signatoryName: input.signatoryName ?? null,
+        signatoryTitle: input.signatoryTitle ?? null,
+        mentions: input.mentions ?? null,
+      }),
+      student: {
+        firstName: 'Prénoms de l’élève',
+        lastName: 'Nom',
+        matricule: `${school.matriculePrefix}-0000`,
+        gender: 'F',
+        birthDate: `${Number(fromDbDate(year.startDate).slice(0, 4)) - 12}-01-15`,
+        birthPlace: school.city,
+        nationality: 'Camerounaise',
+        photoKey: null,
+      },
+      class: { name: cls?.name ?? '6e A', level: cls?.level.name ?? '6e' },
+      year: {
+        name: year.name,
+        startDate: fromDbDate(year.startDate),
+        endDate: fromDbDate(year.endDate),
+      },
+      enrollmentStatus: 'ENROLLED',
+      duplicateOf: null,
     };
   }
 
@@ -283,20 +333,11 @@ export class DocumentsService {
       ...(q.studentId ? { studentId: q.studentId } : {}),
     };
     if (search) {
-      const students = await this.db.student.findMany({
-        where: {
-          OR: [
-            { lastName: { contains: search, mode: 'insensitive' } },
-            { firstName: { contains: search, mode: 'insensitive' } },
-            { matricule: { contains: search, mode: 'insensitive' } },
-          ],
-        },
-        select: { id: true },
-        take: 200,
-      });
+      // Même recherche que la liste des élèves : sans accents ni casse, mots dans tout ordre.
+      const studentIds = (await matchStudentIds(this.db, search, 500)) ?? [];
       where.OR = [
         { number: { contains: search, mode: 'insensitive' } },
-        { studentId: { in: students.map((s) => s.id) } },
+        { studentId: { in: studentIds } },
       ];
     }
     const [total, rows] = await Promise.all([

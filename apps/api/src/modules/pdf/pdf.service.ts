@@ -474,7 +474,7 @@ export class PdfService {
       .text(
         card.status === 'DRAFT'
           ? 'BROUILLON — document non publié, sans valeur officielle.'
-          : 'Scannez le code pour contrôler l’authenticité. Toute correction après publication produit une nouvelle version numérotée.',
+          : `Scannez le code ou rendez-vous sur ${this.verifyUrl(card.verificationCode)} pour contrôler l’authenticité. Toute correction après publication produit une nouvelle version numérotée.`,
         left + 66,
         footY + 24,
         { width: W - 70 },

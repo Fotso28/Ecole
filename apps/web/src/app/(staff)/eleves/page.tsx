@@ -5,7 +5,7 @@ import { Search, Upload, UserPlus } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState } from 'react';
-import { Badge, ENROLLMENT_BADGE } from '@/components/ui/badge';
+import { Badge, ENROLLMENT_BADGE, enrollmentLabel } from '@/components/ui/badge';
 import { ButtonLink } from '@/components/ui/button';
 import { EmptyState, ErrorBlock, LoadingBlock, PageHeader } from '@/components/ui/card';
 import { controlClass } from '@/components/ui/field';
@@ -183,7 +183,7 @@ function StudentsContent() {
                   <span className="flex shrink-0 flex-col items-end gap-1">
                     {s.status ? (
                       <Badge tone={ENROLLMENT_BADGE[s.status].tone}>
-                        {ENROLLMENT_BADGE[s.status].label}
+                        {enrollmentLabel(s.status, s.gender)}
                       </Badge>
                     ) : null}
                     {s.overdue ? (
@@ -241,7 +241,7 @@ function StudentsContent() {
                     <td className="px-3 py-2.5">
                       {s.status ? (
                         <Badge tone={ENROLLMENT_BADGE[s.status].tone}>
-                          {ENROLLMENT_BADGE[s.status].label}
+                          {enrollmentLabel(s.status, s.gender)}
                         </Badge>
                       ) : null}
                     </td>

@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { AdminDocumentType } from '@ecole/shared';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, Eye } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
@@ -17,7 +17,7 @@ import {
 } from '@/components/ui/card';
 import { InputField, TextareaField } from '@/components/ui/field';
 import { useToast } from '@/components/ui/toast';
-import { api } from '@/lib/api';
+import { api, openPdf } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 
 interface Template {
@@ -54,18 +54,24 @@ function TemplateCard({ template }: { template: Template }) {
     .split('\n')
     .map((l) => l.trim())
     .filter(Boolean);
+  const body = {
+    title: form.title,
+    headerLines,
+    signatoryName: form.signatoryName,
+    signatoryTitle: form.signatoryTitle,
+    mentions: form.mentions,
+  };
+  const [previewing, setPreviewing] = useState(false);
+  /** Aperçu du modèle tel que saisi, avec un élève fictif : aucun numéro du registre consommé. */
+  const preview = () => {
+    setPreviewing(true);
+    openPdf(`/documents/templates/${template.type}/preview`, { method: 'POST', body })
+      .catch((e: unknown) => toast(e instanceof Error ? e.message : 'Erreur', 'error'))
+      .finally(() => setPreviewing(false));
+  };
   const save = useMutation({
     mutationFn: () =>
-      api<Template>(`/documents/templates/${template.type}`, {
-        method: 'PUT',
-        body: {
-          title: form.title,
-          headerLines,
-          signatoryName: form.signatoryName,
-          signatoryTitle: form.signatoryTitle,
-          mentions: form.mentions,
-        },
-      }),
+      api<Template>(`/documents/templates/${template.type}`, { method: 'PUT', body }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['document-templates'] });
       toast(`Modèle « ${template.label} » enregistré`);
@@ -127,14 +133,25 @@ function TemplateCard({ template }: { template: Template }) {
           onChange={(e) => setForm({ ...form, mentions: e.target.value })}
           hint="Formule finale du document, par exemple « pour servir et valoir ce que de droit »."
         />
-        <Button
-          type="submit"
-          className="self-start"
-          loading={save.isPending}
-          disabled={headerLines.length > 6}
-        >
-          Enregistrer le modèle
-        </Button>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Button type="submit" loading={save.isPending} disabled={headerLines.length > 6}>
+            Enregistrer le modèle
+          </Button>
+          <Button
+            variant="secondary"
+            loading={previewing}
+            disabled={headerLines.length > 6}
+            onClick={preview}
+            aria-label={`Aperçu : ${template.label}`}
+          >
+            <Eye className="size-4" aria-hidden />
+            Aperçu
+          </Button>
+        </div>
+        <p className="text-[13px] text-muted">
+          L’aperçu montre le modèle tel que saisi, avec un élève fictif et la mention « SPÉCIMEN » :
+          aucun numéro du registre n’est utilisé.
+        </p>
       </form>
     </Card>
   );

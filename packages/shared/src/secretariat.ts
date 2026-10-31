@@ -144,6 +144,13 @@ export const ADMIN_DOCUMENT_LABELS: Record<AdminDocumentType, string> = {
   STUDENT_CARD: 'Carte d’élève',
 };
 
+/** Accord du participe selon le genre du document : « Certificat annulé », « Carte annulée ». */
+export const ADMIN_DOCUMENT_FEMININE: Record<AdminDocumentType, boolean> = {
+  SCHOOL_CERTIFICATE: false,
+  ENROLLMENT_ATTESTATION: true,
+  STUDENT_CARD: true,
+};
+
 /** Préfixe du numéro d'enregistrement, par type de document. */
 export const ADMIN_DOCUMENT_PREFIXES: Record<AdminDocumentType, string> = {
   SCHOOL_CERTIFICATE: 'CS',

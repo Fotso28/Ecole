@@ -181,11 +181,14 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
   });
 }
 
-/** Ouvre un PDF protégé (bulletin, reçu) dans un nouvel onglet. */
-export async function openPdf(path: string): Promise<void> {
+/**
+ * Ouvre un PDF protégé (bulletin, reçu) dans un nouvel onglet. Avec `options`, le PDF est
+ * demandé par un envoi (aperçu d'un modèle en cours de saisie).
+ */
+export async function openPdf(path: string, options: RequestOptions = {}): Promise<void> {
   const tab = window.open('', '_blank');
   try {
-    const res = await request(path);
+    const res = await request(path, options);
     const url = URL.createObjectURL(await res.blob());
     if (tab) tab.location.href = url;
     else window.location.href = url;

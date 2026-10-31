@@ -318,7 +318,15 @@ function DocumentsContent() {
         <Button
           size="sm"
           variant="secondary"
-          onClick={() => duplicate.mutate(doc)}
+          onClick={() => {
+            // Un duplicata consomme un nouveau numéro du registre : confirmation d'abord.
+            if (
+              window.confirm(
+                `Délivrer un duplicata du n° ${doc.number} ? Il recevra un nouveau numéro du registre.`,
+              )
+            )
+              duplicate.mutate(doc);
+          }}
           loading={duplicate.isPending && duplicate.variables?.id === doc.id}
         >
           <Copy className="size-4" aria-hidden />

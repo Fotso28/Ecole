@@ -19,10 +19,12 @@ import type { Response } from 'express';
 import { ApiBearerAuth, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import {
   duplicateCheckSchema,
+  enrollmentChangeSchema,
   enrollmentCreateSchema,
   ENROLLMENT_STATUSES,
   guardianContactSchema,
   guardianInputSchema,
+  guardianPhoneCheckSchema,
   studentCreateSchema,
   studentImportSchema,
   studentUpdateSchema,
@@ -45,10 +47,6 @@ const listSchema = z.object({
 });
 const reasonSchema = z.object({ reason: z.string().trim().min(5).max(300) });
 const documentSchema = z.object({ status: z.enum(['RECEIVED', 'MISSING']) });
-const enrollmentChangeSchema = z.object({
-  classId: z.string().optional(),
-  status: z.enum(ENROLLMENT_STATUSES).optional(),
-});
 const xlsxImportSchema = z.object({
   classId: z.string().min(1).optional(),
   dryRun: z
@@ -94,6 +92,18 @@ export class StudentsController {
     @Body(new ZodPipe(duplicateCheckSchema)) body: z.infer<typeof duplicateCheckSchema>,
   ) {
     return this.students.findDuplicates(body);
+  }
+
+  /**
+   * Parents déjà enregistrés sous ces numéros, avec leurs enfants : le secrétariat choisit de
+   * rattacher l'élève au parent existant ou de corriger un numéro mal saisi.
+   */
+  @RequirePermissions('students.write')
+  @Post('students/check-guardian-phones')
+  checkGuardianPhones(
+    @Body(new ZodPipe(guardianPhoneCheckSchema)) body: z.infer<typeof guardianPhoneCheckSchema>,
+  ) {
+    return this.students.knownGuardians(body.phones);
   }
 
   @RequirePermissions('students.write')

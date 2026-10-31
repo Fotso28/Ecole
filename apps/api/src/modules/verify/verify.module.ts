@@ -1,7 +1,12 @@
 import { Controller, Get, Module, NotFoundException, Param } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
-import { ADMIN_DOCUMENT_LABELS, formatFcfa, formatGrade } from '@ecole/shared';
+import {
+  ADMIN_DOCUMENT_LABELS,
+  formatFcfa,
+  formatGrade,
+  normalizeVerificationCode,
+} from '@ecole/shared';
 import { runAsSystem } from '../../common/context';
 import { Public } from '../../common/decorators';
 import { Db, InjectDb } from '../../common/prisma';
@@ -17,7 +22,9 @@ export class VerifyController {
   @Public()
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @Get(':code')
-  async verify(@Param('code') code: string) {
+  async verify(@Param('code') raw: string) {
+    // Code recopié à la main : minuscules, espaces et tirets acceptés pour tous les documents.
+    const code = normalizeVerificationCode(raw);
     if (!/^[A-Z0-9]{6,20}$/.test(code)) throw new NotFoundException('Code inconnu');
     return runAsSystem('public-verify', async () => {
       const card = await this.db.reportCard.findUnique({ where: { verificationCode: code } });
@@ -42,6 +49,8 @@ export class VerifyController {
             card.generalAverageCenti === null ? null : formatGrade(card.generalAverageCenti),
           annualAverage:
             card.annualAverageCenti === null ? null : formatGrade(card.annualAverageCenti),
+          // Bulletin de fin d'année : la décision du conseil est l'information la plus falsifiée.
+          yearEndDecision: data.yearEndDecision?.label ?? null,
           publishedAt: card.publishedAt,
         };
       }

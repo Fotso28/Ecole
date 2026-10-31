@@ -2,6 +2,7 @@ import {
   Body,
   ConflictException,
   Controller,
+  Delete,
   Get,
   Injectable,
   Module,
@@ -264,6 +265,52 @@ export class AcademicService {
     return after;
   }
 
+  /**
+   * Retrait d'une matière d'une classe (affectation faite par erreur). Refusé dès que des notes,
+   * des appels, un emploi du temps ou un cahier de texte y sont rattachés : rien ne se perd.
+   */
+  async removeClassSubject(id: string) {
+    const cs = await this.db.classSubject.findUniqueOrThrow({
+      where: { id },
+      include: { subject: true, class: true },
+    });
+    const label = `${cs.subject.name} (${cs.class.name})`;
+    const [evaluations, sessions, timetable, lessons, materials] = await Promise.all([
+      this.db.evaluation.count({ where: { classSubjectId: id } }),
+      this.db.attendanceSession.count({ where: { classSubjectId: id } }),
+      this.db.timetableEntry.count({ where: { classSubjectId: id } }),
+      this.db.lessonLog.count({ where: { classSubjectId: id } }),
+      this.db.courseMaterial.count({ where: { classSubjectId: id } }),
+    ]);
+    if (evaluations > 0)
+      throw new ConflictException(
+        `Impossible de retirer ${label} : des évaluations y sont déjà saisies`,
+      );
+    if (sessions + timetable + lessons + materials > 0)
+      throw new ConflictException(
+        `Impossible de retirer ${label} : l’emploi du temps, des appels ou le cahier de texte y sont rattachés`,
+      );
+    await this.db.$transaction(async (tx: Tx) => {
+      await tx.classSubject.delete({ where: { id } });
+      await this.audit.log(
+        {
+          action: 'academic.subject_removed',
+          entity: 'ClassSubject',
+          entityId: id,
+          before: {
+            classId: cs.classId,
+            subjectId: cs.subjectId,
+            coefficient: cs.coefficient,
+            teacherId: cs.teacherId,
+            weeklyHours: cs.weeklyHours,
+          },
+        },
+        tx,
+      );
+    });
+    return { ok: true };
+  }
+
   /** Copie la structure d'une année (classes, matières, coefficients, enseignants, frais) vers une autre. */
   async rollover(toYearId: string, fromYearId: string) {
     const schoolId = currentSchoolId();
@@ -494,6 +541,12 @@ export class AcademicController {
     @Body(new ZodPipe(classSubjectUpdateSchema)) body: z.infer<typeof classSubjectUpdateSchema>,
   ) {
     return this.academic.updateClassSubject(id, body);
+  }
+
+  @RequirePermissions('academic.write')
+  @Delete('class-subjects/:id')
+  removeClassSubject(@Param('id') id: string) {
+    return this.academic.removeClassSubject(id);
   }
 }
 

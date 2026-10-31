@@ -1,7 +1,14 @@
+import {
+  ADMIN_DOCUMENT_FEMININE,
+  normalizeVerificationCode,
+  type AdminDocumentType,
+} from '@ecole/shared';
 import { CheckCircle2, ShieldAlert, XCircle } from 'lucide-react';
 import type { Metadata } from 'next';
 import { headers } from 'next/headers';
+import { redirect } from 'next/navigation';
 import { forwardedFor } from '@/lib/client-ip';
+import { VerifyCodeForm } from '../code-form';
 
 export const metadata: Metadata = { title: 'Vérification d’un document' };
 export const dynamic = 'force-dynamic';
@@ -19,6 +26,8 @@ type Result =
       version: number;
       latestVersion: number | null;
       generalAverage: string | null;
+      annualAverage: string | null;
+      yearEndDecision: string | null;
       publishedAt: string | null;
     }
   | {
@@ -33,7 +42,7 @@ type Result =
     }
   | {
       type: 'document';
-      documentType: string;
+      documentType: AdminDocumentType;
       label: string;
       valid: boolean;
       status: 'ISSUED' | 'CANCELLED';
@@ -49,7 +58,9 @@ type Result =
 
 function heading(result: Result): string {
   if (result.type === 'document')
-    return result.valid ? `${result.label} authentique` : `${result.label} annulé(e)`;
+    return result.valid
+      ? `${result.label} authentique`
+      : `${result.label} ${ADMIN_DOCUMENT_FEMININE[result.documentType] ? 'annulée' : 'annulé'}`;
   if (result.valid)
     return result.type === 'report-card' ? 'Bulletin authentique' : 'Reçu authentique';
   return result.type === 'report-card'
@@ -82,8 +93,21 @@ const fr = (iso: string | null) =>
       }).format(new Date(iso))
     : '—';
 
+/** Code de l'adresse, décodé (« %20 » → espace). */
+function decoded(raw: string): string {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
 export default async function VerifyPage({ params }: { params: Promise<{ code: string }> }) {
-  const { code } = await params;
+  const typed = decoded((await params).code);
+  // Minuscules, espaces et tirets acceptés : redirection vers l'adresse du code normalisé.
+  const code = normalizeVerificationCode(typed);
+  if (!code) redirect('/verifier');
+  if (code !== typed) redirect(`/verifier/${encodeURIComponent(code)}`);
   const result = await verify(code);
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col gap-6 px-5 py-10">
@@ -97,7 +121,7 @@ export default async function VerifyPage({ params }: { params: Promise<{ code: s
         <section className="flex flex-col items-center gap-3 rounded-[16px] bg-danger-soft p-6 text-center">
           <ShieldAlert className="size-12 text-danger" aria-hidden />
           <h1 className="font-display text-2xl font-bold">Code inconnu</h1>
-          <p className="text-sm">
+          <p className="text-sm [overflow-wrap:anywhere]">
             Aucun document ne correspond au code {code}. Ce document n’a pas été émis par un
             établissement utilisant Ecole, ou le code a été mal recopié.
           </p>
@@ -131,6 +155,20 @@ export default async function VerifyPage({ params }: { params: Promise<{ code: s
                 <dd className="text-right font-semibold tabular">
                   {result.generalAverage ?? '—'} / 20
                 </dd>
+                {result.annualAverage ? (
+                  <>
+                    <dt className="text-muted">Moyenne annuelle</dt>
+                    <dd className="text-right font-semibold tabular">
+                      {result.annualAverage} / 20
+                    </dd>
+                  </>
+                ) : null}
+                {result.yearEndDecision ? (
+                  <>
+                    <dt className="text-muted">Décision de fin d’année</dt>
+                    <dd className="text-right font-semibold">{result.yearEndDecision}</dd>
+                  </>
+                ) : null}
                 <dt className="text-muted">Version</dt>
                 <dd className="text-right font-semibold">
                   {result.version} · publiée le {fr(result.publishedAt)}
@@ -172,6 +210,10 @@ export default async function VerifyPage({ params }: { params: Promise<{ code: s
           </dl>
         </section>
       )}
+      <section className="flex flex-col gap-3">
+        <h2 className="font-display text-lg font-bold">Vérifier un autre document</h2>
+        <VerifyCodeForm />
+      </section>
     </main>
   );
 }

@@ -5,13 +5,14 @@ import { formatFileSize } from '@ecole/shared';
 import { ChevronRight, Eye, FileText, Lock, Phone, Upload, Wallet } from 'lucide-react';
 import Link from 'next/link';
 import { use, useState } from 'react';
-import { Badge, ENROLLMENT_BADGE, LINE_BADGE } from '@/components/ui/badge';
+import { Badge, ENROLLMENT_BADGE, enrollmentLabel, LINE_BADGE } from '@/components/ui/badge';
 import { Button, ButtonLink } from '@/components/ui/button';
 import { Card, CardHeader, ErrorBlock, LoadingBlock } from '@/components/ui/card';
 import { InputField, TextareaField } from '@/components/ui/field';
 import { FilePicker } from '@/components/ui/file-picker';
 import { Sheet } from '@/components/ui/sheet';
 import { PhotoCard, StudentAvatar, type PhotoState } from '@/components/student-photo';
+import { exitSummary, StudentActions } from '@/components/students/student-actions';
 import { useToast } from '@/components/ui/toast';
 import { api, ApiError, openFile, openPdf, uploadFile } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -22,6 +23,7 @@ import {
   formatFcfa,
   formatGrade,
   formatShortDate,
+  plural,
 } from '@/lib/format';
 import type { Account, AccountTotals } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -56,6 +58,9 @@ interface Overview {
     academicYear: string;
     isCurrent: boolean;
     class: { id: string; name: string; level: string };
+    exitDate: string | null;
+    exitReason: string | null;
+    destinationSchool: string | null;
   }[];
   documents: StudentDocument[];
   attendance: {
@@ -304,10 +309,10 @@ export default function StudentPage({ params }: { params: Promise<{ id: string }
             <div className="flex flex-wrap gap-1.5">
               {current ? (
                 <Badge tone={ENROLLMENT_BADGE[current.status].tone}>
-                  {ENROLLMENT_BADGE[current.status].label}
+                  {enrollmentLabel(current.status, s.gender)}
                 </Badge>
               ) : (
-                <Badge>Non inscrit cette année</Badge>
+                <Badge>{s.gender === 'F' ? 'Non inscrite' : 'Non inscrit'} cette année</Badge>
               )}
               {s.finance ? (
                 s.finance.totals.overdue > 0 ? (
@@ -329,7 +334,7 @@ export default function StudentPage({ params }: { params: Promise<{ id: string }
             <dd className="font-semibold">{current?.class.name ?? '—'}</dd>
           </div>
           <div className="col-span-2 sm:col-span-1">
-            <dt className="text-muted">Né(e) le</dt>
+            <dt className="text-muted">{s.gender === 'F' ? 'Née le' : 'Né le'}</dt>
             <dd className="font-semibold">
               {formatDate(s.birthDate)}
               {s.birthPlace ? ` à ${s.birthPlace}` : ''}
@@ -343,6 +348,17 @@ export default function StudentPage({ params }: { params: Promise<{ id: string }
           </ButtonLink>
         ) : null}
       </Card>
+
+      {current && exitSummary(current, s.gender) ? (
+        <p
+          role="status"
+          className="rounded-[12px] border border-line bg-white p-3 text-sm [overflow-wrap:anywhere]"
+        >
+          <strong>{exitSummary(current, s.gender)}</strong>
+          {current.exitReason ? ` · Motif : ${current.exitReason}` : ''}
+        </p>
+      ) : null}
+      <StudentActions student={s} enrollment={current} />
 
       <DocumentUploadSheet studentId={id} doc={uploadDoc} onClose={() => setUploadDoc(null)} />
       {can('health.read') ? (
@@ -435,7 +451,8 @@ export default function StudentPage({ params }: { params: Promise<{ id: string }
               </div>
             </div>
             <p className="mt-3 text-sm text-muted">
-              {s.attendance.unjustified} absence(s) non justifiée(s).
+              {plural(s.attendance.unjustified, 'absence non justifiée', 'absences non justifiées')}
+              .
             </p>
           </Card>
 
@@ -494,8 +511,8 @@ export default function StudentPage({ params }: { params: Promise<{ id: string }
                     <strong className="text-sm">
                       {e.academicYear} · {e.class.name}
                     </strong>
-                    <span className="text-[13px] text-muted">
-                      {ENROLLMENT_BADGE[e.status].label}
+                    <span className="text-[13px] text-muted [overflow-wrap:anywhere]">
+                      {exitSummary(e, s.gender) ?? enrollmentLabel(e.status, s.gender)}
                     </span>
                   </div>
                 </li>
@@ -715,7 +732,7 @@ export default function StudentPage({ params }: { params: Promise<{ id: string }
                     {formatShortDate(r.date)} · {r.startTime}–{r.endTime}
                   </span>
                   <Badge tone={r.status === 'ABSENT' ? 'danger' : 'warn'}>
-                    {r.status === 'ABSENT' ? 'Absent' : 'Retard'}
+                    {r.status === 'ABSENT' ? (s.gender === 'F' ? 'Absente' : 'Absent') : 'Retard'}
                   </Badge>
                   {r.justification === 'ACCEPTED' ? (
                     <Badge tone="info">Justifié</Badge>

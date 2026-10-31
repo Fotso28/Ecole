@@ -335,6 +335,8 @@ async function main(): Promise<void> {
     gender: 'F' | 'M',
     phone: string,
     birthDate: string,
+    /** Parent déjà enregistré (frère ou sœur) : même nom, rattachement sans question. */
+    sibling?: { firstName: string; relationship: 'FATHER' | 'MOTHER' },
   ) => {
     const st = await runInContext(secretary, () =>
       students.create({
@@ -349,10 +351,10 @@ async function main(): Promise<void> {
         confirmNotDuplicate: true,
         guardians: [
           {
-            firstName: gender === 'F' ? 'Pierre' : 'Thérèse',
+            firstName: sibling?.firstName ?? (gender === 'F' ? 'Pierre' : 'Thérèse'),
             lastName,
             phone,
-            relationship: n % 2 ? 'MOTHER' : 'FATHER',
+            relationship: sibling?.relationship ?? (n % 2 ? 'MOTHER' : 'FATHER'),
             isPrimary: true,
             isEmergencyContact: true,
             canPickUp: true,
@@ -365,7 +367,10 @@ async function main(): Promise<void> {
     return st.id;
   };
   const ngono = await add('4e A', 'Marie-Claire', 'Ngono', 'F', '+237677123456', '2012-03-12');
-  await add('6e A', 'Paul-Henri', 'Ngono', 'M', '+237677123456', '2015-06-21');
+  await add('6e A', 'Paul-Henri', 'Ngono', 'M', '+237677123456', '2015-06-21', {
+    firstName: 'Pierre',
+    relationship: 'FATHER',
+  });
   for (const [cls, , count] of classDefs) {
     const start = cls === '4e A' ? 1 : cls === '6e A' ? 1 : 0;
     for (let i = start; i < count; i++) {

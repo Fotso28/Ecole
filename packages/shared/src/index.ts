@@ -16,3 +16,4 @@ export * from './schemas';
 export * from './secretariat';
 export * from './timetable';
 export * from './transport';
+export * from './zod-fr';

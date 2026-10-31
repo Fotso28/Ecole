@@ -38,6 +38,49 @@ export function normalizeName(name: string): string {
     .replace(/\s+/g, ' ');
 }
 
+/**
+ * Même personne d'après le nom et le prénom, sans tenir compte des accents, de la casse, de la
+ * ponctuation ni de l'ordre des mots (« NGONO Pierre » = « Pierre Ngono »).
+ */
+export function sameGuardianName(
+  a: { firstName: string; lastName: string },
+  b: { firstName: string; lastName: string },
+): boolean {
+  const key = (p: { firstName: string; lastName: string }) =>
+    normalizeName(`${p.lastName} ${p.firstName}`).split(' ').sort().join(' ');
+  return key(a) === key(b);
+}
+
+/**
+ * Correspondances utilisées par la recherche, côté code et côté base (`translate`) : lettres
+ * accentuées (majuscules et minuscules) vers la lettre minuscule simple, apostrophe typographique
+ * vers l'apostrophe droite. Les deux chaînes ont la même longueur, caractère pour caractère.
+ */
+export const SEARCH_FOLD_FROM = 'ÀÁÂÃÄÅàáâãäåÇçÈÉÊËèéêëÌÍÎÏìíîïÑñÒÓÔÕÖòóôõöÙÚÛÜùúûüÝŸýÿ’';
+export const SEARCH_FOLD_TO = "aaaaaaaaaaaacceeeeeeeeiiiiiiiinnoooooooooouuuuuuuuyyyy'";
+
+/** Texte replié pour la recherche : minuscules, sans accents (« Cédric » → « cedric »). */
+export function foldForSearch(text: string): string {
+  let out = '';
+  for (const ch of text) {
+    const i = SEARCH_FOLD_FROM.indexOf(ch);
+    out += i >= 0 ? SEARCH_FOLD_TO[i] : ch;
+  }
+  return out.toLowerCase().replace(/œ/g, 'oe').replace(/æ/g, 'ae');
+}
+
+/**
+ * Mots d'une recherche, repliés (accents, casse) : chacun doit se retrouver dans le nom, les
+ * prénoms ou le matricule, dans n'importe quel ordre (« ngono paul » trouve « NGONO Paul-Henri »).
+ */
+export function searchWords(search: string): string[] {
+  return foldForSearch(search)
+    .split(/\s+/)
+    .map((w) => w.trim())
+    .filter(Boolean)
+    .slice(0, 6);
+}
+
 /** Distance de Levenshtein classique. */
 export function levenshtein(a: string, b: string): number {
   if (a === b) return 0;
@@ -133,6 +176,39 @@ export function formatMatricule(prefix: string, year: number, sequence: number):
   if (!Number.isInteger(year) || year < 2000 || year > 2100) throw new RangeError('Année invalide');
   if (!Number.isInteger(sequence) || sequence <= 0) throw new RangeError('Séquence invalide');
   return `${prefix}-${year}-${String(sequence).padStart(4, '0')}`;
+}
+
+/**
+ * Code de vérification recopié à la main (bulletin, reçu, document) : espaces, tirets et points
+ * retirés, majuscules. « mxhe rzzb-6pem » → « MXHERZZB6PEM ».
+ */
+export function normalizeVerificationCode(input: string): string {
+  return input.replace(/[\s\-.]+/g, '').toUpperCase();
+}
+
+/** Énumération française : « A », « A et B », « A, B et C ». */
+export function joinFrench(items: readonly string[]): string {
+  if (items.length <= 1) return items[0] ?? '';
+  return `${items.slice(0, -1).join(', ')} et ${items[items.length - 1]}`;
+}
+
+/**
+ * Parent déjà enregistré, désigné pour le secrétariat : « Pierre Ngono (parent de Marie-Claire et
+ * Paul-Henri) ». Le nom de famille de l'enfant n'est répété que s'il diffère de celui du parent.
+ */
+export function describeGuardian(g: {
+  firstName: string;
+  lastName: string;
+  children: readonly { firstName: string; lastName: string }[];
+}): string {
+  const name = `${g.firstName} ${g.lastName}`;
+  if (g.children.length === 0) return name;
+  const children = g.children.map((c) =>
+    normalizeName(c.lastName) === normalizeName(g.lastName)
+      ? c.firstName
+      : `${c.firstName} ${c.lastName}`,
+  );
+  return `${name} (parent de ${joinFrench(children)})`;
 }
 
 /** Initiales pour les avatars : « Ngono Marie-Claire » → « NM ». */

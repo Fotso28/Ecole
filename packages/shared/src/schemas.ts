@@ -1,18 +1,25 @@
 import { z } from 'zod';
+// Messages de validation en français pour tous les schémas (API et site).
+import './zod-fr';
 import { PAYMENT_METHODS } from './finance';
 import { normalizeCameroonPhone } from './identity';
 import { STAFF_ROLES } from './permissions';
 import { COUNCIL_DECISIONS, YEAR_END_DECISIONS } from './results';
 
+/** Date AAAA-MM-JJ existante ; un champ vide signale « Champ obligatoire », pas une date invalide. */
 export const isoDate = z
   .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Date attendue au format AAAA-MM-JJ')
-  .refine(
-    (s) =>
-      !Number.isNaN(new Date(`${s}T00:00:00Z`).getTime()) &&
-      new Date(`${s}T00:00:00Z`).toISOString().startsWith(s),
-    'Date invalide',
-  );
+  .min(1, 'Champ obligatoire')
+  .superRefine((s, ctx) => {
+    if (s === '') return;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Date attendue au format AAAA-MM-JJ' });
+      return;
+    }
+    const d = new Date(`${s}T00:00:00Z`);
+    if (Number.isNaN(d.getTime()) || !d.toISOString().startsWith(s))
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Date invalide' });
+  });
 export const timeOfDay = z
   .string()
   .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Heure attendue au format HH:MM');
@@ -161,6 +168,11 @@ export const guardianInputSchema = z.object({
   isPrimary: z.boolean().default(false),
   isEmergencyContact: z.boolean().default(false),
   canPickUp: z.boolean().default(true),
+  /**
+   * Choix explicite de rattacher l'élève au parent déjà enregistré avec ce numéro, quand le nom
+   * saisi diffère du sien : sans ce choix, l'API refuse (`GUARDIAN_PHONE_TAKEN`).
+   */
+  linkExistingGuardian: z.boolean().optional(),
 });
 export const studentCreateSchema = z.object({
   firstName: name,
@@ -175,14 +187,25 @@ export const studentCreateSchema = z.object({
   classId: id.optional(),
   confirmNotDuplicate: z.boolean().default(false),
 });
+/** Correction de l'identité : un lieu de naissance vide (ou `null`) l'efface. */
 export const studentUpdateSchema = z.object({
   firstName: name.optional(),
   lastName: name.optional(),
   gender: z.enum(GENDERS).optional(),
   birthDate: isoDate.optional(),
-  birthPlace: z.string().trim().max(80).optional(),
-  nationality: z.string().trim().max(60).optional(),
+  birthPlace: z
+    .string()
+    .trim()
+    .max(80)
+    .nullable()
+    .optional()
+    .transform((v) => (v === '' ? null : v)),
+  nationality: z.string().trim().min(1, 'Champ obligatoire').max(60).optional(),
   photoConsent: z.boolean().optional(),
+});
+/** Vérification des numéros de parents avant l'inscription (parent déjà connu ?). */
+export const guardianPhoneCheckSchema = z.object({
+  phones: z.array(z.string().max(30)).min(1).max(4),
 });
 export const duplicateCheckSchema = z.object({
   firstName: name,
@@ -197,6 +220,52 @@ export const enrollmentCreateSchema = z.object({
   classId: id,
   status: z.enum(['ENROLLED', 'REPEATING']).default('ENROLLED'),
 });
+/**
+ * Changement d'inscription en cours d'année : changement de classe (même année), transfert vers
+ * un autre établissement ou sortie (date et motif obligatoires, établissement d'accueil pour un
+ * transfert), ou réintégration (statut inscrit ou redoublant, la sortie est effacée).
+ */
+export const enrollmentChangeSchema = z
+  .object({
+    classId: id.optional(),
+    status: z.enum(ENROLLMENT_STATUSES).optional(),
+    exitDate: isoDate.optional(),
+    exitReason: z.string().trim().max(300).optional(),
+    destinationSchool: z.string().trim().max(120).optional(),
+  })
+  .superRefine((v, ctx) => {
+    if (v.classId === undefined && v.status === undefined)
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Indiquez une nouvelle classe ou un statut',
+        path: ['status'],
+      });
+    if (v.status !== 'TRANSFERRED' && v.status !== 'LEFT') return;
+    if (v.classId !== undefined)
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Un élève qui quitte l’établissement ne change pas de classe',
+        path: ['classId'],
+      });
+    if (!v.exitDate)
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Champ obligatoire',
+        path: ['exitDate'],
+      });
+    if (!v.exitReason || v.exitReason.length < 3)
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Motif obligatoire (3 caractères minimum)',
+        path: ['exitReason'],
+      });
+    if (v.status === 'TRANSFERRED' && !v.destinationSchool)
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Indiquez l’établissement d’accueil',
+        path: ['destinationSchool'],
+      });
+  });
 export const studentImportSchema = z.object({
   csv: z.string().min(1).max(2_000_000),
   classId: id.optional(),

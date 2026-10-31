@@ -22,7 +22,7 @@ async function expectAccessible(page: Page, label: string): Promise<void> {
 }
 
 test('écrans publics', async ({ page }) => {
-  for (const path of ['/connexion', '/parent/connexion']) {
+  for (const path of ['/connexion', '/parent/connexion', '/verifier']) {
     await page.goto(path);
     await expect(page.locator('h1').first()).toBeVisible();
     await expectAccessible(page, path);
@@ -86,6 +86,21 @@ test('écrans de la direction', async ({ page }) => {
     .click();
   await expect(page.getByRole('dialog')).toBeVisible();
   await expectAccessible(page, '/eleves/[id] (dépôt de pièce)');
+  await page.getByRole('button', { name: 'Fermer' }).click();
+  // Fenêtres de la fiche : correction d'identité, transfert ou sortie.
+  await page.getByRole('button', { name: 'Corriger l’identité' }).click();
+  await expect(page.getByRole('dialog', { name: 'Corriger l’identité' })).toBeVisible();
+  await expectAccessible(page, '/eleves/[id] (identité)');
+  await page.getByRole('button', { name: 'Fermer' }).click();
+  await page.getByRole('button', { name: 'Transfert ou sortie' }).click();
+  await expect(page.getByRole('dialog', { name: 'Transfert ou sortie' })).toBeVisible();
+  await expectAccessible(page, '/eleves/[id] (transfert ou sortie)');
+  await page.getByRole('button', { name: 'Fermer' }).click();
+  // Structure : correction d'une matière de classe.
+  await page.goto('/structure');
+  await page.getByRole('button', { name: 'Modifier Français en 4e A' }).click();
+  await expect(page.getByRole('dialog', { name: 'Français · 4e A' })).toBeVisible();
+  await expectAccessible(page, '/structure (matière de classe)');
 });
 
 test('écran des rôles et fenêtre d’édition', async ({ page }) => {

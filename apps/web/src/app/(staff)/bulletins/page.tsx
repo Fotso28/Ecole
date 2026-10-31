@@ -1,9 +1,17 @@
 'use client';
 
 import {
-  suggestYearEndDecision,
+  COUNCIL_DECISION_LABELS,
+  COUNCIL_DECISIONS,
+  DEFAULT_COUNCIL_RULES,
+  officialExamForLevel,
+  proposeDistinction,
+  proposeYearEndDecision,
   YEAR_END_DECISION_LABELS,
   YEAR_END_DECISIONS,
+  type CouncilDecision,
+  type CouncilRules,
+  type YearEndDecision,
 } from '@ecole/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { FileText, Lock, TriangleAlert } from 'lucide-react';
@@ -29,6 +37,8 @@ interface CardRow {
   generalAverageCenti: number | null;
   rank: number | null;
   rankLabel: string;
+  /** Élèves classés (ayant une moyenne) ce trimestre. */
+  ranked: number;
   classSize: number;
   publishedAt: string | null;
   needsRepublish: boolean;
@@ -37,15 +47,17 @@ interface CardRow {
   annualAverageCenti: number | null;
   annualRankLabel: string | null;
   yearEndDecision: string | null;
+  /** Redoublant cette année (au moment de la préparation). */
+  repeating: boolean;
+  /** Décision enregistrée par le conseil, éventuellement après la préparation du bulletin. */
+  council: {
+    decision: CouncilDecision;
+    decisionLabel: string;
+    yearEndDecision: YearEndDecision | null;
+    yearEndDecisionLabel: string | null;
+    comment: string | null;
+  } | null;
 }
-
-const DECISIONS = [
-  ['HONOR_ROLL', 'Tableau d’honneur'],
-  ['ENCOURAGEMENT', 'Encouragements'],
-  ['WARNING', 'Avertissement'],
-  ['BLAME', 'Blâme'],
-  ['NONE', 'Aucune mention'],
-] as const;
 
 export default function ReportCardsPage() {
   const { can } = useAuth();
@@ -58,6 +70,12 @@ export default function ReportCardsPage() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [overrideReason, setOverrideReason] = useState('');
   const [decisionFor, setDecisionFor] = useState<CardRow | null>(null);
+  // Remonte le formulaire à chaque ouverture : aucune saisie ne passe d'un élève à l'autre.
+  const [decisionKey, setDecisionKey] = useState(0);
+  const openDecision = (c: CardRow) => {
+    setDecisionFor(c);
+    setDecisionKey((k) => k + 1);
+  };
 
   useEffect(() => {
     if (!termId && structure.data?.terms[0]) setTermId(structure.data.terms[0].id);
@@ -72,13 +90,22 @@ export default function ReportCardsPage() {
   const completeness = useQuery({
     queryKey: ['report-cards-completeness', classId, termId],
     queryFn: () =>
-      api<{ issues: string[]; annual: boolean }>(
+      api<{ issues: string[]; annual: boolean; stale: boolean; rules: CouncilRules }>(
         `/report-cards/completeness?classId=${classId}&termId=${termId}`,
       ),
     enabled: !!classId && !!termId,
   });
   const issues = completeness.data?.issues ?? [];
   const annual = completeness.data?.annual ?? false;
+  const stale = completeness.data?.stale ?? false;
+  const rules = completeness.data?.rules ?? DEFAULT_COUNCIL_RULES;
+  const levelName = classes.data?.find((c) => c.id === classId)?.level.name;
+  const exam = levelName ? officialExamForLevel(levelName) : null;
+  const distinction = proposeDistinction(decisionFor?.generalAverageCenti ?? null, rules);
+  const yearEnd = proposeYearEndDecision(decisionFor?.annualAverageCenti ?? null, {
+    repeating: decisionFor?.repeating ?? false,
+    rules,
+  });
   const generate = useMutation({
     mutationFn: () =>
       api<{ generated: number }>('/report-cards/generate', {
@@ -117,6 +144,8 @@ export default function ReportCardsPage() {
     onSuccess: () => {
       setDecisionFor(null);
       toast('Décision enregistrée. Préparez à nouveau les bulletins pour l’y faire figurer.');
+      void queryClient.invalidateQueries({ queryKey: key });
+      void completeness.refetch();
     },
     onError: (e) => toast(e instanceof Error ? e.message : 'Erreur', 'error'),
   });
@@ -138,6 +167,7 @@ export default function ReportCardsPage() {
           <strong>Bulletin de fin d’année.</strong> Il ajoute les moyennes et le rang annuels
           (moyenne des trois trimestres) et la décision de fin d’année du conseil. Les saisies de
           toute l’année sont contrôlées.
+          {exam ? ` Classe d’examen : le passage dépend aussi du résultat au ${exam}.` : ''}
         </p>
       ) : null}
       <Card className="grid gap-3 sm:grid-cols-2">
@@ -170,12 +200,26 @@ export default function ReportCardsPage() {
             </Button>
           ) : null}
           {can('reportcards.publish') ? (
-            <Button onClick={() => setConfirmOpen(true)} disabled={drafts === 0}>
+            <Button onClick={() => setConfirmOpen(true)} disabled={drafts === 0 || stale}>
               <Lock className="size-4" aria-hidden />
               Publier {drafts > 0 ? plural(drafts, 'bulletin', 'bulletins') : ''}
             </Button>
           ) : null}
         </div>
+      ) : null}
+
+      {classId && termId && stale && drafts > 0 ? (
+        <p
+          role="status"
+          className="flex gap-2.5 rounded-[16px] border border-[#f1d99a] bg-warn-soft p-4 text-sm"
+        >
+          <TriangleAlert className="mt-0.5 size-5 shrink-0 text-warn" aria-hidden />
+          <span>
+            <strong>Brouillons à mettre à jour.</strong> Des notes, des coefficients ou des
+            décisions du conseil ont changé depuis la préparation : préparez à nouveau les bulletins
+            pour les y intégrer avant de publier.
+          </span>
+        </p>
       ) : null}
 
       {classId && termId && issues.length > 0 ? (
@@ -225,16 +269,32 @@ export default function ReportCardsPage() {
               <div className="flex min-w-0 flex-1 flex-col">
                 <strong className="truncate">{c.student}</strong>
                 <span className="text-[13px] text-muted tabular">
-                  Moyenne {formatGrade(c.generalAverageCenti)} · {c.rankLabel} sur {c.classSize}
-                  {c.decision ? ` · ${c.decision}` : ''}
+                  Moyenne {formatGrade(c.generalAverageCenti)} ·{' '}
+                  {c.rank === null ? 'non classé' : `${c.rankLabel} sur ${c.ranked}`}
+                  {c.repeating ? ' · redoublant' : ''}
+                  {c.council
+                    ? c.council.decision === 'NONE'
+                      ? ''
+                      : ` · ${c.council.decisionLabel}`
+                    : c.decision
+                      ? ` · ${c.decision}`
+                      : ''}
                 </span>
                 {annual ? (
                   <span className="text-[13px] text-muted tabular">
                     Année {formatGrade(c.annualAverageCenti)}
                     {c.annualRankLabel ? ` · ${c.annualRankLabel}` : ''}
                     {' · '}
-                    <span className={c.yearEndDecision ? 'font-semibold text-ink' : ''}>
-                      {c.yearEndDecision ?? 'décision de fin d’année à saisir'}
+                    <span
+                      className={
+                        (c.council?.yearEndDecisionLabel ?? c.yearEndDecision)
+                          ? 'font-semibold text-ink'
+                          : ''
+                      }
+                    >
+                      {c.council?.yearEndDecisionLabel ??
+                        c.yearEndDecision ??
+                        'décision de fin d’année à saisir'}
                     </span>
                   </span>
                 ) : null}
@@ -265,7 +325,7 @@ export default function ReportCardsPage() {
                     variant="secondary"
                     size="sm"
                     className="flex-1 sm:flex-none"
-                    onClick={() => setDecisionFor(c)}
+                    onClick={() => openDecision(c)}
                   >
                     Décision
                   </Button>
@@ -306,8 +366,12 @@ export default function ReportCardsPage() {
       >
         <ul className="flex list-disc flex-col gap-2 pl-5 text-sm">
           <li>
-            {plural(drafts, 'bulletin sera publié', 'bulletins seront publiés')} et deviendra
-            consultable par les parents.
+            {plural(
+              drafts,
+              'bulletin sera publié et deviendra consultable',
+              'bulletins seront publiés et deviendront consultables',
+            )}{' '}
+            par les parents.
           </li>
           <li>Les parents reçoivent un SMS avec la moyenne générale.</li>
           <li>
@@ -335,6 +399,7 @@ export default function ReportCardsPage() {
         title={`Décision du conseil · ${decisionFor?.student ?? ''}`}
       >
         <form
+          key={decisionKey}
           className="flex flex-col gap-4"
           onSubmit={(e) => {
             e.preventDefault();
@@ -348,28 +413,42 @@ export default function ReportCardsPage() {
             });
           }}
         >
-          <SelectField label="Décision" name="decision" defaultValue="NONE">
-            {DECISIONS.map(([v, l]) => (
-              <option key={v} value={v}>
-                {l}
+          <SelectField
+            label="Décision"
+            name="decision"
+            defaultValue={decisionFor?.council?.decision ?? distinction ?? 'NONE'}
+            hint={
+              decisionFor?.council
+                ? 'Décision déjà enregistrée par le conseil'
+                : distinction
+                  ? `Moyenne ${formatGrade(decisionFor?.generalAverageCenti ?? null)} · proposition : ${COUNCIL_DECISION_LABELS[distinction]}${distinction === 'NONE' ? '' : ', à confirmer selon la conduite'}`
+                  : 'Aucune moyenne ce trimestre'
+            }
+          >
+            {COUNCIL_DECISIONS.map((d) => (
+              <option key={d} value={d}>
+                {COUNCIL_DECISION_LABELS[d]}
               </option>
             ))}
           </SelectField>
           {annual ? (
             <SelectField
-              key={decisionFor?.id}
               label="Décision de fin d’année"
               name="yearEndDecision"
-              hint={
+              hint={[
                 decisionFor?.annualAverageCenti != null
-                  ? `Moyenne annuelle ${formatGrade(decisionFor.annualAverageCenti)} · proposition : ${
-                      YEAR_END_DECISION_LABELS[
-                        suggestYearEndDecision(decisionFor.annualAverageCenti) ?? 'REPEAT'
-                      ]
-                    }`
-                  : 'Aucune moyenne annuelle'
-              }
-              defaultValue={suggestYearEndDecision(decisionFor?.annualAverageCenti ?? null) ?? ''}
+                  ? `Moyenne annuelle ${formatGrade(decisionFor.annualAverageCenti)}`
+                  : 'Aucune moyenne annuelle',
+                decisionFor?.repeating ? 'redoublant cette année' : null,
+                yearEnd
+                  ? `proposition : ${YEAR_END_DECISION_LABELS[yearEnd.decision]} (${yearEnd.reason})`
+                  : null,
+                decisionFor?.council?.yearEndDecision ? 'décision déjà enregistrée' : null,
+                exam ? `classe d’examen : le passage dépend aussi du ${exam}` : null,
+              ]
+                .filter(Boolean)
+                .join(' · ')}
+              defaultValue={decisionFor?.council?.yearEndDecision ?? yearEnd?.decision ?? ''}
             >
               <option value="">Non décidée</option>
               {YEAR_END_DECISIONS.map((d) => (
@@ -379,7 +458,13 @@ export default function ReportCardsPage() {
               ))}
             </SelectField>
           ) : null}
-          <TextareaField label="Appréciation du conseil" name="comment" maxLength={300} optional />
+          <TextareaField
+            label="Appréciation du conseil"
+            name="comment"
+            maxLength={300}
+            optional
+            defaultValue={decisionFor?.council?.comment ?? ''}
+          />
           <Button type="submit" loading={decide.isPending}>
             Enregistrer
           </Button>

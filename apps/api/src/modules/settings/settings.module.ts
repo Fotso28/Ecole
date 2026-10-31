@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Module, Patch } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { councilRulesSchema } from '@ecole/shared';
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { AuditService } from '../../common/audit.service';
@@ -21,6 +22,8 @@ const settingsSchema = z.object({
       mfaRequired: z.boolean().optional(),
       /** Canal des notifications aux familles quand les deux coordonnées sont connues. */
       preferredChannel: z.enum(['SMS', 'EMAIL']).optional(),
+      /** Règles du conseil de classe : moyenne de passage, distinctions, exclusions proposées. */
+      council: councilRulesSchema.optional(),
     })
     .optional(),
 });

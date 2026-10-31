@@ -176,3 +176,132 @@ export function suggestYearEndDecision(
     throw new RangeError('Moyenne invalide');
   return annualAverageCenti >= thresholdCenti ? 'PROMOTED' : 'REPEAT';
 }
+
+/** Distinctions et sanctions trimestrielles du conseil de classe. */
+export const COUNCIL_DECISIONS = [
+  'CONGRATULATIONS',
+  'ENCOURAGEMENT',
+  'HONOR_ROLL',
+  'WARNING',
+  'BLAME',
+  'NONE',
+] as const;
+export type CouncilDecision = (typeof COUNCIL_DECISIONS)[number];
+
+export const COUNCIL_DECISION_LABELS: Record<CouncilDecision, string> = {
+  CONGRATULATIONS: 'Félicitations',
+  ENCOURAGEMENT: 'Encouragements',
+  HONOR_ROLL: 'Tableau d’honneur',
+  WARNING: 'Avertissement',
+  BLAME: 'Blâme',
+  NONE: 'Aucune mention',
+};
+
+/**
+ * Règles du conseil de classe, propres à chaque école (paramètres). Moyennes en centièmes.
+ * Les valeurs par défaut suivent l'usage du secondaire camerounais ; chaque proposition reste
+ * modifiable par le conseil.
+ */
+export interface CouncilRules {
+  /** Moyenne annuelle de passage en classe supérieure. */
+  passThresholdCenti: number;
+  /** Seuils des distinctions trimestrielles (tableau d'honneur ≤ encouragements ≤ félicitations). */
+  honorRollCenti: number;
+  encouragementCenti: number;
+  congratulationsCenti: number;
+  /** Proposer l'exclusion d'un redoublant qui n'atteint pas la moyenne de passage. */
+  excludeFailingRepeaters: boolean;
+  /** Moyenne annuelle sous laquelle l'exclusion est proposée ; `null` : jamais sur ce seul critère. */
+  exclusionThresholdCenti: number | null;
+}
+
+export const DEFAULT_COUNCIL_RULES: CouncilRules = {
+  passThresholdCenti: PASS_THRESHOLD_CENTI,
+  honorRollCenti: 1200,
+  encouragementCenti: 1400,
+  congratulationsCenti: 1600,
+  excludeFailingRepeaters: true,
+  exclusionThresholdCenti: null,
+};
+
+/** Règles de l'école complétées par les valeurs par défaut. */
+export function resolveCouncilRules(partial?: Partial<CouncilRules> | null): CouncilRules {
+  const rules = { ...DEFAULT_COUNCIL_RULES };
+  for (const key of Object.keys(DEFAULT_COUNCIL_RULES) as (keyof CouncilRules)[]) {
+    const value = partial?.[key];
+    if (value !== undefined) (rules as Record<string, unknown>)[key] = value;
+  }
+  return rules;
+}
+
+const fmt = (centi: number) => `${Math.floor(centi / 100)},${String(centi % 100).padStart(2, '0')}`;
+
+export interface YearEndProposal {
+  decision: YearEndDecision;
+  /** Motif lisible de la proposition, affiché au conseil. */
+  reason: string;
+}
+
+/**
+ * Proposition de décision de fin d'année : admis au-dessus de la moyenne de passage ; en dessous,
+ * redoublement, ou exclusion pour un redoublant (un second redoublement de la même classe n'est
+ * pas admis) ou sous le seuil d'exclusion de l'école. Le rachat reste l'affaire du seul conseil.
+ */
+export function proposeYearEndDecision(
+  annualAverageCenti: number | null,
+  {
+    repeating = false,
+    rules = DEFAULT_COUNCIL_RULES,
+  }: { repeating?: boolean; rules?: CouncilRules } = {},
+): YearEndProposal | null {
+  if (annualAverageCenti === null) return null;
+  if (!Number.isInteger(annualAverageCenti) || annualAverageCenti < 0)
+    throw new RangeError('Moyenne invalide');
+  const pass = rules.passThresholdCenti;
+  if (annualAverageCenti >= pass)
+    return { decision: 'PROMOTED', reason: `moyenne annuelle d’au moins ${fmt(pass)}` };
+  if (rules.exclusionThresholdCenti !== null && annualAverageCenti < rules.exclusionThresholdCenti)
+    return {
+      decision: 'EXCLUDED_WORK',
+      reason: `moyenne annuelle inférieure à ${fmt(rules.exclusionThresholdCenti)}`,
+    };
+  if (repeating && rules.excludeFailingRepeaters)
+    return {
+      decision: 'EXCLUDED_WORK',
+      reason: `redoublant sous ${fmt(pass)} : un second redoublement de la classe n’est pas admis`,
+    };
+  return { decision: 'REPEAT', reason: `moyenne annuelle inférieure à ${fmt(pass)}` };
+}
+
+/**
+ * Distinction proposée d'après la moyenne générale du trimestre : félicitations, encouragements,
+ * tableau d'honneur ou aucune. Les sanctions (avertissement, blâme) relèvent du seul conseil, qui
+ * tient aussi compte de la conduite. `null` si l'élève n'a pas de moyenne.
+ */
+export function proposeDistinction(
+  termAverageCenti: number | null,
+  rules: CouncilRules = DEFAULT_COUNCIL_RULES,
+): Extract<CouncilDecision, 'CONGRATULATIONS' | 'ENCOURAGEMENT' | 'HONOR_ROLL' | 'NONE'> | null {
+  if (termAverageCenti === null) return null;
+  if (!Number.isInteger(termAverageCenti) || termAverageCenti < 0)
+    throw new RangeError('Moyenne invalide');
+  if (termAverageCenti >= rules.congratulationsCenti) return 'CONGRATULATIONS';
+  if (termAverageCenti >= rules.encouragementCenti) return 'ENCOURAGEMENT';
+  if (termAverageCenti >= rules.honorRollCenti) return 'HONOR_ROLL';
+  return 'NONE';
+}
+
+/**
+ * Examen officiel qui sanctionne la fin d'un niveau (« 3e » → BEPC, « 1re » → Probatoire,
+ * « Tle » → Baccalauréat, et leurs équivalents anglophones), `null` sinon. Dans ces classes, le
+ * passage dépend aussi du résultat à l'examen.
+ */
+export function officialExamForLevel(levelName: string): string | null {
+  const n = levelName.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+  if (/^(3e?(me)?|troisieme)(\s|$)/.test(n)) return 'BEPC';
+  if (/^(1re|1ere|premiere)(\s|$)/.test(n)) return 'Probatoire';
+  if (/^(tle|terminale)(\s|$)/.test(n)) return 'Baccalauréat';
+  if (/^form\s*5(\s|$)/.test(n)) return 'GCE O Level';
+  if (/^upper\s*sixth(\s|$)/.test(n)) return 'GCE A Level';
+  return null;
+}

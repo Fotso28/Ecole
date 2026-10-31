@@ -295,7 +295,13 @@ export class PdfService {
     doc.font('Helvetica').fontSize(9).text(' / 20');
     doc
       .fontSize(8)
-      .text(`Rang ${data.totals.rankLabel} sur ${data.totals.ranked}`, left + 8, y + 44);
+      .text(
+        data.totals.rank === null
+          ? 'Non classé (aucune moyenne)'
+          : `Rang ${data.totals.rankLabel} sur ${data.totals.ranked}`,
+        left + 8,
+        y + 44,
+      );
     doc.text(
       `Classe : ${grade(data.classStats.averageCenti)} · extrêmes ${grade(data.classStats.minCenti)} et ${grade(data.classStats.maxCenti)}`,
       left + 8,
@@ -378,9 +384,14 @@ export class PdfService {
       doc.font('Helvetica').fontSize(9).text(' / 20');
       doc
         .fontSize(8)
-        .text(`Rang annuel ${annual.rankLabel} sur ${annual.ranked}`, left + 8, y + 37, {
-          width: 150,
-        });
+        .text(
+          annual.rank === null
+            ? 'Non classé sur l’année'
+            : `Rang annuel ${annual.rankLabel} sur ${annual.ranked}`,
+          left + 8,
+          y + 37,
+          { width: 150 },
+        );
       const midX = left + 150;
       const midW = W * 0.58 - 158;
       doc.text(

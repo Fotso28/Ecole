@@ -106,6 +106,7 @@ enum ReportCardStatus {
 }
 
 enum CouncilDecisionType {
+  CONGRATULATIONS
   HONOR_ROLL
   ENCOURAGEMENT
   WARNING

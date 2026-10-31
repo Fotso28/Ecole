@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { PAYMENT_METHODS } from './finance';
 import { normalizeCameroonPhone } from './identity';
 import { STAFF_ROLES } from './permissions';
-import { YEAR_END_DECISIONS } from './results';
+import { COUNCIL_DECISIONS, YEAR_END_DECISIONS } from './results';
 
 export const isoDate = z
   .string()
@@ -240,11 +240,37 @@ export const reportCardPublishSchema = reportCardGenerateSchema.extend({
   overrideReason: z.string().trim().min(10).max(300).optional(),
 });
 export const councilDecisionSchema = z.object({
-  decision: z.enum(['HONOR_ROLL', 'ENCOURAGEMENT', 'WARNING', 'BLAME', 'NONE']),
+  decision: z.enum(COUNCIL_DECISIONS),
   comment: z.string().trim().max(300).optional(),
   /** Décision de fin d'année, réservée au dernier trimestre ; `null` l'efface. */
   yearEndDecision: z.enum(YEAR_END_DECISIONS).nullable().optional(),
 });
+const centi20 = z.number().int().min(0).max(2000);
+/** Règles du conseil de classe de l'école (paramètres), moyennes en centièmes. */
+export const councilRulesSchema = z
+  .object({
+    passThresholdCenti: z.number().int().min(500).max(1500),
+    honorRollCenti: centi20,
+    encouragementCenti: centi20,
+    congratulationsCenti: centi20,
+    excludeFailingRepeaters: z.boolean(),
+    exclusionThresholdCenti: centi20.nullable(),
+  })
+  .refine(
+    (r) =>
+      r.honorRollCenti <= r.encouragementCenti && r.encouragementCenti <= r.congratulationsCenti,
+    {
+      message: 'Les seuils doivent croître : tableau d’honneur, encouragements, félicitations',
+      path: ['encouragementCenti'],
+    },
+  )
+  .refine(
+    (r) => r.exclusionThresholdCenti === null || r.exclusionThresholdCenti < r.passThresholdCenti,
+    {
+      message: 'Le seuil d’exclusion doit être inférieur à la moyenne de passage',
+      path: ['exclusionThresholdCenti'],
+    },
+  );
 /** Relevé de notes : séquence ou trimestre (identifiant obligatoire), ou année (courante par défaut). */
 export const transcriptQuerySchema = z
   .object({

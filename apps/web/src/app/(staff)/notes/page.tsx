@@ -92,6 +92,9 @@ function NotesContent() {
   const [serverErrors, setServerErrors] = useState<Record<string, string>>({});
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [newEvalOpen, setNewEvalOpen] = useState(false);
+  // Intitulé de la nouvelle évaluation : suit le type tant qu'il n'a pas été personnalisé.
+  const [newEvalName, setNewEvalName] = useState<string>(TYPE_LABEL.QUIZ);
+  const [newEvalKey, setNewEvalKey] = useState(0);
   const [reopenOpen, setReopenOpen] = useState(false);
   const dirty = useRef<Map<string, Set<string>>>(new Map());
   const timers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
@@ -346,7 +349,15 @@ function NotesContent() {
             </span>
             <div className="ml-auto flex flex-wrap gap-2">
               {editable && data.status !== 'SUBMITTED' ? (
-                <Button variant="secondary" size="sm" onClick={() => setNewEvalOpen(true)}>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    setNewEvalName(TYPE_LABEL.QUIZ);
+                    setNewEvalKey((k) => k + 1);
+                    setNewEvalOpen(true);
+                  }}
+                >
                   <Plus className="size-4" aria-hidden />
                   Évaluation
                 </Button>
@@ -618,6 +629,7 @@ function NotesContent() {
 
       <Sheet open={newEvalOpen} onClose={() => setNewEvalOpen(false)} title="Nouvelle évaluation">
         <form
+          key={newEvalKey}
           className="flex flex-col gap-4"
           onSubmit={(e) => {
             e.preventDefault();
@@ -630,7 +642,16 @@ function NotesContent() {
             });
           }}
         >
-          <SelectField label="Type" name="type" defaultValue="QUIZ">
+          <SelectField
+            label="Type"
+            name="type"
+            defaultValue="QUIZ"
+            onChange={(e) => {
+              const label = TYPE_LABEL[e.target.value as keyof typeof TYPE_LABEL];
+              if (label && (Object.values(TYPE_LABEL) as string[]).includes(newEvalName.trim()))
+                setNewEvalName(label);
+            }}
+          >
             {Object.entries(TYPE_LABEL).map(([k, v]) => (
               <option key={k} value={k}>
                 {v}
@@ -640,7 +661,8 @@ function NotesContent() {
           <InputField
             label="Intitulé"
             name="name"
-            defaultValue="Interrogation"
+            value={newEvalName}
+            onChange={(e) => setNewEvalName(e.target.value)}
             required
             maxLength={60}
           />

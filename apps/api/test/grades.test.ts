@@ -416,7 +416,7 @@ describe('bulletins', () => {
       .expect(200);
     expect(bilongCard.body.data.decision).toEqual({
       type: 'HONOR_ROLL',
-      label: "Tableau d'honneur",
+      label: 'Tableau d’honneur',
       comment: 'Excellent trimestre',
     });
 

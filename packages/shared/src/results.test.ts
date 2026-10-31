@@ -9,8 +9,15 @@ import {
   suggestYearEndDecision,
   YEAR_END_DECISION_LABELS,
   YEAR_END_DECISIONS,
+  COUNCIL_DECISION_LABELS,
+  COUNCIL_DECISIONS,
+  DEFAULT_COUNCIL_RULES,
+  officialExamForLevel,
+  proposeDistinction,
+  proposeYearEndDecision,
+  resolveCouncilRules,
 } from './results';
-import { transcriptQuerySchema, councilDecisionSchema } from './schemas';
+import { transcriptQuerySchema, councilDecisionSchema, councilRulesSchema } from './schemas';
 
 describe('annualAverage', () => {
   it('fait la moyenne arithmétique des trois trimestres', () => {
@@ -247,5 +254,103 @@ describe('transcriptQuerySchema', () => {
     expect(transcriptQuerySchema.safeParse({ scope: 'year' }).success).toBe(true);
     expect(transcriptQuerySchema.safeParse({ scope: 'term' }).success).toBe(false);
     expect(transcriptQuerySchema.safeParse({ scope: 'month', periodId: 'x' }).success).toBe(false);
+  });
+});
+
+describe('proposeYearEndDecision', () => {
+  it('admet à partir de la moyenne de passage, au centième près', () => {
+    expect(proposeYearEndDecision(1000)?.decision).toBe('PROMOTED');
+    expect(proposeYearEndDecision(999)?.decision).toBe('REPEAT');
+    expect(proposeYearEndDecision(999)?.reason).toBe('moyenne annuelle inférieure à 10,00');
+    expect(proposeYearEndDecision(1806)?.reason).toBe('moyenne annuelle d’au moins 10,00');
+    expect(proposeYearEndDecision(null)).toBeNull();
+  });
+
+  it('propose l’exclusion d’un redoublant sous la moyenne, sauf si l’école l’a désactivée', () => {
+    expect(proposeYearEndDecision(713, { repeating: true })).toEqual({
+      decision: 'EXCLUDED_WORK',
+      reason: 'redoublant sous 10,00 : un second redoublement de la classe n’est pas admis',
+    });
+    expect(proposeYearEndDecision(1000, { repeating: true })?.decision).toBe('PROMOTED');
+    const lenient = resolveCouncilRules({ excludeFailingRepeaters: false });
+    expect(proposeYearEndDecision(713, { repeating: true, rules: lenient })?.decision).toBe(
+      'REPEAT',
+    );
+  });
+
+  it('applique le seuil d’exclusion et la moyenne de passage propres à l’école', () => {
+    const rules = resolveCouncilRules({ passThresholdCenti: 1050, exclusionThresholdCenti: 700 });
+    expect(proposeYearEndDecision(1049, { rules })?.decision).toBe('REPEAT');
+    expect(proposeYearEndDecision(1050, { rules })?.decision).toBe('PROMOTED');
+    expect(proposeYearEndDecision(700, { rules })?.decision).toBe('REPEAT');
+    expect(proposeYearEndDecision(699, { rules })).toEqual({
+      decision: 'EXCLUDED_WORK',
+      reason: 'moyenne annuelle inférieure à 7,00',
+    });
+    expect(() => proposeYearEndDecision(10.5)).toThrow(RangeError);
+  });
+});
+
+describe('proposeDistinction', () => {
+  it('suit les seuils 12, 14 et 16 par défaut, bornes comprises', () => {
+    expect(proposeDistinction(1199)).toBe('NONE');
+    expect(proposeDistinction(1200)).toBe('HONOR_ROLL');
+    expect(proposeDistinction(1399)).toBe('HONOR_ROLL');
+    expect(proposeDistinction(1400)).toBe('ENCOURAGEMENT');
+    expect(proposeDistinction(1600)).toBe('CONGRATULATIONS');
+    expect(proposeDistinction(null)).toBeNull();
+    expect(() => proposeDistinction(-1)).toThrow(RangeError);
+  });
+
+  it('respecte les seuils de l’école', () => {
+    const rules = resolveCouncilRules({ congratulationsCenti: 1500 });
+    expect(proposeDistinction(1500, rules)).toBe('CONGRATULATIONS');
+  });
+});
+
+describe('règles du conseil', () => {
+  it('complète les règles partielles par les valeurs par défaut', () => {
+    expect(resolveCouncilRules(null)).toEqual(DEFAULT_COUNCIL_RULES);
+    expect(resolveCouncilRules({ honorRollCenti: 1100 })).toEqual({
+      ...DEFAULT_COUNCIL_RULES,
+      honorRollCenti: 1100,
+    });
+  });
+
+  it('refuse des seuils incohérents', () => {
+    expect(councilRulesSchema.safeParse(DEFAULT_COUNCIL_RULES).success).toBe(true);
+    expect(
+      councilRulesSchema.safeParse({ ...DEFAULT_COUNCIL_RULES, encouragementCenti: 1100 }).success,
+    ).toBe(false);
+    expect(
+      councilRulesSchema.safeParse({ ...DEFAULT_COUNCIL_RULES, exclusionThresholdCenti: 1000 })
+        .success,
+    ).toBe(false);
+    expect(
+      councilRulesSchema.safeParse({ ...DEFAULT_COUNCIL_RULES, passThresholdCenti: 1000.5 })
+        .success,
+    ).toBe(false);
+  });
+
+  it('libelle chaque distinction et accepte les félicitations', () => {
+    for (const d of COUNCIL_DECISIONS) expect(COUNCIL_DECISION_LABELS[d]).toBeTruthy();
+    expect(councilDecisionSchema.parse({ decision: 'CONGRATULATIONS' })).toEqual({
+      decision: 'CONGRATULATIONS',
+    });
+  });
+});
+
+describe('officialExamForLevel', () => {
+  it('repère les classes d’examen', () => {
+    expect(officialExamForLevel('3e')).toBe('BEPC');
+    expect(officialExamForLevel('3ème')).toBe('BEPC');
+    expect(officialExamForLevel('1re')).toBe('Probatoire');
+    expect(officialExamForLevel('Première')).toBe('Probatoire');
+    expect(officialExamForLevel('Tle')).toBe('Baccalauréat');
+    expect(officialExamForLevel('Terminale D')).toBe('Baccalauréat');
+    expect(officialExamForLevel('Form 5')).toBe('GCE O Level');
+    expect(officialExamForLevel('Upper Sixth')).toBe('GCE A Level');
+    for (const n of ['6e', '4e', '2nde', '30e', 'Lower Sixth', 'Form 4'])
+      expect(officialExamForLevel(n)).toBeNull();
   });
 });

@@ -4,14 +4,17 @@ import {
   annualClassResults,
   appreciation,
   classStatistics,
+  COUNCIL_DECISION_LABELS,
   formatRank,
   generalAverage,
   passRate,
   periodAverage,
+  resolveCouncilRules,
   rankWithTies,
   subjectAverage,
   toMinutes,
   YEAR_END_DECISION_LABELS,
+  type CouncilRules,
 } from '@ecole/shared';
 import {
   CouncilDecisionType,
@@ -37,13 +40,7 @@ export const GROUP_LABELS: Record<SubjectGroup, string> = {
   OTHER: 'Autres enseignements',
 };
 
-export const DECISION_LABELS: Record<CouncilDecisionType, string> = {
-  HONOR_ROLL: "Tableau d'honneur",
-  ENCOURAGEMENT: 'Encouragements',
-  WARNING: 'Avertissement',
-  BLAME: 'Blâme',
-  NONE: 'Aucune mention',
-};
+export const DECISION_LABELS: Record<CouncilDecisionType, string> = COUNCIL_DECISION_LABELS;
 
 export interface ReportCardSubject {
   subjectId: string;
@@ -533,15 +530,34 @@ export class ReportCardsService {
     };
   }
 
-  /** Saisies manquantes d'une classe pour un trimestre (affichées avant la publication). */
+  /**
+   * Saisies manquantes d'une classe pour un trimestre (affichées avant la publication), brouillons
+   * périmés (notes, coefficients ou décisions du conseil modifiés depuis la préparation) et règles
+   * du conseil de classe de l'école.
+   */
   async completeness(classId: string, termId: string) {
     const { term, yearTerms, final } = await this.classTerm(classId, termId);
-    const { issues } = await this.inputs(
+    const { issues, digest } = await this.inputs(
       classId,
       final ? yearTerms.flatMap((t) => t.sequences) : term.sequences,
       termId,
     );
-    return { issues, annual: final };
+    const drafts = await this.db.reportCard.findMany({
+      where: { classId, termId, status: 'DRAFT' },
+      select: { data: true },
+    });
+    const stale = drafts.some((d) => (d.data as unknown as ReportCardData).inputsDigest !== digest);
+    return { issues, annual: final, stale, rules: await this.councilRules() };
+  }
+
+  /** Règles du conseil de classe de l'école, complétées par les valeurs par défaut. */
+  async councilRules(): Promise<CouncilRules> {
+    const school = await this.db.school.findUniqueOrThrow({
+      where: { id: currentSchoolId() },
+      select: { settings: true },
+    });
+    const settings = (school.settings ?? {}) as { council?: Partial<CouncilRules> };
+    return resolveCouncilRules(settings.council);
   }
 
   private async classTerm(classId: string, termId: string) {
@@ -654,7 +670,7 @@ export class ReportCardsService {
     const { issues, digest, classSubjects } = await this.inputs(classId, sequences, termId);
     if (drafts.some((d) => (d.data as unknown as ReportCardData).inputsDigest !== digest))
       throw new ConflictException(
-        'Les notes ou les élèves ont changé depuis la préparation : préparez à nouveau les bulletins',
+        'Les notes, les élèves, les coefficients ou les décisions du conseil ont changé depuis la préparation : préparez à nouveau les bulletins',
       );
     if (issues.length > 0 && !overrideReason)
       throw new ConflictException({
@@ -753,9 +769,16 @@ export class ReportCardsService {
     });
     const latest = new Map<string, (typeof cards)[number]>();
     for (const c of cards) if (!latest.has(c.studentId)) latest.set(c.studentId, c);
+    // Décisions enregistrées depuis la préparation : la fiche du conseil les reprend telles quelles.
+    const decisions = await this.db.councilDecision.findMany({
+      where: { termId, studentId: { in: [...latest.keys()] } },
+      select: { studentId: true, decision: true, yearEndDecision: true, comment: true },
+    });
+    const councilOf = new Map(decisions.map((d) => [d.studentId, d]));
     return [...latest.values()]
       .map((c) => {
         const data = c.data as unknown as ReportCardData;
+        const council = councilOf.get(c.studentId);
         return {
           id: c.id,
           studentId: c.studentId,
@@ -766,6 +789,7 @@ export class ReportCardsService {
           generalAverageCenti: c.generalAverageCenti,
           rank: c.rank,
           rankLabel: data.totals.rankLabel,
+          ranked: data.totals.ranked,
           classSize: c.classSize,
           publishedAt: c.publishedAt,
           needsRepublish: c.needsRepublish,
@@ -774,6 +798,18 @@ export class ReportCardsService {
           annualAverageCenti: c.annualAverageCenti,
           annualRankLabel: data.annual?.rankLabel ?? null,
           yearEndDecision: data.yearEndDecision?.label ?? null,
+          repeating: data.student.repeating ?? false,
+          council: council
+            ? {
+                decision: council.decision,
+                decisionLabel: DECISION_LABELS[council.decision],
+                yearEndDecision: council.yearEndDecision,
+                yearEndDecisionLabel: council.yearEndDecision
+                  ? YEAR_END_DECISION_LABELS[council.yearEndDecision]
+                  : null,
+                comment: council.comment,
+              }
+            : null,
         };
       })
       .sort(

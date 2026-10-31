@@ -20,6 +20,11 @@ test('saisie des notes : validation immédiate, enregistrement automatique, moye
 
   await page.getByRole('button', { name: 'Évaluation' }).click();
   const dialog = page.getByRole('dialog', { name: 'Nouvelle évaluation' });
+  // L'intitulé par défaut suit le type choisi, tant qu'il n'a pas été personnalisé.
+  await expect(dialog.getByLabel('Intitulé')).toHaveValue('Interrogation');
+  await dialog.getByLabel('Type').selectOption({ label: 'Composition' });
+  await expect(dialog.getByLabel('Intitulé')).toHaveValue('Composition');
+  await dialog.getByLabel('Type').selectOption({ label: 'Interrogation' });
   await dialog.getByLabel('Intitulé').fill(evalName);
   await dialog.getByRole('button', { name: 'Créer l’évaluation' }).click();
   await expect(dialog).toBeHidden();

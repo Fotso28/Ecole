@@ -1,5 +1,6 @@
 import type { INestApplication } from '@nestjs/common';
 import ExcelJS from 'exceljs';
+import { DEFAULT_COUNCIL_RULES, proposeYearEndDecision } from '@ecole/shared';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { enrollStudent, seedSchool, sessions, type SchoolFixture } from './fixtures';
@@ -287,6 +288,8 @@ describe('bulletin de fin d’année', () => {
     expect(check.body).toEqual({
       annual: true,
       issues: ['Mathématiques · Séquence 1 : saisie non soumise'],
+      stale: false,
+      rules: DEFAULT_COUNCIL_RULES,
     });
     await generate(t3);
     const refused = await http()
@@ -315,6 +318,110 @@ describe('bulletin de fin d’année', () => {
       .send({ classId: f.class4AId, termId: t3, overrideReason: 'Conseil de fin d’année tenu' })
       .expect(409);
     expect(stale.body.message).toMatch(/préparez à nouveau/);
+  });
+
+  it('donne au conseil les décisions enregistrées, signale les brouillons périmés et applique les règles de l’école', async () => {
+    await fillYear();
+    const t3 = terms[2]!.id;
+    await prisma.enrollment.updateMany({
+      where: { studentId: ids.ekotto, classId: f.class4AId },
+      data: { status: 'REPEATING' },
+    });
+    await generate(t3);
+    const completeness = async () =>
+      (
+        await http()
+          .get(`/report-cards/completeness?classId=${f.class4AId}&termId=${t3}`)
+          .set(s.censeur.auth)
+          .expect(200)
+      ).body as { stale: boolean; rules: typeof DEFAULT_COUNCIL_RULES };
+    type Row = {
+      studentId: string;
+      repeating: boolean;
+      annualAverageCenti: number | null;
+      council: Record<string, unknown> | null;
+    };
+    const list = async () =>
+      (
+        await http()
+          .get(`/report-cards?classId=${f.class4AId}&termId=${t3}`)
+          .set(s.censeur.auth)
+          .expect(200)
+      ).body as Row[];
+    expect(await completeness()).toMatchObject({ stale: false, rules: DEFAULT_COUNCIL_RULES });
+    const ekotto = (await list()).find((r) => r.studentId === ids.ekotto)!;
+    // Redoublante sous la moyenne (10 + 8 + 9,5) ÷ 3 = 9,17 : l'exclusion est proposée au conseil.
+    expect(ekotto).toMatchObject({ repeating: true, annualAverageCenti: 917, council: null });
+    expect(
+      proposeYearEndDecision(ekotto.annualAverageCenti, { repeating: ekotto.repeating })?.decision,
+    ).toBe('EXCLUDED_WORK');
+
+    await http()
+      .put('/report-cards/decisions')
+      .set(s.censeur.auth)
+      .send({
+        studentId: ids.bilong,
+        termId: t3,
+        decision: 'CONGRATULATIONS',
+        comment: 'Excellente année',
+        yearEndDecision: 'PROMOTED',
+      })
+      .expect(200);
+    // La décision est relue telle qu'enregistrée, avant même une nouvelle préparation.
+    expect((await list()).find((r) => r.studentId === ids.bilong)!.council).toEqual({
+      decision: 'CONGRATULATIONS',
+      decisionLabel: 'Félicitations',
+      yearEndDecision: 'PROMOTED',
+      yearEndDecisionLabel: 'Admis en classe supérieure',
+      comment: 'Excellente année',
+    });
+    expect((await completeness()).stale).toBe(true);
+    const refused = await http()
+      .post('/report-cards/publish')
+      .set(s.direction.auth)
+      .send({ classId: f.class4AId, termId: t3 })
+      .expect(409);
+    expect(refused.body.message).toMatch(/décisions du conseil ont changé/);
+    await generate(t3);
+    expect((await completeness()).stale).toBe(false);
+    const card = await prisma.reportCard.findFirstOrThrow({
+      where: { studentId: ids.bilong, termId: t3, status: 'DRAFT' },
+    });
+    expect((card.data as { decision: unknown }).decision).toMatchObject({
+      type: 'CONGRATULATIONS',
+      label: 'Félicitations',
+    });
+
+    // Règles du conseil propres à l'école : cohérentes, réservées à la direction, journalisées.
+    await http()
+      .patch('/settings')
+      .set(s.direction.auth)
+      .send({ settings: { council: { ...DEFAULT_COUNCIL_RULES, encouragementCenti: 1100 } } })
+      .expect(400);
+    const rules = {
+      ...DEFAULT_COUNCIL_RULES,
+      passThresholdCenti: 1050,
+      excludeFailingRepeaters: false,
+    };
+    await http()
+      .patch('/settings')
+      .set(s.censeur.auth)
+      .send({ settings: { council: rules } })
+      .expect(403);
+    await http()
+      .patch('/settings')
+      .set(s.direction.auth)
+      .send({ settings: { council: rules } })
+      .expect(200);
+    expect((await completeness()).rules).toEqual(rules);
+    expect(
+      await prisma.auditLog.count({
+        where: {
+          action: 'settings.updated',
+          after: { path: ['council', 'passThresholdCenti'], equals: 1050 },
+        },
+      }),
+    ).toBe(1);
   });
 
   it('refuse le bulletin annuel sans aucune note au 3e trimestre', async () => {

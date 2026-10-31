@@ -1,6 +1,12 @@
 'use client';
 
-import { SUBSCRIPTION_PRICING_LABELS } from '@ecole/shared';
+import {
+  formatGrade,
+  parseGradeInput,
+  resolveCouncilRules,
+  SUBSCRIPTION_PRICING_LABELS,
+  type CouncilRules,
+} from '@ecole/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { TriangleAlert } from 'lucide-react';
 import { StateBadge } from '@/components/billing';
@@ -27,7 +33,113 @@ interface SchoolSettings {
     reminderOffsets?: number[];
     mfaRequired?: boolean;
     preferredChannel?: 'SMS' | 'EMAIL';
+    council?: Partial<CouncilRules>;
   };
+}
+
+/** Moyenne saisie (« 10 », « 12,5 ») en centièmes ; `null` si vide, `undefined` si invalide. */
+function readAverage(raw: FormDataEntryValue | null): number | null | undefined {
+  const text = String(raw ?? '').trim();
+  if (text === '') return null;
+  const parsed = parseGradeInput(text);
+  return parsed.kind === 'score' ? parsed.centi : undefined;
+}
+
+/** Règles du conseil de classe : propositions faites au conseil, toujours modifiables par lui. */
+function CouncilRulesCard({
+  value,
+  onSave,
+  saving,
+  onInvalid,
+}: {
+  value: Partial<CouncilRules> | undefined;
+  onSave: (rules: CouncilRules) => void;
+  saving: boolean;
+  onInvalid: (message: string) => void;
+}) {
+  const r = resolveCouncilRules(value);
+  return (
+    <Card id="conseil">
+      <CardHeader
+        title="Conseil de classe"
+        subtitle="Propositions faites au conseil sur la fiche de chaque élève ; le conseil garde le dernier mot."
+      />
+      <form
+        className="grid gap-4 sm:grid-cols-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          const pass = readAverage(fd.get('passThreshold'));
+          const honor = readAverage(fd.get('honorRoll'));
+          const encouragement = readAverage(fd.get('encouragement'));
+          const congratulations = readAverage(fd.get('congratulations'));
+          const exclusion = readAverage(fd.get('exclusionThreshold'));
+          if (
+            pass == null ||
+            honor == null ||
+            encouragement == null ||
+            congratulations == null ||
+            exclusion === undefined
+          )
+            return onInvalid('Moyennes sur 20, deux décimales au plus (exemple : 10 ou 12,5)');
+          onSave({
+            passThresholdCenti: pass,
+            honorRollCenti: honor,
+            encouragementCenti: encouragement,
+            congratulationsCenti: congratulations,
+            excludeFailingRepeaters: fd.get('excludeFailingRepeaters') === 'on',
+            exclusionThresholdCenti: exclusion,
+          });
+        }}
+      >
+        <InputField
+          label="Moyenne annuelle de passage"
+          name="passThreshold"
+          inputMode="decimal"
+          defaultValue={formatGrade(r.passThresholdCenti)}
+          hint="Admis en classe supérieure à partir de cette moyenne"
+          containerClassName="sm:col-span-2"
+        />
+        <InputField
+          label="Tableau d’honneur à partir de"
+          name="honorRoll"
+          inputMode="decimal"
+          defaultValue={formatGrade(r.honorRollCenti)}
+        />
+        <InputField
+          label="Encouragements à partir de"
+          name="encouragement"
+          inputMode="decimal"
+          defaultValue={formatGrade(r.encouragementCenti)}
+        />
+        <InputField
+          label="Félicitations à partir de"
+          name="congratulations"
+          inputMode="decimal"
+          defaultValue={formatGrade(r.congratulationsCenti)}
+        />
+        <InputField
+          label="Proposer l’exclusion sous la moyenne annuelle de"
+          name="exclusionThreshold"
+          inputMode="decimal"
+          defaultValue={
+            r.exclusionThresholdCenti === null ? '' : formatGrade(r.exclusionThresholdCenti)
+          }
+          hint="Laisser vide : jamais sur ce seul critère"
+          optional
+        />
+        <Checkbox
+          name="excludeFailingRepeaters"
+          defaultChecked={r.excludeFailingRepeaters}
+          label="Proposer l’exclusion d’un redoublant qui n’atteint pas la moyenne de passage (pas de second redoublement)"
+          className="sm:col-span-2"
+        />
+        <Button type="submit" loading={saving} className="sm:col-span-2 sm:justify-self-start">
+          Enregistrer les règles du conseil
+        </Button>
+      </form>
+    </Card>
+  );
 }
 interface AuditPage {
   total: number;
@@ -228,6 +340,14 @@ export default function SettingsPage() {
           </Button>
         </form>
       </Card>
+      {can('settings.write') ? (
+        <CouncilRulesCard
+          value={s.settings.council}
+          saving={save.isPending}
+          onSave={(council) => save.mutate({ settings: { council } })}
+          onInvalid={(m) => toast(m, 'error')}
+        />
+      ) : null}
       {can('roles.manage') ? (
         <Card id="roles">
           <CardHeader

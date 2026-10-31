@@ -2,8 +2,10 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  COUNCIL_DECISION_LABELS,
   REENROLLMENT_LABELS,
   REENROLLMENT_DECISIONS,
+  YEAR_END_DECISION_LABELS,
   type ReenrollmentDecision,
 } from '@ecole/shared';
 import { CheckCheck, Copy, Plus } from 'lucide-react';
@@ -71,13 +73,11 @@ interface ApplyResult {
   skipped: { studentId: string; reason: string }[];
 }
 
-/** Décisions trimestrielles connues ; toute autre valeur est affichée telle quelle. */
+/** Décisions de fin d'année et mentions trimestrielles connues ; toute autre valeur est affichée telle quelle. */
 const COUNCIL_LABELS: Record<string, string> = {
-  HONOR_ROLL: 'Tableau d’honneur',
-  ENCOURAGEMENT: 'Encouragements',
-  WARNING: 'Avertissement',
-  BLAME: 'Blâme',
+  ...COUNCIL_DECISION_LABELS,
   NONE: 'Aucune distinction',
+  ...YEAR_END_DECISION_LABELS,
 };
 const councilLabel = (d: string) =>
   COUNCIL_LABELS[d] ?? d.charAt(0) + d.slice(1).toLowerCase().replace(/_/g, ' ');

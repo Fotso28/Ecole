@@ -147,9 +147,11 @@ test('dossier du personnel et fenêtres du module RH', async ({ page }) => {
   const firstMonth = page
     .getByRole('dialog', { name: 'Demande d’avance sur salaire' })
     .getByLabel('Première retenue');
-  await expect(firstMonth.locator('option').first()).toHaveAttribute(
-    'value',
-    new Date(Date.now() + 3_600_000).toISOString().slice(0, 7),
+  // Première retenue : jamais un mois passé (ni un mois dont la paie est déjà soumise ou validée).
+  const currentMonth = new Date(Date.now() + 3_600_000).toISOString().slice(0, 7);
+  await expect(firstMonth.locator('option').first()).toHaveAttribute('value', /^\d{4}-\d{2}$/);
+  expect((await firstMonth.locator('option').first().getAttribute('value'))! >= currentMonth).toBe(
+    true,
   );
   await page.goto('/rh/baremes');
   await page.getByRole('button', { name: 'Nouvelle version' }).click();

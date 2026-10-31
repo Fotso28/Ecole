@@ -6,11 +6,12 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { ROLE_LABELS } from '@ecole/shared';
 import { OfflineBanner } from '@/components/offline-banner';
+import { AccessDenied } from '@/components/shell/access-denied';
 import { InvitationsBanner } from '@/components/shell/invitations-banner';
 import { Sheet } from '@/components/ui/sheet';
 import { homeFor, useAuth } from '@/lib/auth';
 import { useStaffUnread } from '@/lib/communication';
-import { activeHref, primaryNav, visibleNav } from '@/lib/nav';
+import { activeHref, primaryNav, routeAccess, visibleNav } from '@/lib/nav';
 import { cn } from '@/lib/utils';
 
 function Splash() {
@@ -50,6 +51,8 @@ export function StaffShell({ children }: { children: ReactNode }) {
     !!me.activeSchool?.mfaRequired &&
     !me.user.mfaEnabled &&
     (me.adminAccess ?? me.roles.some((r) => ADMIN_ROLES.includes(r)));
+  // Lien direct vers une page non autorisée : refus net, sans les commandes de la page.
+  const access = routeAccess(pathname, me);
   const name = `${me.user.firstName} ${me.user.lastName}`;
   const roleLabel = [
     ...me.roles.map((r) => ROLE_LABELS[r]),
@@ -242,7 +245,13 @@ export function StaffShell({ children }: { children: ReactNode }) {
         <InvitationsBanner />
 
         <main id="contenu" className="flex-1 px-4 pt-4 pb-28 lg:px-8 lg:pt-6 lg:pb-12">
-          <div className="mx-auto flex w-full max-w-6xl flex-col gap-5">{children}</div>
+          <div className="mx-auto flex w-full max-w-6xl flex-col gap-5">
+            {access.allowed ? (
+              children
+            ) : (
+              <AccessDenied access={access} home={homeFor(me, teacherOnly)} />
+            )}
+          </div>
         </main>
       </div>
 

@@ -282,6 +282,10 @@ test('appel et notes de l’enseignant', async ({ page }) => {
   await page.getByRole('button', { name: 'Mois', exact: true }).click();
   await expect(page.getByRole('table')).toBeVisible();
   await expectAccessible(page, '/calendrier (mois)');
+  // Lien direct vers une page non autorisée.
+  await page.goto('/caisse/journal');
+  await expect(page.getByRole('heading', { name: 'Accès refusé' })).toBeVisible();
+  await expectAccessible(page, '/caisse/journal (accès refusé)');
 });
 
 test('transport, bibliothèque et stock', async ({ page }) => {

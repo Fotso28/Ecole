@@ -21,6 +21,7 @@ import {
   setSessionLostHandler,
   setSessionRefreshedHandler,
 } from './api';
+import { visibleNav } from './nav';
 import { isOffline, purgeOfflineData, readOfflineProfile, saveOfflineProfile } from './offline';
 import type { Me, SessionResponse } from './types';
 
@@ -238,5 +239,7 @@ export function homeFor(me: Me | null, teacherOnly: boolean): string {
   if (me.roles.length > 0 && me.roles.every((r) => r === 'TRANSPORT')) return '/transport/appel';
   if (me.user.isPlatformAdmin && !me.activeSchool) return '/plateforme/facturation';
   if (me.permissions.includes('dashboard.read')) return '/tableau-de-bord';
-  return '/eleves';
+  if (me.permissions.includes('students.read')) return '/eleves';
+  // Rôle sur mesure sans accès aux élèves : première page de son menu.
+  return visibleNav(me)[0]?.items[0]?.href ?? '/compte';
 }

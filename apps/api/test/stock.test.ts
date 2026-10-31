@@ -119,6 +119,66 @@ describe('stock de fournitures et d’uniformes', () => {
     expect(await prisma.invoiceLine.count({ where: { label: { startsWith: 'Chemise' } } })).toBe(0);
   });
 
+  it('vente annulée déjà payée : la part payée est reportée sur les échéances suivantes, sinon à rendre', async () => {
+    const shirt = await uniform();
+    const otherDiscounts = async (saleLineId: string) =>
+      (
+        await prisma.invoiceLine.aggregate({
+          where: { invoice: { studentId: a.id }, id: { not: saleLineId } },
+          _sum: { discount: true },
+        })
+      )._sum.discount ?? 0;
+    await http().post('/finance/cash-sessions/open').set(s.compta.auth).expect(201);
+    const payFor = (lineId: string) =>
+      http()
+        .post('/finance/payments')
+        .set(s.compta.auth)
+        .send({
+          studentId: a.id,
+          amount: 4500,
+          method: 'CASH',
+          lineIds: [lineId],
+          idempotencyKey: randomUUID(),
+        })
+        .expect(201);
+
+    // 1. Il reste de la scolarité à payer : la chemise payée est reportée dessus.
+    const sale = await sell(shirt.id, 1).expect(201);
+    await payFor(sale.body.invoiceLineId);
+    const before = await otherDiscounts(sale.body.invoiceLineId);
+    const rev = await http()
+      .post(`/stock/movements/${sale.body.id}/reverse`)
+      .set(s.compta.auth)
+      .send({ reason: 'Taille trop petite' })
+      .expect(201);
+    expect(rev.body).toMatchObject({ credited: 0, carriedOver: 4500, notCredited: 0 });
+    expect((await otherDiscounts(sale.body.invoiceLineId)) - before).toBe(4500);
+    expect(
+      await prisma.ledgerEntry.count({
+        where: {
+          studentId: a.id,
+          type: 'DISCOUNT',
+          description: { contains: 'report de la vente annulée' },
+        },
+      }),
+    ).toBeGreaterThan(0);
+
+    // 2. Plus rien à payer : la somme est à rendre en espèces.
+    const second = await sell(shirt.id, 1).expect(201);
+    await payFor(second.body.invoiceLineId);
+    const others = await prisma.invoiceLine.findMany({
+      where: { invoice: { studentId: a.id }, id: { not: second.body.invoiceLineId } },
+    });
+    for (const l of others)
+      await prisma.invoiceLine.update({ where: { id: l.id }, data: { discount: l.amount } });
+    const rev2 = await http()
+      .post(`/stock/movements/${second.body.id}/reverse`)
+      .set(s.compta.auth)
+      .send({ reason: 'Erreur de saisie' })
+      .expect(201);
+    expect(rev2.body).toMatchObject({ credited: 0, carriedOver: 0, notCredited: 4500 });
+  });
+
   it('corrige par un mouvement inverse, une seule fois ; les mouvements sont figés', async () => {
     const shirt = await uniform();
     const sale = await sell(shirt.id, 2).expect(201);
@@ -132,6 +192,7 @@ describe('stock de fournitures et d’uniformes', () => {
       quantity: 2,
       invoiced: true,
       credited: 9000,
+      carriedOver: 0,
       notCredited: 0,
     });
     // Avoir automatique sur la ligne de facture de la vente annulée.

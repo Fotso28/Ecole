@@ -11,6 +11,7 @@ import { useToast } from '@/components/ui/toast';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { initials, plural, todayIso } from '@/lib/format';
+import { useOfflineStatus } from '@/lib/offline';
 import { useClasses } from '@/lib/queries';
 import { cn } from '@/lib/utils';
 
@@ -124,6 +125,8 @@ function AttendanceContent() {
   const counts = { PRESENT: 0, ABSENT: 0, LATE: 0, none: 0 };
   for (const v of Object.values(marks)) counts[v ?? 'none']++;
   const ready = roster.data && roster.data.students.length > 0 && counts.none === 0;
+  // Hors connexion : la liste gardée sur l'appareil se consulte, l'appel attend le réseau.
+  const { offline } = useOfflineStatus();
 
   return (
     <>
@@ -240,6 +243,7 @@ function AttendanceContent() {
           </div>
           <Button
             variant="secondary"
+            disabled={offline}
             onClick={() =>
               setMarks((m) =>
                 Object.fromEntries(Object.entries(m).map(([k, v]) => [k, v ?? 'PRESENT'])),
@@ -282,12 +286,13 @@ function AttendanceContent() {
                         type="button"
                         role="radio"
                         aria-checked={cur === m.value}
+                        disabled={offline}
                         aria-label={
                           s.gender === 'F' && m.value !== 'LATE' ? `${m.label}e` : m.label
                         }
                         onClick={() => setMarks((prev) => ({ ...prev, [s.id]: m.value }))}
                         className={cn(
-                          'h-12 w-12 rounded-[10px] text-[15px] font-bold',
+                          'h-12 w-12 rounded-[10px] text-[15px] font-bold disabled:opacity-60',
                           cur === m.value ? m.on : 'bg-[#f1f0ea] text-muted',
                         )}
                       >
@@ -302,20 +307,23 @@ function AttendanceContent() {
           <div className="sticky bottom-20 z-20 -mx-4 border-t border-line bg-paper/95 px-4 py-3 backdrop-blur lg:bottom-0 lg:mx-0 lg:rounded-[12px] lg:border lg:px-4">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
               <p className="flex-1 text-[13px] text-muted">
-                {smsDelayText(roster.data.absenceNotificationDelayMinutes ?? 60)} L’appel reste
-                modifiable d’ici là.
+                {offline
+                  ? 'Hors connexion : l’appel se consulte, il se fera au retour du réseau.'
+                  : `${smsDelayText(roster.data.absenceNotificationDelayMinutes ?? 60)} L’appel reste modifiable d’ici là.`}
               </p>
               <Button
                 size="lg"
                 onClick={() => submit.mutate()}
                 loading={submit.isPending}
-                disabled={!ready}
+                disabled={!ready || offline}
               >
-                {ready
-                  ? roster.data.session
-                    ? 'Mettre à jour l’appel'
-                    : 'Valider l’appel'
-                  : `Encore ${plural(counts.none, 'élève', 'élèves')} à marquer`}
+                {offline
+                  ? 'Appel au retour du réseau'
+                  : ready
+                    ? roster.data.session
+                      ? 'Mettre à jour l’appel'
+                      : 'Valider l’appel'
+                    : `Encore ${plural(counts.none, 'élève', 'élèves')} à marquer`}
               </Button>
             </div>
           </div>

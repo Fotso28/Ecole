@@ -13,6 +13,9 @@ Module activable par école (`hr` dans les modules de l'abonnement).
 
 La validation d'une paie (et l'accord d'une avance) doit venir d'une autre personne que celle qui
 l'a préparée (calcul ou soumission) : la règle est vérifiée par l'API, même pour la direction.
+La direction peut valider une paie qui contient son propre bulletin : il est calculé à partir du
+contrat par la comptabilité, et la personne qui a préparé la paie ou modifié un bulletin ne peut pas
+la valider. Le journal d'audit le signale (`includesValidatorPayslip` sur `hr.payroll_validated`).
 
 ## Circuit de la paie
 

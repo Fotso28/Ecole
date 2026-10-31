@@ -1,20 +1,21 @@
 /*
- * Service worker d'Ecole : lecture hors connexion du portail des parents et de « Ma journée »,
- * appel du car sans réseau.
+ * Service worker d'Ecole : lecture hors connexion du portail des parents et, pour l'enseignant, de
+ * « Ma journée », des notes et de l'appel en classe ; appel du car sans réseau.
  *
  * - Fichiers statiques (/_next/static, icônes) : cache d'abord.
- * - Pages du portail, de « Ma journée » et de l'appel du car : réseau d'abord, dernière version en
+ * - Pages du portail, de « Ma journée », des notes, de l'appel en classe et de l'appel du car :
+ *   réseau d'abord, dernière version en
  *   secours. Ces pages sont des coquilles statiques, identiques pour tous : aucune donnée
  *   personnelle dedans.
- * - Données (GET /api/portal/*, /api/teacher/*, surveillances d'examen de l'enseignant, lignes et
- *   feuilles d'appel du car) : réseau d'abord, dernière réponse en secours, marquée de l'heure
+ * - Données (GET /api/portal/*, /api/teacher/*, surveillances d'examen de l'enseignant, grilles de
+ *   notes, listes d'appel, classes, lignes et feuilles d'appel du car) : réseau d'abord, dernière réponse en secours, marquée de l'heure
  *   d'enregistrement (en-tête x-ecole-cached-at) pour le bandeau. L'appel du car pointé sans
  *   réseau est gardé par la page elle-même (localStorage) et envoyé au retour du réseau.
  * - Jamais de cache : authentification, paiements, santé, fichiers et documents PDF (bulletins,
  *   relevés, reçus), toute requête autre que GET.
  *   Le cache des données est purgé par le site à la déconnexion.
  */
-const VERSION = 'v2';
+const VERSION = 'v3';
 const STATIC_CACHE = `ecole-static-${VERSION}`;
 const PAGE_CACHE = `ecole-pages-${VERSION}`;
 const DATA_CACHE = 'ecole-data';
@@ -28,11 +29,13 @@ const OFFLINE_PAGES = [
   '/portail/messages',
   '/portail/calendrier',
   '/enseignant',
+  '/notes',
+  '/presences',
   '/transport/appel',
 ];
-const PAGE_SCOPE = /^\/(portail|enseignant|transport\/appel)(\/|$)/;
+const PAGE_SCOPE = /^\/(portail|enseignant|transport\/appel)(\/|$)|^\/(notes|presences)$/;
 const DATA_SCOPE =
-  /^\/api\/(portal\/|teacher\/|exams\/my-supervisions$|transport\/(my-lines|trips)$)/;
+  /^\/api\/(portal\/|teacher\/|exams\/my-supervisions$|transport\/(my-lines|trips)$|grades\/(class-subjects|sheet)$|attendance\/roster$|academic\/classes$)/;
 const NEVER_CACHED =
   /\/(auth|health|payments?|paiement|finance|files?|webhooks?)(\/|$)|(\/|\.)pdf$/;
 
@@ -49,14 +52,38 @@ function offlineHtml(path) {
   return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Hors connexion · Ecole</title></head><body style="font-family:system-ui,sans-serif;background:#F6F5F0;color:#14201A;padding:24px;max-width:28rem;margin:auto"><h1 style="font-size:1.5rem">Hors connexion</h1><p>${message}</p><p><a id="accueil" href="${fallback}" style="color:#0E6B4A;font-weight:600;display:inline-block;min-height:44px;line-height:44px">Retour à l’accueil</a></p><script>try{var m=JSON.parse(localStorage.getItem('ecole.offline.me')||'null');if(m){var r=m.roles||[];var h=m.kind==='parent'?'/portail':r.length&&r.every(function(x){return x==='TRANSPORT'})?'/transport/appel':r.indexOf('TEACHER')>=0?'/enseignant':r.indexOf('TRANSPORT')>=0?'/transport/appel':null;if(h)document.getElementById('accueil').href=h;}}catch(e){}</script></body></html>`;
 }
 
+/**
+ * Fichiers statiques cités par une page. Les chemins de Next contiennent des parenthèses
+ * (« chunks/app/(staff)/notes/page-….js ») : on lit jusqu'à l'extension du fichier.
+ */
+function assetUrls(html) {
+  const found =
+    html.match(
+      /\/_next\/static\/[^"'\s\\]+?\.(?:js|css|woff2|woff|ttf|png|jpe?g|svg|ico|webp)\b/g,
+    ) ?? [];
+  return [...new Set(found)];
+}
+
+/**
+ * Libère la connexion d'une réponse qu'on ne garde pas : jamais lue, elle resterait ouverte, et le
+ * navigateur n'en ouvre que six à la fois vers le site (l'installation se bloquerait).
+ */
+async function discard(res) {
+  try {
+    await res.body?.cancel();
+  } catch {
+    // Corps déjà lu ou fermé.
+  }
+}
+
 /** Met en cache une page et les fichiers statiques qu'elle charge (JS, CSS). */
 async function cachePage(path) {
   const res = await fetch(path, { credentials: 'same-origin' });
-  if (!res.ok || res.redirected) return;
+  if (!res.ok || res.redirected) return discard(res);
   const pages = await caches.open(PAGE_CACHE);
   await pages.put(path, res.clone());
   const html = await res.text();
-  const assets = [...new Set(html.match(/\/_next\/static\/[^"'\s)\\]+/g) ?? [])];
+  const assets = assetUrls(html);
   const statics = await caches.open(STATIC_CACHE);
   await Promise.all(
     assets.map(async (url) => {
@@ -64,6 +91,7 @@ async function cachePage(path) {
       try {
         const asset = await fetch(url);
         if (asset.ok) await statics.put(url, asset);
+        else await discard(asset);
       } catch {
         // Fichier indisponible : il sera mis en cache à la première consultation.
       }

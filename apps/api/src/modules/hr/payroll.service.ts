@@ -791,6 +791,8 @@ export class PayrollService {
             headcount: slips.length,
             gross: slips.reduce((s, p) => s + p.gross, 0),
             net: slips.reduce((s, p) => s + p.net, 0),
+            // Permis (la paie est préparée par une autre personne), mais signalé au journal.
+            includesValidatorPayslip: files.some((f) => f.userId === actor),
           },
         },
         tx,

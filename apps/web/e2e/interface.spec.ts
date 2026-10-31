@@ -285,7 +285,7 @@ test.describe('hors connexion', () => {
     await expect(page).toHaveURL(/\/parent\/connexion/);
   });
 
-  test('l’enseignant relit « Ma journée » hors connexion, jamais l’authentification', async ({
+  test('l’enseignant relit « Ma journée », ses notes et l’appel hors connexion, jamais l’authentification', async ({
     page,
     context,
   }) => {
@@ -302,12 +302,39 @@ test.describe('hors connexion', () => {
     expect(cached).toContain('/api/teacher/today');
     expect(cached.filter((p) => /\/(auth|health|payments?|finance)(\/|$)/.test(p))).toEqual([]);
 
+    // Grille de notes ouverte avec le réseau : elle se relit hors connexion, sans saisie possible.
+    // Carte de la 4e A dans « Ma journée » (classe qui a des notes en séquence 1).
+    const notesOf4eA = () =>
+      page
+        .locator('main li')
+        .filter({ hasText: /^4e A/ })
+        .first()
+        .getByRole('link', { name: 'Notes', exact: true });
+    await notesOf4eA().click();
+    await page.waitForURL(/\/notes\?cs=/);
+    const firstGrade = page.locator('main').getByRole('textbox').first();
+    await expect(firstGrade).toBeVisible();
+    await page.waitForLoadState('networkidle');
+    // Liste d'appel ouverte avec le réseau.
+    await page.goto('/presences');
+    await expect(page.locator('main h1').first()).toBeVisible();
+    await page.waitForLoadState('networkidle');
+    await page.goto('/enseignant');
+    await page.waitForLoadState('networkidle');
+
     await context.setOffline(true);
     await page.reload();
     await expect(page.getByText(/Hors connexion, données du/)).toBeVisible();
     await expect(page.locator('main h1').first()).toBeVisible();
+    await notesOf4eA().click();
+    await expect(page.getByText(/Hors connexion : consultation seule/)).toBeVisible();
+    await expect(firstGrade).toBeVisible();
+    await expect(firstGrade).toBeDisabled();
+    await page.goto('/presences');
+    await expect(page.locator('main h1').first()).toBeVisible();
+    await expect(page.getByText('Cette page n’a pas encore été ouverte')).toHaveCount(0);
     // Page non prévue hors connexion : message juste, retour à « Ma journée » (pas au portail).
-    await page.goto('/notes');
+    await page.goto('/cahier-de-texte');
     await expect(page.getByText('Cette page n’est pas disponible hors connexion.')).toBeVisible();
     await expect(page.getByRole('link', { name: 'Retour à l’accueil' })).toHaveAttribute(
       'href',

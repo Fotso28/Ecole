@@ -355,7 +355,7 @@ function MovementsTab({ canWrite }: { canWrite: boolean }) {
   });
   const reverse = useMutation({
     mutationFn: (id: string) =>
-      api<{ invoiced: boolean; credited: number; notCredited: number }>(
+      api<{ invoiced: boolean; credited: number; carriedOver: number; notCredited: number }>(
         `/stock/movements/${id}/reverse`,
         {
           method: 'POST',
@@ -364,13 +364,17 @@ function MovementsTab({ canWrite }: { canWrite: boolean }) {
       ),
     onSuccess: (r) => {
       void qc.invalidateQueries({ queryKey: ['stock'] });
-      toast(
-        !r.invoiced
-          ? 'Mouvement corrigé par un mouvement inverse'
-          : r.notCredited > 0
-            ? `Vente annulée : avoir de ${formatFcfa(r.credited)} ; ${formatFcfa(r.notCredited)} déjà payés restent à rembourser par la scolarité`
-            : `Vente annulée : avoir de ${formatFcfa(r.credited)} sur la facture`,
-      );
+      if (!r.invoiced) return toast('Mouvement corrigé par un mouvement inverse');
+      // Ce qui restait dû est annulé ; ce qui était payé est reporté sur la scolarité de l'élève ;
+      // s'il n'y a plus rien à payer, la caisse rend l'argent.
+      const parts = [
+        r.credited > 0 ? `${formatFcfa(r.credited)} annulés sur la facture` : null,
+        r.carriedOver > 0
+          ? `${formatFcfa(r.carriedOver)} déjà payés reportés sur les prochaines échéances`
+          : null,
+        r.notCredited > 0 ? `${formatFcfa(r.notCredited)} à rendre en espèces` : null,
+      ].filter(Boolean);
+      toast(`Vente annulée : ${parts.join(' ; ') || 'rien à reprendre sur la facture'}`);
     },
     onError: onError(toast),
   });

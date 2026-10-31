@@ -46,6 +46,18 @@ describe('service worker', () => {
     expect(intercepts('/api/teacher/today')).toBe(true);
   });
 
+  it('garde aussi les grilles de notes et les listes d’appel de l’enseignant, pas le reste', () => {
+    expect(intercepts('/api/grades/class-subjects')).toBe(true);
+    expect(intercepts('/api/grades/sheet?classSubjectId=c1&sequenceId=s1')).toBe(true);
+    expect(intercepts('/api/attendance/roster?classId=c1&date=2026-10-31&startTime=07:30')).toBe(
+      true,
+    );
+    expect(intercepts('/api/academic/classes')).toBe(true);
+    expect(intercepts('/api/grades/progress?sequenceId=s1')).toBe(false);
+    expect(intercepts('/api/attendance/justifications')).toBe(false);
+    expect(intercepts('/api/finance/payments')).toBe(false);
+  });
+
   it('ne met jamais en cache les documents PDF (bulletins, relevés, reçus)', () => {
     expect(intercepts('/api/portal/report-cards/abc/pdf')).toBe(false);
     expect(intercepts('/api/portal/children/abc/transcript.pdf?termId=t1')).toBe(false);
@@ -92,6 +104,7 @@ describe('service worker', () => {
     expect(intercepts('/api/transport/lines')).toBe(false);
     expect(intercepts('/api/exams/sessions')).toBe(false);
     expect(intercepts('/api/grades/sheets')).toBe(false);
+    expect(intercepts('/api/grades/evaluations')).toBe(false);
   });
 
   it('page de secours : message juste et retour à l’accueil du rôle', async () => {
@@ -122,13 +135,16 @@ describe('service worker', () => {
       if (!response) throw new Error('navigation non interceptée');
       return (await (response as Promise<Response>)).text();
     };
-    const notes = await page('/notes');
-    expect(notes).toContain('Cette page n’est pas disponible hors connexion');
-    expect(notes).not.toContain('pas encore été');
-    expect(notes).not.toContain('href="/portail"');
+    // Page gardée hors connexion (Notes, Présences) jamais ouverte avec le réseau sur l'appareil.
+    expect(await page('/notes')).toContain('pas encore été ouverte sur cet appareil');
+    expect(await page('/presences')).toContain('pas encore été ouverte sur cet appareil');
+    // Page non prévue hors connexion, sous-page comprise.
+    const other = await page('/presences/justificatifs');
+    expect(other).toContain('Cette page n’est pas disponible hors connexion');
+    expect(other).not.toContain('href="/portail"');
     // Le lien suit le profil gardé sur l'appareil : enseignant, chauffeur ou parent.
-    expect(notes).toContain("'/enseignant'");
-    expect(notes).toContain("'/transport/appel'");
+    expect(other).toContain("'/enseignant'");
+    expect(other).toContain("'/transport/appel'");
     const rollCall = await page('/transport/appel');
     expect(rollCall).toContain('pas encore été ouverte sur cet appareil');
     expect(await page('/portail/notes')).toContain('href="/portail"');
@@ -137,5 +153,72 @@ describe('service worker', () => {
   it('ne met jamais en cache l’authentification ni les fichiers', () => {
     expect(intercepts('/api/auth/me')).toBe(false);
     expect(intercepts('/api/portal/materials/abc/file')).toBe(false);
+  });
+});
+
+describe('mise en cache des pages par le service worker', () => {
+  /** Charge le service worker et renvoie ses fonctions internes. */
+  function internals(fetchImpl: (url: string) => Promise<Response>) {
+    const context: Record<string, unknown> = {
+      self: { location: { origin: 'https://ecole.test' }, addEventListener: () => undefined },
+      URL,
+      Response,
+      Headers,
+      caches: {
+        match: async () => undefined,
+        open: async () => ({ put: async () => undefined, match: async () => undefined }),
+      },
+      fetch: fetchImpl,
+    };
+    runInNewContext(
+      readFileSync(fileURLToPath(new URL('../../public/sw.js', import.meta.url)), 'utf8'),
+      context,
+    );
+    return context as {
+      assetUrls: (html: string) => string[];
+      cachePage: (path: string) => Promise<void>;
+    };
+  }
+
+  it('lit les chemins de Next qui contiennent des parenthèses', () => {
+    const { assetUrls } = internals(async () => new Response(''));
+    const html =
+      '<script src="/_next/static/chunks/app/(staff)/notes/page-1a2b.js" async></script>' +
+      '<link rel="stylesheet" href="/_next/static/css/app-9f.css">' +
+      'self.__next_f.push([1,"I[\\"/_next/static/chunks/app/(staff)/layout-77.js\\"]"])' +
+      '<style>@font-face{src:url(/_next/static/media/font-x.woff2)}</style>' +
+      '<script src="/_next/static/chunks/app/(staff)/notes/page-1a2b.js"></script>';
+    expect(assetUrls(html)).toEqual([
+      '/_next/static/chunks/app/(staff)/notes/page-1a2b.js',
+      '/_next/static/css/app-9f.css',
+      '/_next/static/chunks/app/(staff)/layout-77.js',
+      '/_next/static/media/font-x.woff2',
+    ]);
+  });
+
+  it('libère toute réponse non gardée (page en erreur, fichier introuvable)', async () => {
+    const cancelled: string[] = [];
+    const response = (url: string, status: number, body: string) =>
+      new Response(
+        new ReadableStream({
+          start: (c) => {
+            c.enqueue(new TextEncoder().encode(body));
+            // La page gardée se lit jusqu'au bout ; les autres restent ouvertes tant qu'on ne les libère pas.
+            if (status === 200) c.close();
+          },
+          cancel: () => void cancelled.push(url),
+        }),
+        { status },
+      );
+    const { cachePage } = internals(async (url) =>
+      url === '/notes'
+        ? response(url, 200, '<script src="/_next/static/chunks/absent.js"></script>')
+        : url === '/erreur'
+          ? response(url, 500, 'erreur')
+          : response(url, 404, 'introuvable'),
+    );
+    await cachePage('/erreur');
+    await cachePage('/notes');
+    expect(cancelled).toEqual(['/erreur', '/_next/static/chunks/absent.js']);
   });
 });

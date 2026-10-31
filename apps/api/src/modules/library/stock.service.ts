@@ -300,8 +300,9 @@ export class StockService {
 
   /**
    * Correction d'un mouvement par un mouvement inverse (une seule fois). Une vente annulée reçoit
-   * automatiquement un avoir sur sa ligne de facture, à hauteur du reste dû ; la part déjà payée
-   * reste à rembourser par la scolarité (`notCredited`).
+   * automatiquement un avoir sur sa ligne de facture, à hauteur du reste dû ; la part déjà payée est
+   * reportée sur les autres échéances impayées de l'élève (`carriedOver`), et ce qui ne trouve
+   * aucune échéance à couvrir est à rendre en espèces par la caisse (`notCredited`).
    */
   async reverse(movementId: string, reason: string) {
     return this.db.$transaction(async (tx) => {
@@ -339,6 +340,7 @@ export class StockService {
         tx,
       );
       let credited = 0;
+      let carriedOver = 0;
       let notCredited = 0;
       if (original.type === 'SALE' && original.invoiceLineId) {
         const amount = (original.unitPrice ?? 0) * Math.abs(original.quantity);
@@ -353,8 +355,28 @@ export class StockService {
         );
         credited = applied;
         notCredited = amount - applied;
+        // Part déjà payée : reportée sur les prochaines échéances de l'élève, rien à rembourser.
+        if (notCredited > 0 && original.studentId) {
+          const report = await this.finance.carryOverCredit(
+            {
+              studentId: original.studentId,
+              amount: notCredited,
+              reason: `report de la vente annulée (déjà payée) : ${reason}`,
+              excludeLineId: original.invoiceLineId,
+            },
+            tx,
+          );
+          carriedOver = report.carriedOver;
+          notCredited = report.toRefund;
+        }
       }
-      return { ...m, invoiced: original.invoiceLineId !== null, credited, notCredited };
+      return {
+        ...m,
+        invoiced: original.invoiceLineId !== null,
+        credited,
+        carriedOver,
+        notCredited,
+      };
     });
   }
 

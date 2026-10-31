@@ -371,6 +371,40 @@ export class FinanceService {
     return { before, applied };
   }
 
+  /**
+   * Report d'un montant déjà payé (vente annulée…) sur les autres échéances impayées de l'élève,
+   * les plus anciennes d'abord, par avoirs. Rien ne sort de la caisse : ce qui ne trouve aucune
+   * échéance à couvrir est renvoyé « à rendre » (remise en espèces par la caisse).
+   */
+  async carryOverCredit(
+    input: { studentId: string; amount: number; reason: string; excludeLineId: string },
+    tx: Tx,
+  ) {
+    const lines = await tx.invoiceLine.findMany({
+      where: { invoice: { studentId: input.studentId }, id: { not: input.excludeLineId } },
+      include: lineInclude,
+      orderBy: [{ dueDate: 'asc' }, { order: 'asc' }],
+    });
+    const today = todayInCameroon();
+    let left = input.amount;
+    for (const line of lines) {
+      if (left <= 0) break;
+      const outstanding = toLineState(line, today).outstanding;
+      if (outstanding <= 0) continue;
+      const { applied } = await this.creditNote(
+        {
+          lineId: line.id,
+          amount: Math.min(left, outstanding),
+          reason: input.reason,
+          source: 'report',
+        },
+        tx,
+      );
+      left -= applied;
+    }
+    return { carriedOver: input.amount - left, toRefund: left };
+  }
+
   /** Remise ou bourse accordée sur une échéance. */
   async addDiscount(lineId: string, amount: number, reason: string) {
     return this.db.$transaction(async (tx) => {

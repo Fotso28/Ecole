@@ -318,9 +318,10 @@ describe('paie mensuelle', () => {
   let teacherFile: string;
   let vacataireFile: string;
   let director2: Session;
+  let director2Id: string;
 
   beforeEach(async () => {
-    await createStaff(f.schoolId, 'direction2@demo.cm', ['DIRECTOR']);
+    director2Id = (await createStaff(f.schoolId, 'direction2@demo.cm', ['DIRECTOR'])).id;
     director2 = await login(app, 'direction2@demo.cm');
     teacherFile = await createFile(s.compta, f.users.teacher, {
       payoutMethod: 'BANK',
@@ -493,6 +494,14 @@ describe('paie mensuelle', () => {
       .expect(201);
     expect(validated.body.status).toBe('VALIDATED');
     expect(validated.body.validatedBy).toContain('direction');
+    // La paie ne contient pas le bulletin de la direction : rien à signaler au journal.
+    expect(
+      (
+        await prisma.auditLog.findFirstOrThrow({
+          where: { action: 'hr.payroll_validated', entityId: validated.body.id },
+        })
+      ).after,
+    ).toMatchObject({ includesValidatorPayslip: false });
     expect(validated.body.payslips.map((p: { number: string }) => p.number).sort()).toEqual([
       'PAIE-2026-10-0001',
       'PAIE-2026-10-0002',
@@ -587,6 +596,18 @@ describe('paie mensuelle', () => {
       summary.body.employee.total + summary.body.advances + summary.body.net,
     );
 
+    // La seconde directrice a son propre bulletin dès novembre : elle pourra valider la paie
+    // préparée par la comptabilité, et le journal le signalera.
+    const ownFile = await createFile(s.compta, director2Id, { position: 'Directrice adjointe' });
+    expect(
+      (
+        await addContract(s.compta, ownFile, {
+          type: 'CDI',
+          startDate: '2026-11-01',
+          baseSalary: 300_000,
+        })
+      ).status,
+    ).toBe(201);
     // Mois suivant : seconde mensualité retenue, rappel négatif pour corriger octobre.
     await http().post('/hr/payroll/2026-11/compute').set(s.compta.auth).expect(201);
     const nov = await http().get('/hr/payroll/2026-11').set(s.compta.auth).expect(200);
@@ -609,7 +630,17 @@ describe('paie mensuelle', () => {
       .expect(200);
     expect(recall.body.result.grossTaxable).toBe(195_000);
     await http().post('/hr/payroll/2026-11/submit').set(s.compta.auth).expect(201);
-    await http().post('/hr/payroll/2026-11/validate').set(director2.auth).expect(201);
+    const novValidated = await http()
+      .post('/hr/payroll/2026-11/validate')
+      .set(director2.auth)
+      .expect(201);
+    expect(
+      (
+        await prisma.auditLog.findFirstOrThrow({
+          where: { action: 'hr.payroll_validated', entityId: novValidated.body.id },
+        })
+      ).after,
+    ).toMatchObject({ includesValidatorPayslip: true });
     const advance = await prisma.salaryAdvance.findUniqueOrThrow({ where: { id: adv.body.id } });
     expect(advance.status).toBe('REPAID');
   });

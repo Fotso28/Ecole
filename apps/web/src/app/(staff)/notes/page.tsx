@@ -22,6 +22,7 @@ import { useToast } from '@/components/ui/toast';
 import { api, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { formatGrade, plural } from '@/lib/format';
+import { useOfflineStatus } from '@/lib/offline';
 import { useMyClassSubjects } from '@/lib/queries';
 import { cn } from '@/lib/utils';
 
@@ -266,7 +267,10 @@ function NotesContent() {
   });
 
   const data = sheet.data;
+  // Hors connexion : la grille gardée sur l'appareil se consulte, la saisie attend le réseau.
+  const { offline } = useOfflineStatus();
   const editable =
+    !offline &&
     !!data &&
     (data.status === 'DRAFT' ||
       data.status === 'MIXED' ||
@@ -334,7 +338,9 @@ function NotesContent() {
               {STATUS[data.status].label}
             </Badge>
             <span className="flex items-center gap-1.5 text-[13px] text-muted" aria-live="polite">
-              {!editable && saveState === 'idle' ? null : saveState === 'saving' ? (
+              {offline ? (
+                'Hors connexion : consultation seule, la saisie reprendra au retour du réseau'
+              ) : !editable && saveState === 'idle' ? null : saveState === 'saving' ? (
                 'Enregistrement…'
               ) : saveState === 'saved' ? (
                 <>
@@ -364,7 +370,8 @@ function NotesContent() {
                   Évaluation
                 </Button>
               ) : null}
-              {(data.status === 'DRAFT' || data.status === 'MIXED') &&
+              {!offline &&
+              (data.status === 'DRAFT' || data.status === 'MIXED') &&
               data.evaluations.length > 0 ? (
                 <Button
                   size="sm"

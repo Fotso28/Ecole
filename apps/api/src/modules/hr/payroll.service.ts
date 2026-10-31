@@ -423,11 +423,22 @@ export class PayrollService {
       select: payrollUserSelect,
     });
     const userById = new Map(users.map((u) => [u.id, u]));
-    const advances = await this.db.salaryAdvance.findMany({
+    // Seule une avance réellement versée se rembourse : une avance accordée mais pas encore
+    // versée (« À verser ») n'est jamais retenue sur le bulletin.
+    const approved = await this.db.salaryAdvance.findMany({
       where: { status: 'APPROVED', firstMonth: { lte: month } },
       include: { repayments: true },
       orderBy: { createdAt: 'asc' },
     });
+    const paidOut = new Set(
+      (
+        await this.db.staffPayout.findMany({
+          where: { kind: 'ADVANCE', sourceId: { in: approved.map((a) => a.id) } },
+          select: { sourceId: true },
+        })
+      ).map((p) => p.sourceId),
+    );
+    const advances = approved.filter((a) => paidOut.has(a.id));
     const previous = new Map((existing?.payslips ?? []).map((p) => [p.employeeId, p]));
     const dim = daysInMonth(month);
 

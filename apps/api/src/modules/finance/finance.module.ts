@@ -34,6 +34,7 @@ import { safeEqual } from '../../common/crypto';
 import { Public, RequireModule, RequirePermissions } from '../../common/decorators';
 import { ScopeService } from '../../common/scope.service';
 import { ZodPipe } from '../../common/zod.pipe';
+import { AccountingModule } from '../accounting/accounting.module';
 import { PdfModule } from '../pdf/pdf.module';
 import { PdfService } from '../pdf/pdf.service';
 import { FinanceService } from './finance.service';
@@ -359,7 +360,7 @@ export class MobileMoneySimulatorController {
 }
 
 @Module({
-  imports: [PdfModule],
+  imports: [PdfModule, AccountingModule],
   controllers: [FinanceController, WebhooksController, MobileMoneySimulatorController],
   providers: [
     FinanceService,

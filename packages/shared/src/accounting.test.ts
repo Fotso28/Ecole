@@ -6,6 +6,8 @@ import {
   assertFiscalYearRange,
   balanceSheet,
   carryForwardLines,
+  CASH_DIFFERENCE_ACCOUNTS,
+  cashDifferencePosting,
   dateInFiscalYear,
   defaultFiscalYear,
   entryReference,
@@ -226,6 +228,25 @@ describe('dépenses', () => {
     expect(() =>
       expensePostings({ amount: 0, chargeAccount: '6052', method: 'CASH', label: 'x' }),
     ).toThrow(/positif/);
+  });
+
+  it('écart de caisse : manquant en 6588, excédent en 7588, au journal de caisse', () => {
+    expect(cashDifferencePosting({ expected: 25_000, counted: 24_500, label: 'Manquant' })).toEqual(
+      { journal: 'CA', label: 'Manquant', lines: [d('6588', 500), c('571', 500)] },
+    );
+    expect(cashDifferencePosting({ expected: 10_000, counted: 10_250, label: 'Excédent' })).toEqual(
+      { journal: 'CA', label: 'Excédent', lines: [d('571', 250), c('7588', 250)] },
+    );
+    expect(cashDifferencePosting({ expected: 0, counted: 0, label: 'x' })).toBeNull();
+    expect(cashDifferencePosting({ expected: 5000, counted: 5000, label: 'x' })).toBeNull();
+    expect(() => cashDifferencePosting({ expected: 1.5, counted: 0, label: 'x' })).toThrow(
+      RangeError,
+    );
+    expect(() => cashDifferencePosting({ expected: 0, counted: -1, label: 'x' })).toThrow(
+      RangeError,
+    );
+    const numbers = SYSCOHADA_CHART.map((a) => a.number);
+    for (const n of Object.values(CASH_DIFFERENCE_ACCOUNTS)) expect(numbers).toContain(n);
   });
 
   it('validation par une autre personne à partir du seuil', () => {

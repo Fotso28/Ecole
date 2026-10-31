@@ -11,6 +11,7 @@ import {
 import {
   feeItemCreateSchema,
   formatCameroonPhone,
+  formatFcfa,
   installmentStatus,
   isMobileMoney,
   isOverdue,
@@ -29,6 +30,7 @@ import { CountersService } from '../../common/counters.service';
 import { verificationCode } from '../../common/crypto';
 import { addDays, fromDbDate, todayInCameroon, toDbDate } from '../../common/dates';
 import { Db, InjectDb, Tx } from '../../common/prisma';
+import { AccountingService, translateAccountingError } from '../accounting/accounting.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { templates } from '../notifications/templates';
 import {
@@ -113,6 +115,7 @@ export class FinanceService {
     private readonly counters: CountersService,
     private readonly notifications: NotificationsService,
     @Inject(MOBILE_MONEY_PROVIDER) private readonly mobileMoney: MobileMoneyProvider,
+    private readonly accounting: AccountingService,
   ) {}
 
   // ---------------------------------------------------------------- Grille de frais
@@ -1239,17 +1242,48 @@ export class FinanceService {
   }
 
   async listCashSessions(status?: 'OPEN' | 'CLOSED' | 'APPROVED') {
+    const ctx = staffContext();
     const sessions = await this.db.cashSession.findMany({
       where: { status },
-      orderBy: { openedAt: 'desc' },
+      orderBy: [{ closedAt: { sort: 'desc', nulls: 'first' } }, { openedAt: 'desc' }],
       take: 100,
     });
+    const people = [
+      ...new Set(sessions.flatMap((s) => [s.openedById, s.closedById, s.approvedById])),
+    ].filter((x): x is string => !!x);
     const users = await this.db.user.findMany({
-      where: { id: { in: [...new Set(sessions.map((s) => s.openedById))] } },
+      where: { id: { in: people } },
       select: { id: true, firstName: true, lastName: true },
     });
     const byId = new Map(users.map((u) => [u.id, u]));
-    return sessions.map((s) => ({ ...s, openedBy: byId.get(s.openedById) ?? null }));
+    const entries = await this.db.accountingEntry.findMany({
+      where: { sourceType: 'CASH_DIFFERENCE', sourceId: { in: sessions.map((s) => s.id) } },
+      select: { sourceId: true, reference: true },
+    });
+    const entryBy = new Map(entries.map((e) => [e.sourceId, e.reference]));
+    const open = sessions.filter((s) => s.status === 'OPEN');
+    const totals = new Map(
+      await Promise.all(open.map(async (s) => [s.id, await this.sessionTotals(s.id)] as const)),
+    );
+    const canApprove = ctx.permissions.has('finance.cash.approve');
+    return sessions.map((s) => {
+      const expected = s.expectedAmount ?? totals.get(s.id)?.expected ?? 0;
+      return {
+        ...s,
+        openedBy: byId.get(s.openedById) ?? null,
+        closedBy: s.closedById ? (byId.get(s.closedById) ?? null) : null,
+        approvedBy: s.approvedById ? (byId.get(s.approvedById) ?? null) : null,
+        expectedAmount: expected,
+        difference: s.countedAmount === null ? null : s.countedAmount - expected,
+        entry: entryBy.get(s.id) ?? null,
+        // Contrôle à quatre yeux : ni le caissier ni la personne qui a clôturé n'approuvent.
+        canApprove:
+          canApprove &&
+          s.status === 'CLOSED' &&
+          s.openedById !== ctx.userId &&
+          s.closedById !== ctx.userId,
+      };
+    });
   }
 
   async closeCashSession(id: string, countedAmount: number, note?: string) {
@@ -1264,6 +1298,11 @@ export class FinanceService {
         throw new ForbiddenException('Seul le caissier ou la direction peut clôturer cette caisse');
       }
       const totals = await this.sessionTotals(id, tx);
+      const difference = countedAmount - totals.expected;
+      if (difference !== 0 && !note?.trim())
+        throw new BadRequestException(
+          `${difference < 0 ? 'Manquant' : 'Excédent'} de ${formatFcfa(Math.abs(difference))} : indiquez le motif de l’écart`,
+        );
       const closed = await tx.cashSession.update({
         where: { id, status: 'OPEN' },
         data: {
@@ -1272,7 +1311,7 @@ export class FinanceService {
           closedById: ctx.userId,
           expectedAmount: totals.expected,
           countedAmount,
-          note,
+          note: note?.trim() || null,
         },
       });
       await this.audit.log(
@@ -1280,36 +1319,79 @@ export class FinanceService {
           action: 'finance.cash_closed',
           entity: 'CashSession',
           entityId: id,
-          after: { expected: totals.expected, counted: countedAmount },
+          after: { expected: totals.expected, counted: countedAmount, difference },
+          reason: note?.trim() || undefined,
         },
         tx,
       );
-      return {
-        ...closed,
-        difference: countedAmount - totals.expected,
-        operations: totals.operations,
-      };
+      return { ...closed, difference, operations: totals.operations };
     });
   }
 
+  /**
+   * Approbation d'une clôture par une autre personne que le caissier. L'écart éventuel est passé
+   * en comptabilité dans la même transaction (manquant en 6588, excédent en 7588, contre 571).
+   */
   async approveCashSession(id: string) {
     const ctx = staffContext();
     const session = await this.db.cashSession.findUnique({ where: { id } });
     if (!session) throw new NotFoundException('Caisse introuvable');
     if (session.status !== 'CLOSED')
-      throw new ConflictException('La caisse doit être clôturée avant validation');
+      throw new ConflictException(
+        session.status === 'APPROVED'
+          ? 'Cette clôture est déjà approuvée'
+          : 'La caisse doit être clôturée avant validation',
+      );
     // Contrôle à quatre yeux : ni le caissier ni la personne qui a clôturé ne valident.
     if (session.closedById === ctx.userId || session.openedById === ctx.userId) {
       throw new ForbiddenException(
         'La validation doit être faite par une autre personne que le caissier',
       );
     }
-    const approved = await this.db.cashSession.update({
-      where: { id, status: 'CLOSED' },
-      data: { status: 'APPROVED', approvedById: ctx.userId, approvedAt: new Date() },
-    });
-    await this.audit.log({ action: 'finance.cash_approved', entity: 'CashSession', entityId: id });
-    return approved;
+    const difference = (session.countedAmount ?? 0) - (session.expectedAmount ?? 0);
+    const accounting = difference !== 0 && (await this.accounting.enabled());
+    if (accounting) await this.accounting.ensureSetup();
+    try {
+      return await this.db.$transaction(
+        async (tx) => {
+          const { count } = await tx.cashSession.updateMany({
+            where: { id, status: 'CLOSED' },
+            data: { status: 'APPROVED', approvedById: ctx.userId, approvedAt: new Date() },
+          });
+          if (count === 0) throw new ConflictException('Cette clôture est déjà approuvée');
+          let entry: string | null = null;
+          if (accounting) {
+            await this.accounting.postOperation(tx, 'CASH_DIFFERENCE', id);
+            entry =
+              (
+                await tx.accountingEntry.findFirst({
+                  where: { sourceType: 'CASH_DIFFERENCE', sourceId: id },
+                  select: { reference: true },
+                })
+              )?.reference ?? null;
+          }
+          await this.audit.log(
+            {
+              action: 'finance.cash_approved',
+              entity: 'CashSession',
+              entityId: id,
+              after: {
+                expected: session.expectedAmount,
+                counted: session.countedAmount,
+                difference,
+                entry,
+              },
+            },
+            tx,
+          );
+          const approved = await tx.cashSession.findUniqueOrThrow({ where: { id } });
+          return { ...approved, difference, entry };
+        },
+        { timeout: 30_000 },
+      );
+    } catch (e) {
+      throw translateAccountingError(e);
+    }
   }
 
   // ---------------------------------------------------------------- Pilotage

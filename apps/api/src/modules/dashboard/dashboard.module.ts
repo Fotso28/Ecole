@@ -36,6 +36,10 @@ export class DashboardService {
     private readonly finance: FinanceService,
   ) {}
 
+  private pendingApprovals() {
+    return pendingApprovalsFor(this.db, staffContext());
+  }
+
   async overview() {
     const ctx = staffContext();
     const year = await this.scope.currentYear();
@@ -82,7 +86,16 @@ export class DashboardService {
             where: { status: 'PENDING', createdAt: { lt: new Date(Date.now() - 2 * 3600_000) } },
           })
         : Promise.resolve(0),
-      canFinance ? this.db.cashSession.count({ where: { status: 'CLOSED' } }) : Promise.resolve(0),
+      // Clôtures que la personne peut approuver : jamais les siennes (contrôle à quatre yeux).
+      ctx.permissions.has('finance.cash.approve')
+        ? this.db.cashSession.count({
+            where: {
+              status: 'CLOSED',
+              openedById: { not: ctx.userId },
+              OR: [{ closedById: null }, { closedById: { not: ctx.userId } }],
+            },
+          })
+        : Promise.resolve(0),
       this.db.evaluation.groupBy({
         by: ['classSubjectId', 'sequenceId'],
         where: { status: 'SUBMITTED' },
@@ -94,6 +107,7 @@ export class DashboardService {
         take: 8,
       }),
     ]);
+    const approvals = await this.pendingApprovals();
     const previousCount = previousYear
       ? await this.db.enrollment.count({
           where: { academicYearId: previousYear.id, status: { in: ['ENROLLED', 'REPEATING'] } },
@@ -141,6 +155,7 @@ export class DashboardService {
         cashSessionsToApprove: cashToApprove,
         gradeSheetsToValidate: submittedSheets.length,
         reportCardBatchesToPublish: draftCards.length,
+        ...approvals,
       },
       activity: activity.map((a) => {
         const actor = actors.find((u) => u.id === a.actorId);
@@ -154,6 +169,55 @@ export class DashboardService {
       }),
     };
   }
+}
+
+/**
+ * Ce qui attend une seconde personne et que la personne connectée peut traiter : jamais ce
+ * qu'elle a saisi elle-même (la validation revient toujours à quelqu'un d'autre).
+ */
+async function pendingApprovalsFor(db: Db, ctx: ReturnType<typeof staffContext>) {
+  const school = await db.school.findUniqueOrThrow({
+    where: { id: ctx.schoolId },
+    select: { modules: true },
+  });
+  const accounting =
+    school.modules.includes('accounting') && ctx.permissions.has('accounting.write');
+  const hr = school.modules.includes('hr');
+  const validate = hr && ctx.permissions.has('hr.payroll.validate');
+  const pay = hr && ctx.permissions.has('hr.payroll.pay');
+  const me = { not: ctx.userId };
+  const [expenses, entries, payroll, advances, approved] = await Promise.all([
+    accounting ? db.expense.count({ where: { status: 'PENDING_APPROVAL', createdById: me } }) : 0,
+    accounting ? db.manualEntryRequest.count({ where: { status: 'PENDING', createdById: me } }) : 0,
+    validate
+      ? db.payrollRun.count({
+          where: {
+            status: 'PREPARED',
+            computedById: me,
+            OR: [{ preparedById: null }, { preparedById: me }],
+          },
+        })
+      : 0,
+    validate ? db.salaryAdvance.count({ where: { status: 'REQUESTED', requestedById: me } }) : 0,
+    pay
+      ? db.salaryAdvance.findMany({
+          where: { status: 'APPROVED', decidedById: me },
+          select: { id: true },
+        })
+      : [],
+  ]);
+  const paidOut = approved.length
+    ? await db.staffPayout.count({
+        where: { kind: 'ADVANCE', sourceId: { in: approved.map((a) => a.id) } },
+      })
+    : 0;
+  return {
+    expensesToApprove: expenses,
+    entriesToApprove: entries,
+    payrollToValidate: payroll,
+    advancesToDecide: advances,
+    advancesToPay: approved.length - paidOut,
+  };
 }
 
 @ApiTags('dashboard')

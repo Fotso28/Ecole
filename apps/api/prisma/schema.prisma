@@ -1489,7 +1489,7 @@ model AccountingEntry {
   label           String
   pieceRef        String?
   /// Origine d'une écriture automatique (LEDGER, EXPENSE, EXPENSE_PAYMENT, CARRY_FORWARD, PAYROLL,
-  /// PAYROLL_PAYMENT, ADVANCE_PAYMENT, STOCK_PURCHASE) : jamais passée deux fois.
+  /// PAYROLL_PAYMENT, ADVANCE_PAYMENT, STOCK_PURCHASE, CASH_DIFFERENCE) : jamais passée deux fois.
   sourceType      String?
   sourceId        String?
   reversesEntryId String?  @unique

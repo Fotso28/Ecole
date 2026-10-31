@@ -41,6 +41,7 @@ test('écrans de la direction', async ({ page }) => {
     '/bulletins',
     '/releves',
     '/caisse',
+    '/caisse/clotures',
     '/impayes',
     '/emploi-du-temps',
     '/cahier-de-texte',

@@ -13,6 +13,7 @@ import {
   assertBalancedEntry,
   assertFiscalYearRange,
   carryForwardLines,
+  cashDifferencePosting,
   dateInFiscalYear,
   defaultFiscalYear,
   DEFAULT_EXPENSE_APPROVAL_THRESHOLD,
@@ -65,7 +66,12 @@ export interface PostingInput {
   fiscalYear?: FiscalYear;
 }
 
-export type OperationType = 'PAYROLL' | 'PAYROLL_PAYMENT' | 'ADVANCE_PAYMENT' | 'STOCK_PURCHASE';
+export type OperationType =
+  | 'PAYROLL'
+  | 'PAYROLL_PAYMENT'
+  | 'ADVANCE_PAYMENT'
+  | 'STOCK_PURCHASE'
+  | 'CASH_DIFFERENCE';
 
 const DB_MESSAGES =
   /(Exercice clôturé[^"\n]*|Écriture déséquilibrée[^"\n]*|Numérotation du journal[^"\n]*|La date de l'écriture[^"\n]*|Compte inconnu[^"\n]*|Les écritures comptables[^"\n]*|Un exercice[^"\n]*|Une dépense[^"\n]*|Les données d'une dépense[^"\n]*)/;
@@ -1003,6 +1009,11 @@ export class AccountingService {
               AND COALESCE(o."unitCost", 0) > 0)
         )
         AND ${notPosted('STOCK_PURCHASE', Prisma.sql`m."id"`)}
+      UNION ALL
+      SELECT 'CASH_DIFFERENCE', c."id", c."approvedAt" FROM "CashSession" c
+      WHERE c."schoolId" = ${schoolId} AND c."status" = 'APPROVED'
+        AND c."countedAmount" IS DISTINCT FROM c."expectedAmount"
+        AND ${notPosted('CASH_DIFFERENCE', Prisma.sql`c."id"`)}
       ORDER BY "at", "id"
       ${limit === null ? Prisma.empty : Prisma.sql`LIMIT ${limit}`}`;
   }
@@ -1195,6 +1206,35 @@ export class AccountingService {
           date: todayInCameroon(m.createdAt),
           pieceRef: original.reference,
         };
+      }
+      case 'CASH_DIFFERENCE': {
+        // Écart entre les espèces attendues et comptées, constaté à la clôture et approuvé par
+        // une autre personne que le caissier.
+        const session = await tx.cashSession.findUniqueOrThrow({ where: { id } });
+        if (
+          session.status !== 'APPROVED' ||
+          session.expectedAmount === null ||
+          session.countedAmount === null ||
+          !session.closedAt
+        )
+          return null;
+        const cashier = await tx.user.findUnique({
+          where: { id: session.openedById },
+          select: { firstName: true, lastName: true },
+        });
+        const date = todayInCameroon(session.closedAt);
+        const kind =
+          session.countedAmount < session.expectedAmount
+            ? 'Manquant de caisse'
+            : 'Excédent de caisse';
+        const who = cashier ? ` · ${cashier.lastName} ${cashier.firstName}` : '';
+        const posting = cashDifferencePosting({
+          expected: session.expectedAmount,
+          counted: session.countedAmount,
+          label: `${kind} · clôture du ${frDate(date)}${who}`,
+        });
+        if (!posting) return null;
+        return { posting, date, pieceRef: null };
       }
     }
   }

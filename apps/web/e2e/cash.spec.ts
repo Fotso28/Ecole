@@ -48,12 +48,45 @@ test('encaissement en espèces, reçu, annulation et clôture de caisse', async 
   await page.evaluate(() => fetch('/api/auth/logout', { method: 'POST' }));
   await loginStaff(page, 'compta@demo.cm');
 
-  // Clôture : le montant attendu exclut le paiement annulé.
+  // Clôture : le montant attendu exclut le paiement annulé ; un écart exige un motif.
   await page.goto('/caisse');
   await page.getByRole('button', { name: 'Clôturer ma caisse' }).click();
   const close = page.getByRole('dialog', { name: 'Clôturer ma caisse' });
   const expectedText = (await close.locator('strong').first().textContent()) ?? '0';
-  await close.getByLabel('Montant compté').fill(expectedText.replace(/\D/g, ''));
+  const expected = Number(expectedText.replace(/\D/g, ''));
+  await close.getByLabel('Montant compté').fill(String(expected + 500));
+  await expect(close.getByText('Excédent : +500 FCFA')).toBeVisible();
+  await expect(close.getByRole('button', { name: 'Clôturer' })).toBeDisabled();
+  await close.getByLabel('Motif de l’écart').fill('Monnaie non reprise par un parent');
   await close.getByRole('button', { name: 'Clôturer' }).click();
-  await expect(page.getByText('Caisse clôturée sans écart')).toBeVisible();
+  await expect(
+    page.getByText('Caisse clôturée · écart de +500 FCFA, à faire approuver'),
+  ).toBeVisible();
+
+  // Le caissier voit sa clôture mais ne l'approuve pas.
+  await page.goto('/caisse/clotures');
+  const closure = () =>
+    page
+      .locator(info.project.name === 'mobile' ? 'li' : 'tr')
+      .filter({ hasText: 'Monnaie non reprise par un parent' })
+      .filter({ hasText: 'À approuver' })
+      .first();
+  await expect(closure()).toBeVisible();
+  await expect(closure().getByRole('button', { name: /^Approuver/ })).toHaveCount(0);
+  await expectNoHorizontalOverflow(page);
+
+  // La direction l'approuve depuis « À traiter » du tableau de bord.
+  await page.evaluate(() => fetch('/api/auth/logout', { method: 'POST' }));
+  await loginStaff(page, 'direction@demo.cm');
+  await page.goto('/tableau-de-bord');
+  await page.getByRole('link', { name: /\d+ clôtures? de caisse à approuver/ }).click();
+  await expect(page).toHaveURL(/\/caisse\/clotures$/);
+  await expect(page.getByRole('heading', { name: 'Clôtures de caisse' })).toBeVisible();
+  await expect(closure()).toContainText('+500 FCFA');
+  await closure()
+    .getByRole('button', { name: /^Approuver/ })
+    .click();
+  await expect(page.getByText(/^Clôture approuvée/)).toBeVisible();
+  await expect(closure()).toHaveCount(0);
+  await expectNoHorizontalOverflow(page);
 });

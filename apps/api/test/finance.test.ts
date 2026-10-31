@@ -610,26 +610,73 @@ describe('caisse journalière', () => {
       .set(s.compta.auth)
       .expect(200);
     expect(current.body).toMatchObject({ operations: 1, expected: 25000, reversed: 1 });
-    const closed = await http()
+    // Un écart exige un motif.
+    const noReason = await http()
       .post(`/finance/cash-sessions/${session.body.id}/close`)
       .set(s.compta.auth)
       .send({ countedAmount: 24000 })
+      .expect(400);
+    expect(noReason.body.message).toMatch(/Manquant de 1.000.FCFA : indiquez le motif/);
+    const closed = await http()
+      .post(`/finance/cash-sessions/${session.body.id}/close`)
+      .set(s.compta.auth)
+      .send({ countedAmount: 24000, note: 'Billet de 1 000 introuvable' })
       .expect(201);
     expect(closed.body).toMatchObject({
       status: 'CLOSED',
       expectedAmount: 25000,
       countedAmount: 24000,
       difference: -1000,
+      note: 'Billet de 1 000 introuvable',
     });
     await pay({ amount: 1000, method: 'CASH' }).expect(409);
+
+    // Liste des clôtures : la direction peut approuver, pas le caissier.
+    const forDirection = await http()
+      .get('/finance/cash-sessions?status=CLOSED')
+      .set(s.direction.auth)
+      .expect(200);
+    expect(forDirection.body).toEqual([
+      expect.objectContaining({
+        id: session.body.id,
+        expectedAmount: 25000,
+        countedAmount: 24000,
+        difference: -1000,
+        note: 'Billet de 1 000 introuvable',
+        openedBy: expect.objectContaining({ firstName: expect.any(String) }),
+        canApprove: true,
+      }),
+    ]);
+    const forCashier = await http()
+      .get('/finance/cash-sessions?status=CLOSED')
+      .set(s.compta.auth)
+      .expect(200);
+    expect(forCashier.body[0].canApprove).toBe(false);
+    await http().get('/finance/cash-sessions').set(s.prof.auth).expect(403);
+
     await http()
       .post(`/finance/cash-sessions/${session.body.id}/approve`)
       .set(s.compta.auth)
       .expect(403);
-    await http()
+    const approved = await http()
       .post(`/finance/cash-sessions/${session.body.id}/approve`)
       .set(s.direction.auth)
       .expect(201);
+    // Comptabilité non activée : aucune écriture, mais l'approbation est journalisée.
+    expect(approved.body).toMatchObject({ status: 'APPROVED', difference: -1000, entry: null });
+    await http()
+      .post(`/finance/cash-sessions/${session.body.id}/approve`)
+      .set(s.direction.auth)
+      .expect(409);
+    const audit = await prisma.auditLog.findMany({
+      where: {
+        entityId: session.body.id,
+        action: { in: ['finance.cash_closed', 'finance.cash_approved'] },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    expect(audit.map((a) => a.action)).toEqual(['finance.cash_closed', 'finance.cash_approved']);
+    expect(audit[0]?.reason).toBe('Billet de 1 000 introuvable');
   });
 
   it('n’ouvre qu’une caisse à la fois et fait valider la caisse de la direction par un tiers', async () => {

@@ -2,7 +2,17 @@
 
 import { formatRate } from '@ecole/shared';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronRight, Download, FileText, Receipt, ShieldCheck, Wallet } from 'lucide-react';
+import {
+  Banknote,
+  ChevronRight,
+  Download,
+  FileText,
+  HandCoins,
+  NotebookPen,
+  Receipt,
+  ShieldCheck,
+  Wallet,
+} from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
 import { Button, ButtonLink } from '@/components/ui/button';
@@ -39,6 +49,11 @@ interface Dashboard {
     cashSessionsToApprove: number;
     gradeSheetsToValidate: number;
     reportCardBatchesToPublish: number;
+    expensesToApprove?: number;
+    entriesToApprove?: number;
+    payrollToValidate?: number;
+    advancesToDecide?: number;
+    advancesToPay?: number;
   };
   activity: { id: string; at: string; actor: string; label: string }[];
 }
@@ -274,36 +289,75 @@ export default function DashboardPage() {
   if (q.isPending) return <LoadingBlock />;
   if (q.isError) return <ErrorBlock error={q.error} onRetry={() => q.refetch()} />;
   const d = q.data;
+  // Libellés accordés au nombre : « 1 clôture de caisse à approuver », « 2 clôtures… ».
   const todos = [
     {
       n: d.todo.gradeSheetsToValidate,
-      label: 'grilles de notes à valider',
+      label: (n: number) => (n > 1 ? 'grilles de notes à valider' : 'grille de notes à valider'),
       href: '/notes',
       icon: FileText,
     },
     {
       n: d.todo.reportCardBatchesToPublish,
-      label: 'lots de bulletins à publier',
+      label: (n: number) => (n > 1 ? 'lots de bulletins à publier' : 'lot de bulletins à publier'),
       href: '/bulletins',
       icon: FileText,
     },
     {
       n: d.todo.pendingJustifications,
-      label: 'justificatifs d’absence',
+      label: (n: number) => (n > 1 ? 'justificatifs d’absence' : 'justificatif d’absence'),
       href: '/presences/justificatifs',
       icon: ShieldCheck,
     },
     {
       n: d.todo.pendingMobileMoney,
-      label: 'paiements Mobile Money en attente depuis plus de 2 h',
+      label: (n: number) =>
+        n > 1
+          ? 'paiements Mobile Money en attente depuis plus de 2 h'
+          : 'paiement Mobile Money en attente depuis plus de 2 h',
       href: '/caisse/journal',
       icon: Receipt,
     },
     {
       n: d.todo.cashSessionsToApprove,
-      label: 'clôtures de caisse à approuver',
-      href: '/caisse',
+      label: (n: number) =>
+        n > 1 ? 'clôtures de caisse à approuver' : 'clôture de caisse à approuver',
+      href: '/caisse/clotures',
       icon: Wallet,
+    },
+    {
+      n: d.todo.expensesToApprove ?? 0,
+      label: (n: number) => (n > 1 ? 'dépenses à valider' : 'dépense à valider'),
+      href: '/comptabilite/depenses',
+      icon: HandCoins,
+    },
+    {
+      n: d.todo.entriesToApprove ?? 0,
+      label: (n: number) =>
+        n > 1 ? 'écritures de trésorerie à valider' : 'écriture de trésorerie à valider',
+      href: '/comptabilite/ecritures',
+      icon: NotebookPen,
+    },
+    {
+      n: d.todo.payrollToValidate ?? 0,
+      label: (n: number) => (n > 1 ? 'paies à valider' : 'paie à valider'),
+      href: '/rh/paie',
+      icon: Banknote,
+    },
+    {
+      n: d.todo.advancesToDecide ?? 0,
+      label: (n: number) =>
+        n > 1
+          ? 'demandes d’avance sur salaire à accorder'
+          : 'demande d’avance sur salaire à accorder',
+      href: '/rh/avances',
+      icon: HandCoins,
+    },
+    {
+      n: d.todo.advancesToPay ?? 0,
+      label: (n: number) => (n > 1 ? 'avances accordées à verser' : 'avance accordée à verser'),
+      href: '/rh/avances',
+      icon: HandCoins,
     },
   ].filter((t) => t.n > 0);
 
@@ -381,13 +435,13 @@ export default function DashboardPage() {
           ) : (
             <ul className="flex flex-col">
               {todos.map((t) => (
-                <li key={t.href + t.label} className="border-t border-line first:border-t-0">
+                <li key={t.label(2)} className="border-t border-line first:border-t-0">
                   <Link href={t.href} className="flex min-h-14 items-center gap-3 py-2">
                     <span className="flex size-9 shrink-0 items-center justify-center rounded-[9px] bg-primary-soft text-primary">
                       <t.icon className="size-4" aria-hidden />
                     </span>
                     <span className="flex-1 text-[15px] lg:text-sm">
-                      <strong className="tabular">{t.n}</strong> {t.label}
+                      <strong className="tabular">{t.n}</strong> {t.label(t.n)}
                     </span>
                     <ChevronRight className="size-4 text-muted" aria-hidden />
                   </Link>

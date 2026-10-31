@@ -35,6 +35,7 @@ import {
   UserPlus,
   Users,
   UsersRound,
+  Vault,
   Wallet,
 } from 'lucide-react';
 import type { Me } from './types';
@@ -207,6 +208,14 @@ export const NAV: NavGroup[] = [
         label: 'Journal des paiements',
         short: 'Journal',
         icon: Receipt,
+        permission: 'finance.read',
+        module: 'finance',
+      },
+      {
+        href: '/caisse/clotures',
+        label: 'Clôtures de caisse',
+        short: 'Clôtures',
+        icon: Vault,
         permission: 'finance.read',
         module: 'finance',
       },

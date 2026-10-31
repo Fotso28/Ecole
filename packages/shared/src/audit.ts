@@ -16,6 +16,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   'academic.rollover': 'Passage à l’année suivante',
   'academic.subject_assigned': 'Matière attribuée à un enseignant',
   'academic.subject_updated': 'Matière de classe modifiée',
+  'academic.subject_removed': 'Matière retirée d’une classe',
   'academic.year_closed': 'Année scolaire clôturée',
   'academic.year_created': 'Année scolaire créée',
   'academic.year_current': 'Année scolaire en cours changée',
@@ -44,6 +45,10 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   'students.photo_consent_withdrawn': 'Consentement photo retiré',
   'enrollments.created': 'Inscription créée',
   'enrollments.changed': 'Inscription modifiée',
+  'enrollments.class_changed': 'Élève changé de classe',
+  'enrollments.transferred': 'Transfert d’un élève enregistré',
+  'enrollments.left': 'Sortie d’un élève enregistrée',
+  'enrollments.reinstated': 'Élève réintégré',
   'enrollments.reenrolled': 'Réinscription',
   'health.read': 'Fiche santé consultée',
   'health.updated': 'Fiche santé modifiée',
@@ -56,6 +61,8 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   'attendance.justification_attachment': 'Pièce jointe d’un justificatif consultée',
   'attendance.threshold_alert': 'Alerte de seuil d’absences',
   'discipline.incident': 'Incident enregistré',
+  'discipline.incident_updated': 'Incident corrigé',
+  'discipline.incident_deleted': 'Incident supprimé',
 
   // Notes, bulletins, examens
   'grades.evaluation_created': 'Évaluation créée',
@@ -185,6 +192,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
 
   // Communication
   'communication.announcement': 'Annonce publiée',
+  'communication.announcement_withdrawn': 'Annonce retirée',
   'messaging.thread_created': 'Conversation ouverte',
   'messaging.thread_consulted': 'Conversation consultée (supervision)',
 

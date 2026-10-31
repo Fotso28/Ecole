@@ -15,9 +15,12 @@ import { formatFcfa, formatShortDate, formatWeekday } from '@/lib/format';
 import { useChildOverview } from '@/lib/portal';
 
 export default function PortalHome() {
-  const { children, selected } = useChildren();
+  const { children, selected, loading, error, retry } = useChildren();
   const q = useChildOverview(selected?.id);
-  if (!selected)
+  if (!selected) {
+    // « Aucun enfant » seulement une fois la liste reçue, jamais pendant le chargement.
+    if (loading) return <LoadingBlock label="Chargement de vos enfants…" />;
+    if (error) return <ErrorBlock error={error} onRetry={retry} />;
     return children.length === 0 ? (
       <EmptyState title="Aucun enfant rattaché à ce numéro">
         Contactez le secrétariat de l’école.
@@ -25,6 +28,7 @@ export default function PortalHome() {
     ) : (
       <LoadingBlock />
     );
+  }
   const unjustified =
     q.data?.absences.filter((a) => a.status === 'ABSENT' && !a.justification) ?? [];
   return (

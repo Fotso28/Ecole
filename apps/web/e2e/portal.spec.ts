@@ -3,9 +3,20 @@ import { API_URL } from '../playwright.config';
 import { expectNoHorizontalOverflow, loginParent, PASSWORD } from './helpers';
 
 test.describe('portail parents', () => {
-  test('le parent paie la scolarité par Mobile Money', async ({ page }) => {
+  test('le parent paie la scolarité par Mobile Money', async ({ page, context }) => {
+    // Liste des enfants lente : jamais « Aucun enfant rattaché » pendant le chargement.
+    await context.route('**/api/portal/children', async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await route.continue();
+    });
     await loginParent(page, '677123456');
+    await expect(
+      page.getByRole('status').filter({ hasText: 'Chargement de vos enfants' }),
+    ).toBeAttached();
+    await expect(page.getByText('Aucun enfant rattaché à ce numéro')).toHaveCount(0);
     await expect(page.getByRole('heading', { name: 'Bonjour Pierre' })).toBeVisible();
+    await expect(page.getByText('Aucun enfant rattaché à ce numéro')).toHaveCount(0);
+    await context.unroute('**/api/portal/children');
     const switcher = page.getByRole('group', { name: 'Choisir un enfant' });
     await expect(switcher.getByRole('button')).toHaveCount(2);
     await switcher.getByRole('button', { name: /Marie-Claire/ }).click();

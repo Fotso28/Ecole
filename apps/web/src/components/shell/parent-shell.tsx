@@ -31,12 +31,19 @@ interface ChildrenValue {
   children: Child[];
   selected: Child | null;
   select: (id: string) => void;
+  /** Liste encore en chargement : ne rien conclure (pas de « aucun enfant ») avant la réponse. */
+  loading: boolean;
+  error: unknown;
+  retry: () => void;
 }
 
 const ChildrenContext = createContext<ChildrenValue>({
   children: [],
   selected: null,
   select: () => undefined,
+  loading: true,
+  error: null,
+  retry: () => undefined,
 });
 export const useChildren = () => useContext(ChildrenContext);
 
@@ -83,6 +90,9 @@ export function ParentShell({ children }: { children: ReactNode }) {
 
   const value: ChildrenValue = {
     children: list.data ?? [],
+    loading: list.isPending,
+    error: list.error,
+    retry: () => void list.refetch(),
     selected: list.data?.find((c) => c.id === selectedId) ?? null,
     select: (id) => {
       setSelectedId(id);

@@ -82,7 +82,7 @@ export default function UnpaidPage() {
             tone="danger"
             hint="FCFA"
           />
-          <Stat label="Familles en retard" value={summary.data.overdueStudents} />
+          <Stat label="Élèves en retard" value={summary.data.overdueStudents} />
         </div>
       ) : null}
       <SelectField
@@ -172,7 +172,7 @@ export default function UnpaidPage() {
                 hasMore={!!q.hasNextPage}
                 loading={q.isFetchingNextPage}
                 onMore={() => void q.fetchNextPage()}
-                noun="familles en retard"
+                noun="élèves en retard"
               />
             </div>
           )}

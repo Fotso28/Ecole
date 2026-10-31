@@ -16,9 +16,11 @@ export class ScopeService {
   async currentYear(tx?: Tx) {
     const year = await (tx ?? this.db).academicYear.findFirst({ where: { isCurrent: true } });
     if (!year)
-      throw new ConflictException(
-        'Aucune année scolaire en cours : définissez-la dans la structure académique',
-      );
+      throw new ConflictException({
+        statusCode: 409,
+        code: 'NO_CURRENT_YEAR',
+        message: 'Aucune année scolaire en cours : créez-la depuis le tableau de bord',
+      });
     return year;
   }
 

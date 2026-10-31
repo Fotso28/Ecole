@@ -59,6 +59,38 @@ describe('création d’établissement par la plateforme', () => {
     expect(me.body.roles).toEqual(['DIRECTOR']);
     expect(me.body.permissions).toContain('finance.payments.create');
     expect(me.body.permissions).not.toContain('health.read');
+    expect(created.body.existingUser).toBe(false);
+
+    // Même identifiant : refus clair, pas d'erreur serveur.
+    const twice = await http()
+      .post('/platform/schools')
+      .set(admin.auth)
+      .send({
+        name: 'Collège Démo bis',
+        slug: 'college-demo',
+        city: 'Douala',
+        matriculePrefix: 'CB',
+        director: {
+          firstName: 'Jean',
+          lastName: 'Kamga',
+          email: 'jean@bis.cm',
+          password: 'motdepasse-directeur',
+        },
+      })
+      .expect(409);
+    expect(twice.body.message).toBe('Cet identifiant est déjà utilisé par un autre établissement');
+
+    // École neuve : pas d'année en cours, signalé par un code que l'écran transforme en guide.
+    const empty = await http().get('/dashboard').set(director.auth).expect(409);
+    expect(empty.body).toMatchObject({ code: 'NO_CURRENT_YEAR' });
+    const year = await http()
+      .post('/academic/years')
+      .set(director.auth)
+      .send({ name: '2026-2027', startDate: '2026-09-07', endDate: '2027-06-30' })
+      .expect(201);
+    await http().post(`/academic/years/${year.body.id}/current`).set(director.auth).expect(201);
+    const dashboard = await http().get('/dashboard').set(director.auth).expect(200);
+    expect(dashboard.body.year.name).toBe('2026-2027');
   });
 
   it('refuse les routes plateforme à un directeur', async () => {

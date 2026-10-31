@@ -111,3 +111,46 @@ test('facturation de l’abonnement : plateforme puis direction', async ({ page,
   await expect(card.getByRole('status')).toContainText('Votre accès n’est pas interrompu');
   await expectNoHorizontalOverflow(page, 'paramètres (abonnement)');
 });
+
+test('nouvel établissement : création par la plateforme, puis guide de démarrage de la direction', async ({
+  page,
+  request,
+}, info) => {
+  const tag = info.project.name === 'mobile' ? 'tel' : 'ordi';
+  const stamp = Date.now().toString(36);
+  const email = `direction.${tag}.${stamp}@lbb.cm`;
+  const { secret } = await preparePlatformAdmin(request);
+  await loginPlatformAdmin(page, secret);
+  await page.getByRole('button', { name: 'Nouvel établissement' }).click();
+  const form = page.getByRole('dialog', { name: 'Nouvel établissement' });
+  await form.getByLabel('Nom de l’établissement').fill(`Lycée de Bafoussam ${tag} ${stamp}`);
+  await expect(form.getByLabel('Identifiant')).toHaveValue(`lycee-de-bafoussam-${tag}-${stamp}`);
+  await form.getByLabel('Ville').fill('Bafoussam');
+  await form.getByLabel('Préfixe des matricules').fill('LBB');
+  await form.getByLabel('Prénom').fill('Henriette');
+  await form.getByLabel('Nom', { exact: true }).fill('Tchinda');
+  await form.getByLabel('Adresse e-mail').fill(email);
+  await form.getByLabel('Mot de passe provisoire').fill('Bafoussam2026!');
+  await expectNoHorizontalOverflow(page);
+  await form.getByRole('button', { name: 'Créer l’établissement' }).click();
+  await expect(page.getByText(new RegExp(`la direction se connecte avec ${email}`))).toBeVisible();
+  await expect(
+    page.getByText(`Lycée de Bafoussam ${tag} ${stamp}`).filter({ visible: true }).first(),
+  ).toBeVisible();
+
+  // Première connexion de la direction : guide de démarrage, pas de message d'erreur.
+  await page.evaluate(() => fetch('/api/auth/logout', { method: 'POST' }));
+  await page.goto('/connexion');
+  await page.getByLabel('Adresse e-mail').fill(email);
+  await page.getByLabel('Mot de passe').fill('Bafoussam2026!');
+  await page.getByRole('button', { name: 'Se connecter' }).click();
+  await expect(page.getByRole('heading', { name: 'Bienvenue, Henriette' })).toBeVisible();
+  await expect(page.getByText('Impossible d’afficher cette page')).toHaveCount(0);
+  await expectNoHorizontalOverflow(page);
+  await page.getByRole('button', { name: /^Créer l’année \d{4}-\d{4}$/ }).click();
+  await expect(
+    page.getByText(/^Année \d{4}-\d{4} créée et définie comme année en cours/),
+  ).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Bonjour, Henriette' })).toBeVisible();
+  await expect(page.getByText('Rien en attente. Tout est à jour.')).toBeVisible();
+});

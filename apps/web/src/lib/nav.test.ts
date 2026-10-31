@@ -1,6 +1,6 @@
 import { permissionsForRoles, type StaffRole } from '@ecole/shared';
 import { describe, expect, it } from 'vitest';
-import { activeHref, primaryNav, safeNextPath, visibleNav } from './nav';
+import { activeHref, primaryNav, routeAccess, safeNextPath, visibleNav } from './nav';
 import type { Me } from './types';
 
 function me(
@@ -264,5 +264,43 @@ describe('redirection après connexion', () => {
     expect(
       hrefs({ ...teacher, permissions: [...teacher.permissions, 'discipline.read'] }),
     ).toContain('/incidents');
+  });
+
+  it('refuse net une page non autorisée atteinte par lien direct', () => {
+    const librarian: Me = {
+      ...me([], ['students', 'finance', 'library', 'hr', 'accounting']),
+      customRoles: [{ id: 'r', name: 'Bibliothécaire' }],
+      permissions: ['students.read', 'library.read', 'library.loans'],
+      scopes: { classes: false, lines: false },
+    };
+    for (const [path, label] of [
+      ['/caisse', 'Caisse'],
+      ['/caisse/journal', 'Journal des paiements'],
+      ['/caisse/clotures', 'Clôtures de caisse'],
+      ['/rh/paie', 'Paie'],
+      ['/comptabilite', 'Comptabilité'],
+      ['/comptabilite/depenses', 'Dépenses'],
+      ['/parametres/roles', 'Rôles et droits'],
+    ] as const) {
+      const access = routeAccess(path, librarian);
+      expect(access, path).toMatchObject({ allowed: false, reason: 'permission' });
+      expect(access.allowed ? null : access.item.label).toBe(label);
+    }
+    for (const path of ['/eleves', '/eleves/abc', '/bibliotheque', '/compte', '/enseignant'])
+      expect(routeAccess(path, librarian).allowed, path).toBe(true);
+    // Droit présent mais module non activé.
+    expect(routeAccess('/rh', me(['DIRECTOR']))).toMatchObject({
+      allowed: false,
+      reason: 'module',
+    });
+    expect(routeAccess('/rh', me(['DIRECTOR'], ['hr']))).toEqual({ allowed: true });
+    expect(routeAccess('/plateforme/facturation', me(['DIRECTOR']))).toMatchObject({
+      allowed: false,
+      reason: 'platform',
+    });
+    // Le chauffeur ouvre l'appel du car mais pas la gestion du transport.
+    const driver = me(['TRANSPORT'], ['transport']);
+    expect(routeAccess('/transport/appel', driver).allowed).toBe(true);
+    expect(routeAccess('/transport', driver).allowed).toBe(false);
   });
 });

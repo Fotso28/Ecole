@@ -610,26 +610,73 @@ describe('caisse journalière', () => {
       .set(s.compta.auth)
       .expect(200);
     expect(current.body).toMatchObject({ operations: 1, expected: 25000, reversed: 1 });
-    const closed = await http()
+    // Un écart exige un motif.
+    const noReason = await http()
       .post(`/finance/cash-sessions/${session.body.id}/close`)
       .set(s.compta.auth)
       .send({ countedAmount: 24000 })
+      .expect(400);
+    expect(noReason.body.message).toMatch(/Manquant de 1.000.FCFA : indiquez le motif/);
+    const closed = await http()
+      .post(`/finance/cash-sessions/${session.body.id}/close`)
+      .set(s.compta.auth)
+      .send({ countedAmount: 24000, note: 'Billet de 1 000 introuvable' })
       .expect(201);
     expect(closed.body).toMatchObject({
       status: 'CLOSED',
       expectedAmount: 25000,
       countedAmount: 24000,
       difference: -1000,
+      note: 'Billet de 1 000 introuvable',
     });
     await pay({ amount: 1000, method: 'CASH' }).expect(409);
+
+    // Liste des clôtures : la direction peut approuver, pas le caissier.
+    const forDirection = await http()
+      .get('/finance/cash-sessions?status=CLOSED')
+      .set(s.direction.auth)
+      .expect(200);
+    expect(forDirection.body).toEqual([
+      expect.objectContaining({
+        id: session.body.id,
+        expectedAmount: 25000,
+        countedAmount: 24000,
+        difference: -1000,
+        note: 'Billet de 1 000 introuvable',
+        openedBy: expect.objectContaining({ firstName: expect.any(String) }),
+        canApprove: true,
+      }),
+    ]);
+    const forCashier = await http()
+      .get('/finance/cash-sessions?status=CLOSED')
+      .set(s.compta.auth)
+      .expect(200);
+    expect(forCashier.body[0].canApprove).toBe(false);
+    await http().get('/finance/cash-sessions').set(s.prof.auth).expect(403);
+
     await http()
       .post(`/finance/cash-sessions/${session.body.id}/approve`)
       .set(s.compta.auth)
       .expect(403);
-    await http()
+    const approved = await http()
       .post(`/finance/cash-sessions/${session.body.id}/approve`)
       .set(s.direction.auth)
       .expect(201);
+    // Comptabilité non activée : aucune écriture, mais l'approbation est journalisée.
+    expect(approved.body).toMatchObject({ status: 'APPROVED', difference: -1000, entry: null });
+    await http()
+      .post(`/finance/cash-sessions/${session.body.id}/approve`)
+      .set(s.direction.auth)
+      .expect(409);
+    const audit = await prisma.auditLog.findMany({
+      where: {
+        entityId: session.body.id,
+        action: { in: ['finance.cash_closed', 'finance.cash_approved'] },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    expect(audit.map((a) => a.action)).toEqual(['finance.cash_closed', 'finance.cash_approved']);
+    expect(audit[0]?.reason).toBe('Billet de 1 000 introuvable');
   });
 
   it('n’ouvre qu’une caisse à la fois et fait valider la caisse de la direction par un tiers', async () => {
@@ -695,8 +742,47 @@ describe('pilotage', () => {
       .get(`/finance/payments/export.csv?from=${addDays(today(), -1)}&to=${addDays(today(), 1)}`)
       .set(s.compta.auth)
       .expect(200);
-    expect(csv.text).toContain('date;recu;matricule;eleve;moyen;montant;annule;reference');
+    expect(csv.text).toContain('date;recu;matricule;eleve;moyen;montant;annule;reference;banque');
     expect(csv.text).toContain(';105000;non;');
+  });
+
+  it('exporte comme à l’écran : moyen filtré, heure de Douala, n° de bordereau', async () => {
+    await http().post('/finance/cash-sessions/open').set(s.compta.auth).expect(201);
+    await pay({ amount: 25000, method: 'CASH' }).expect(201);
+    const bank = await pay({
+      amount: 50000,
+      method: 'BANK',
+      bankReference: 'BRD-778812',
+      bankName: 'Afriland First Bank',
+    }).expect(201);
+    // 31/10 à 0 h 30 heure de Douala (23 h 30 UTC la veille) : compté le 31.
+    await prisma.payment.update({
+      where: { id: bank.body.id },
+      data: {
+        createdAt: new Date('2026-10-30T23:30:00Z'),
+        confirmedAt: new Date('2026-10-30T23:30:00Z'),
+      },
+    });
+    const day = await http()
+      .get('/finance/payments/export.csv?from=2026-10-31&to=2026-10-31&method=BANK')
+      .set(s.compta.auth)
+      .expect(200);
+    const rows = day.text.trim().split('\n').slice(1);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatch(/^2026-10-31 00:30;R-\d{4}-\d{6};/);
+    expect(rows[0]).toMatch(/;Banque;50000;non;BRD-778812;Afriland First Bank$/);
+    const cash = await http()
+      .get(`/finance/payments/export.csv?from=${today()}&to=${today()}&method=CASH`)
+      .set(s.compta.auth)
+      .expect(200);
+    const cashRows = cash.text.trim().split('\n').slice(1);
+    expect(cashRows.length).toBeGreaterThan(0);
+    expect(cashRows.every((r) => r.includes(';Espèces;'))).toBe(true);
+    expect(cash.text).not.toContain('BRD-778812');
+    await http()
+      .get('/finance/payments/export.csv?from=2026-10-31&to=2026-10-31&method=CHEQUE')
+      .set(s.compta.auth)
+      .expect(400);
   });
 
   it('exporte tous les paiements de la période, même au-delà de 500', async () => {

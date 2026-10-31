@@ -101,6 +101,30 @@ export function missedBoarding(
   return records.filter((r) => r.boarded === false).map((r) => r.studentId);
 }
 
+/** Avance tolérée de l'horloge du téléphone sur celle du serveur. */
+export const ROLL_CALL_CLOCK_TOLERANCE_MS = 5 * 60_000;
+
+/**
+ * Heure d'un pointage dans le car : celle du téléphone (le pointage a pu être fait sans réseau et
+ * envoyé plus tard), bornée aux valeurs plausibles. Une heure absente, illisible, dans le futur
+ * (au-delà de la tolérance) ou hors du jour du trajet (heure de Douala) est remplacée par l'heure
+ * de réception.
+ */
+export function rollCallTimestamp(
+  client: string | null | undefined,
+  received: Date,
+  tripDate: string,
+): Date {
+  if (!client) return received;
+  const at = new Date(client);
+  if (Number.isNaN(at.getTime())) return received;
+  if (at.getTime() > received.getTime() + ROLL_CALL_CLOCK_TOLERANCE_MS) return received;
+  // Jour calendaire de Douala (UTC+1, sans heure d'été).
+  const doualaDay = new Date(at.getTime() + 3_600_000).toISOString().slice(0, 10);
+  if (doualaDay !== tripDate) return received;
+  return at.getTime() > received.getTime() ? received : at;
+}
+
 // Schémas
 const label = z.string().trim().min(1, 'Champ obligatoire').max(80);
 const fcfa = fcfaAmount;
@@ -154,6 +178,9 @@ export const transportRollCallSchema = z.object({
         studentId: id,
         boarded: z.boolean().nullable(),
         alighted: z.boolean().nullable().default(null),
+        /** Heures du pointage sur le téléphone (ISO 8601), bornées à la réception. */
+        boardedAt: z.string().max(40).nullable().optional(),
+        alightedAt: z.string().max(40).nullable().optional(),
       }),
     )
     .max(200),

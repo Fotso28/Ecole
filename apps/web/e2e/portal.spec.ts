@@ -3,9 +3,21 @@ import { API_URL } from '../playwright.config';
 import { expectNoHorizontalOverflow, loginParent, PASSWORD } from './helpers';
 
 test.describe('portail parents', () => {
-  test('le parent paie la scolarité par Mobile Money', async ({ page }) => {
+  test('le parent paie la scolarité par Mobile Money', async ({ page, context }) => {
+    // Liste des enfants lente : jamais « Aucun enfant rattaché » pendant le chargement.
+    await context.route('**/api/portal/children', async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      // Requête déjà servie (service worker) ou abandonnée : rien à faire.
+      await route.continue().catch(() => undefined);
+    });
     await loginParent(page, '677123456');
+    await expect(
+      page.getByRole('status').filter({ hasText: 'Chargement de vos enfants' }),
+    ).toBeAttached();
+    await expect(page.getByText('Aucun enfant rattaché à ce numéro')).toHaveCount(0);
     await expect(page.getByRole('heading', { name: 'Bonjour Pierre' })).toBeVisible();
+    await expect(page.getByText('Aucun enfant rattaché à ce numéro')).toHaveCount(0);
+    await context.unroute('**/api/portal/children');
     const switcher = page.getByRole('group', { name: 'Choisir un enfant' });
     await expect(switcher.getByRole('button')).toHaveCount(2);
     await switcher.getByRole('button', { name: /Marie-Claire/ }).click();
@@ -24,6 +36,19 @@ test.describe('portail parents', () => {
     await page.getByRole('button', { name: 'Démo : simuler la validation de l’opérateur' }).click();
     await expect(page.getByRole('heading', { name: 'Paiement reçu' })).toBeVisible();
     await expect(page.getByText(/R-\d{4}-\d{6}/)).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+    const receipt = /R-\d{4}-\d{6}/.exec(
+      (await page.getByText(/R-\d{4}-\d{6}/).textContent()) ?? '',
+    )?.[0];
+
+    // Historique des paiements de l'enfant sur l'accueil, avec le reçu.
+    await page
+      .getByRole('navigation', { name: 'Navigation' })
+      .getByRole('link', { name: 'Accueil' })
+      .click();
+    const history = page.getByRole('list', { name: 'Derniers paiements' });
+    await expect(history.getByText(new RegExp(`· reçu ${receipt}$`))).toBeVisible();
+    await expect(history.getByRole('button', { name: `Reçu ${receipt}` })).toBeVisible();
     await expectNoHorizontalOverflow(page);
   });
 

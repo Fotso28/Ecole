@@ -5,7 +5,7 @@ import { formatFileSize } from '@ecole/shared';
 import { ChevronRight, Eye, FileText, Lock, Phone, Upload, Wallet } from 'lucide-react';
 import Link from 'next/link';
 import { use, useState } from 'react';
-import { Badge, ENROLLMENT_BADGE, enrollmentLabel, LINE_BADGE } from '@/components/ui/badge';
+import { Badge, ENROLLMENT_BADGE, enrollmentLabel, lineBadge } from '@/components/ui/badge';
 import { Button, ButtonLink } from '@/components/ui/button';
 import { Card, CardHeader, ErrorBlock, LoadingBlock } from '@/components/ui/card';
 import { InputField, TextareaField } from '@/components/ui/field';
@@ -660,7 +660,7 @@ export default function StudentPage({ params }: { params: Promise<{ id: string }
                       <span className="text-sm font-semibold tabular">
                         {formatFcfa(l.outstanding || l.due)}
                       </span>
-                      <Badge tone={LINE_BADGE[l.status].tone}>{LINE_BADGE[l.status].label}</Badge>
+                      <Badge tone={lineBadge(l).tone}>{lineBadge(l).label}</Badge>
                     </div>
                   </li>
                 ))}

@@ -209,7 +209,7 @@ test('registre des incidents : saisie, filtres et statistiques', async ({ page }
   // Le secrétariat n'a pas accès au registre.
   await switchUser(page, 'secretariat@demo.cm');
   await page.goto('/incidents');
-  await expect(page.getByText('Permission insuffisante').first()).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Accès refusé' })).toBeVisible();
 });
 
 test('assistant de rentrée : nouvelle année, structure reprise, réinscriptions', async ({

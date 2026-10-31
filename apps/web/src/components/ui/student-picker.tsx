@@ -32,6 +32,13 @@ export function StudentPicker({
     const t = setTimeout(() => setTerm(search.trim()), 300);
     return () => clearTimeout(t);
   }, [search]);
+  // Un élève choisi, retiré ou remis à zéro par le formulaire : la recherche repart vide, sans
+  // les résultats de la saisie précédente.
+  const picked = value?.id ?? null;
+  useEffect(() => {
+    setSearch('');
+    setTerm('');
+  }, [picked]);
   const q = useQuery({
     queryKey: ['student-picker', term],
     queryFn: () =>

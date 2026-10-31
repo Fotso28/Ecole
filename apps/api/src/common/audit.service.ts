@@ -11,6 +11,8 @@ export interface AuditEntry {
   after?: unknown;
   reason?: string;
   schoolId?: string | null;
+  /** Auteur connu hors contexte de requête (connexion réussie : la personne qui se connecte). */
+  actorId?: string | null;
 }
 
 function toJson(value: unknown): Prisma.InputJsonValue | undefined {
@@ -35,7 +37,7 @@ export class AuditService {
             : null;
     const data = {
       schoolId,
-      actorId: currentActorId() ?? null,
+      actorId: entry.actorId !== undefined ? entry.actorId : (currentActorId() ?? null),
       action: entry.action,
       entity: entry.entity,
       entityId: entry.entityId ?? null,

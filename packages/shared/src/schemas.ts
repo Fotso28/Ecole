@@ -5,6 +5,8 @@ import { PAYMENT_METHODS } from './finance';
 import { normalizeCameroonPhone } from './identity';
 import { STAFF_ROLES } from './permissions';
 import { COUNCIL_DECISIONS, YEAR_END_DECISIONS } from './results';
+// Messages de validation en français pour tous les schémas.
+import './zod-fr';
 
 /** Date AAAA-MM-JJ existante ; un champ vide signale « Champ obligatoire », pas une date invalide. */
 export const isoDate = z

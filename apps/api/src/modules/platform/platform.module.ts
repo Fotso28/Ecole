@@ -1,4 +1,14 @@
-import { Body, Controller, Get, Injectable, Module, Param, Post, Put } from '@nestjs/common';
+import {
+  Body,
+  ConflictException,
+  Controller,
+  Get,
+  Injectable,
+  Module,
+  Param,
+  Post,
+  Put,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ApiTags } from '@nestjs/swagger';
 import {
@@ -33,6 +43,8 @@ export class PlatformService {
 
   async createSchool(input: z.infer<typeof schoolCreateSchema>) {
     const passwordHash = await AuthService.hashPassword(input.director.password);
+    if (await this.db.school.findUnique({ where: { slug: input.slug }, select: { id: true } }))
+      throw new ConflictException('Cet identifiant est déjà utilisé par un autre établissement');
     return this.db.$transaction(async (tx) => {
       const school = await tx.school.create({
         data: {
@@ -66,7 +78,8 @@ export class PlatformService {
         },
         tx,
       );
-      return { school, directorId: user.id };
+      // Compte existant : rattaché comme direction, son mot de passe reste inchangé.
+      return { school, directorId: user.id, existingUser: !!existing };
     });
   }
 

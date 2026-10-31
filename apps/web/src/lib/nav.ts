@@ -35,6 +35,7 @@ import {
   UserPlus,
   Users,
   UsersRound,
+  Vault,
   Wallet,
 } from 'lucide-react';
 import type { Me } from './types';
@@ -207,6 +208,14 @@ export const NAV: NavGroup[] = [
         label: 'Journal des paiements',
         short: 'Journal',
         icon: Receipt,
+        permission: 'finance.read',
+        module: 'finance',
+      },
+      {
+        href: '/caisse/clotures',
+        label: 'Clôtures de caisse',
+        short: 'Clôtures',
+        icon: Vault,
         permission: 'finance.read',
         module: 'finance',
       },
@@ -429,6 +438,31 @@ export function primaryNav(me: Me | null): NavItem[] {
     .map((href) => items.find((i) => i.href === href))
     .filter((i): i is NavItem => !!i)
     .slice(0, 4);
+}
+
+export type RouteAccess =
+  | { allowed: true }
+  | { allowed: false; reason: 'permission' | 'module' | 'platform'; item: NavItem };
+
+/**
+ * Droit d'ouvrir une page atteinte par lien direct, d'après l'entrée de navigation qui la couvre
+ * (plus long préfixe). Une page sans entrée (Mon compte, pages communes) reste ouverte ; l'API
+ * contrôle de toute façon chaque donnée.
+ */
+export function routeAccess(pathname: string, me: Me | null): RouteAccess {
+  if (!me) return { allowed: true };
+  const item = NAV.flatMap((g) => g.items)
+    .filter((i) => !i.teacherOnly)
+    .filter((i) => pathname === i.href || pathname.startsWith(`${i.href}/`))
+    .sort((a, b) => b.href.length - a.href.length)[0];
+  if (!item) return { allowed: true };
+  if (item.platformAdmin && !me.user.isPlatformAdmin)
+    return { allowed: false, reason: 'platform', item };
+  if (item.permission && !me.permissions.includes(item.permission))
+    return { allowed: false, reason: 'permission', item };
+  if (item.module && !(me.activeSchool?.modules ?? []).includes(item.module))
+    return { allowed: false, reason: 'module', item };
+  return { allowed: true };
 }
 
 /** Élément actif : le plus long préfixe correspondant à l'URL courante. */

@@ -10,6 +10,7 @@ import {
   coversTrip,
   fitsCapacity,
   occupancy,
+  rollCallTimestamp,
   subscriptionFee,
   TRIP_DIRECTION_LABELS,
   vehicleDocumentAlerts,
@@ -793,11 +794,16 @@ export class TransportService implements OnModuleInit {
       let missed = 0;
       for (const r of input.records) {
         const prev = existing.find((e) => e.studentId === r.studentId);
+        // Heure du pointage sur le téléphone (appel fait sans réseau, envoyé plus tard), bornée.
         const data = {
           boarded: r.boarded,
           alighted: r.alighted,
-          boardedAt: r.boarded ? (prev?.boardedAt ?? now) : null,
-          alightedAt: r.alighted ? (prev?.alightedAt ?? now) : null,
+          boardedAt: r.boarded
+            ? (prev?.boardedAt ?? rollCallTimestamp(r.boardedAt, now, input.date))
+            : null,
+          alightedAt: r.alighted
+            ? (prev?.alightedAt ?? rollCallTimestamp(r.alightedAt, now, input.date))
+            : null,
         };
         const record = prev
           ? await tx.transportTripRecord.update({ where: { id: prev.id }, data })

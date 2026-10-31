@@ -4,6 +4,7 @@ import {
   formatFcfa,
   formatMinutes,
   formatPayrollMonth,
+  ofPayrollMonth,
   PAY_ELEMENT_LABELS,
   PAYOUT_METHOD_LABELS,
   PAYROLL_CONTRIBUTION_LABELS as L,
@@ -306,7 +307,7 @@ function csvCell(v: string | number): string {
 export function transfersCsv(month: string, rows: TransferRow[]): string {
   const total = rows.reduce((s, r) => s + r.net, 0);
   const lines = [
-    [`État des virements – paie de ${formatPayrollMonth(month)}`],
+    [`État des virements – paie ${ofPayrollMonth(month)}`],
     [TRANSFER_NOTICE],
     [],
     TRANSFER_HEADERS,
@@ -326,7 +327,7 @@ export async function transfersWorkbook(
   const wb = new ExcelJS.Workbook();
   wb.creator = school;
   const ws = wb.addWorksheet('Virements');
-  ws.addRow([`État des virements – paie de ${formatPayrollMonth(month)} – ${school}`]).font = {
+  ws.addRow([`État des virements – paie ${ofPayrollMonth(month)} – ${school}`]).font = {
     bold: true,
   };
   ws.addRow([TRANSFER_NOTICE]).font = { italic: true };

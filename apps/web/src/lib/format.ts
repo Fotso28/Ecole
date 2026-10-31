@@ -1,3 +1,5 @@
+import { formatFcfa } from '@ecole/shared';
+
 export {
   formatCameroonPhone,
   formatFcfa,
@@ -64,4 +66,10 @@ export function plural(n: number, one: string, many: string): string {
 /** Accord au sexe de l'élève quand il est connu (« absente », « montée »), forme épicène sinon. */
 export function agree(gender: 'F' | 'M' | null | undefined, word: string): string {
   return gender === 'F' ? `${word}e` : gender === 'M' ? word : `${word}(e)`;
+}
+
+/** Écart signé avec le signe moins typographique : « −500 FCFA », « +250 FCFA », « 0 FCFA ». */
+export function formatSignedFcfa(amount: number): string {
+  if (amount === 0) return formatFcfa(0);
+  return `${amount < 0 ? '\u2212' : '+'}${formatFcfa(Math.abs(amount))}`;
 }

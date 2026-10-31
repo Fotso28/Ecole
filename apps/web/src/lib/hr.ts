@@ -100,6 +100,9 @@ export interface AdvanceRow {
   decidedAt: string | null;
   decisionNote: string | null;
   payout: PayoutView | null;
+  /** Salaire de base du contrat mensualisé en cours ; alerte si la retenue en dépasse le tiers. */
+  baseSalary?: number | null;
+  shareAlert?: boolean;
 }
 
 /** Versement enregistré (salaires d'une paie validée ou avance accordée). */
@@ -190,6 +193,14 @@ export interface PayrollRunView {
 /** Mois courant (AAAA-MM), heure du Cameroun. */
 export function currentMonth(now = new Date()): string {
   return new Date(now.getTime() + 3_600_000).toISOString().slice(0, 7);
+}
+
+/** Le mois en cours et les suivants (AAAA-MM), heure du Cameroun. */
+export function nextMonths(count: number, now = new Date()): string[] {
+  const [y, m] = currentMonth(now).split('-').map(Number) as [number, number];
+  return Array.from({ length: count }, (_, i) =>
+    new Date(Date.UTC(y, m - 1 + i, 1)).toISOString().slice(0, 7),
+  );
 }
 
 /** Mois proposés dans les listes : les 12 derniers et le suivant. */

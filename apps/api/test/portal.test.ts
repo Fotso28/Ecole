@@ -80,6 +80,58 @@ describe('portail parent', () => {
     await http().get('/dashboard').set(parent.auth).expect(403);
   });
 
+  it('montre au parent les paiements faits au guichet et leurs reçus', async () => {
+    const mc = await enrollStudent(app, s.secretariat, {
+      firstName: 'Marie-Claire',
+      lastName: 'Ngono',
+      classId: f.class4AId,
+      phone: '677123456',
+    });
+    await http().post('/finance/cash-sessions/open').set(s.compta.auth).expect(201);
+    const paid = await http()
+      .post('/finance/payments')
+      .set(s.compta.auth)
+      .send({ studentId: mc.id, amount: 25000, method: 'CASH', idempotencyKey: randomUUID() })
+      .expect(201);
+    const parent = await parentLogin('677123456');
+    const overview = await http().get(`/portal/children/${mc.id}`).set(parent.auth).expect(200);
+    const payments = overview.body.finance.payments as Record<string, unknown>[];
+    expect(payments).toEqual([
+      expect.objectContaining({
+        id: paid.body.id,
+        amount: 25000,
+        methodLabel: 'Espèces',
+        status: 'SUCCESS',
+        reversed: false,
+        receipt: expect.objectContaining({ number: paid.body.receipt.number }),
+      }),
+    ]);
+    // Ni l'agent de caisse ni les références de paiement ne sont exposés.
+    expect(payments[0]).not.toHaveProperty('receivedById');
+    expect(payments[0]).not.toHaveProperty('payerPhone');
+    expect(payments[0]).not.toHaveProperty('bankReference');
+    const pdf = await http()
+      .get(`/portal/payments/${paid.body.id}/receipt.pdf`)
+      .set(parent.auth)
+      .buffer(true)
+      .parse((res, cb) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (c: Buffer) => chunks.push(c));
+        res.on('end', () => cb(null, Buffer.concat(chunks)));
+      })
+      .expect(200);
+    expect((pdf.body as Buffer).subarray(0, 4).toString()).toBe('%PDF');
+    // Un autre parent ne voit pas ce reçu.
+    await enrollStudent(app, s.secretariat, {
+      firstName: 'Lucie',
+      lastName: 'Owona',
+      classId: f.class4AId,
+      phone: '677445566',
+    });
+    const other = await parentLogin('677445566');
+    await http().get(`/portal/payments/${paid.body.id}/receipt.pdf`).set(other.auth).expect(404);
+  });
+
   it("présente notes publiées, absences, finances et annonces de l'enfant", async () => {
     const mc = await enrollStudent(app, s.secretariat, {
       firstName: 'Marie-Claire',

@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { readFileSync } from 'node:fs';
 import { expectNoHorizontalOverflow, loginStaff, navigate } from './helpers';
 
 test('encaissement en espèces, reçu, annulation et clôture de caisse', async ({ page }, info) => {
@@ -14,6 +15,12 @@ test('encaissement en espèces, reçu, annulation et clôture de caisse', async 
   await page.getByRole('button', { name: new RegExp(student) }).click();
   await expect(page.getByRole('heading', { name: 'Échéancier' })).toBeVisible();
   await expectNoHorizontalOverflow(page);
+  // Une échéance échue impayée porte « En retard », jamais « À venir ».
+  const overdue = await page.locator('li').filter({ hasText: 'Échue le' }).all();
+  for (const line of overdue) {
+    await expect(line.getByText('À venir', { exact: true })).toHaveCount(0);
+    await expect(line.getByText(/En retard|Payé/)).toBeVisible();
+  }
 
   const amountText = await page.getByLabel('Montant encaissé').inputValue();
   const amount = Number(amountText);
@@ -34,6 +41,19 @@ test('encaissement en espèces, reçu, annulation et clôture de caisse', async 
     page.locator('li').filter({ hasText: student }).filter({ hasText: 'Encaissé' }).first();
   await expect(row()).toBeVisible();
   await expect(row().getByRole('button', { name: 'Annuler' })).toHaveCount(0);
+  // Export CSV avec le filtre « Moyen » : espèces seulement, heure de Douala.
+  await page.getByLabel('Moyen').selectOption('CASH');
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Exporter (CSV)' }).click();
+  const file = await download;
+  expect(file.suggestedFilename()).toMatch(/^paiements-.*-cash\.csv$/);
+  const rows = readFileSync(await file.path(), 'utf8')
+    .trim()
+    .split('\n')
+    .slice(1);
+  expect(rows.length).toBeGreaterThan(0);
+  expect(rows.every((r) => r.includes(';Espèces;'))).toBe(true);
+  expect(rows[0]).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2};/);
   await page.evaluate(() => fetch('/api/auth/logout', { method: 'POST' }));
   await loginStaff(page, 'direction@demo.cm');
   await page.goto('/caisse/journal');
@@ -48,12 +68,60 @@ test('encaissement en espèces, reçu, annulation et clôture de caisse', async 
   await page.evaluate(() => fetch('/api/auth/logout', { method: 'POST' }));
   await loginStaff(page, 'compta@demo.cm');
 
-  // Clôture : le montant attendu exclut le paiement annulé.
+  // Clôture : le montant attendu exclut le paiement annulé ; un écart exige un motif.
   await page.goto('/caisse');
   await page.getByRole('button', { name: 'Clôturer ma caisse' }).click();
   const close = page.getByRole('dialog', { name: 'Clôturer ma caisse' });
   const expectedText = (await close.locator('strong').first().textContent()) ?? '0';
-  await close.getByLabel('Montant compté').fill(expectedText.replace(/\D/g, ''));
+  const expected = Number(expectedText.replace(/\D/g, ''));
+  await close.getByLabel('Montant compté').fill(String(expected + 500));
+  await expect(close.getByText('Excédent : +500 FCFA')).toBeVisible();
+  await expect(close.getByRole('button', { name: 'Clôturer' })).toBeDisabled();
+  await close.getByLabel('Motif de l’écart').fill('Monnaie non reprise par un parent');
   await close.getByRole('button', { name: 'Clôturer' }).click();
-  await expect(page.getByText('Caisse clôturée sans écart')).toBeVisible();
+  await expect(
+    page.getByText('Caisse clôturée · écart de +500 FCFA, à faire approuver'),
+  ).toBeVisible();
+
+  // Le caissier voit sa clôture mais ne l'approuve pas.
+  await page.goto('/caisse/clotures');
+  const closure = () =>
+    page
+      .locator(info.project.name === 'mobile' ? 'li' : 'tr')
+      .filter({ hasText: 'Monnaie non reprise par un parent' })
+      .filter({ hasText: 'À approuver' })
+      .first();
+  await expect(closure()).toBeVisible();
+  await expect(closure().getByRole('button', { name: /^Approuver/ })).toHaveCount(0);
+  await expectNoHorizontalOverflow(page);
+
+  // La direction l'approuve depuis « À traiter » du tableau de bord.
+  await page.evaluate(() => fetch('/api/auth/logout', { method: 'POST' }));
+  await loginStaff(page, 'direction@demo.cm');
+  await page.goto('/tableau-de-bord');
+  await page.getByRole('link', { name: /\d+ clôtures? de caisse à approuver/ }).click();
+  await expect(page).toHaveURL(/\/caisse\/clotures$/);
+  await expect(page.getByRole('heading', { name: 'Clôtures de caisse' })).toBeVisible();
+  await expect(closure()).toContainText('+500 FCFA');
+  await closure()
+    .getByRole('button', { name: /^Approuver/ })
+    .click();
+  await expect(page.getByText(/^Clôture approuvée/)).toBeVisible();
+  await expect(closure()).toHaveCount(0);
+  await expectNoHorizontalOverflow(page);
+
+  // Journal d'audit : l'annulation et l'approbation se retrouvent par type d'action et personne,
+  // avec des libellés en français.
+  await page.goto('/parametres');
+  const audit = page.locator('#audit');
+  await audit.getByLabel('Type d’action').selectOption('finance');
+  await audit.getByLabel('Personne').selectOption({ label: 'Ngo Bassa Alice' });
+  await expect(
+    audit.getByText(/Ngo Bassa Alice · Clôture de caisse approuvée/).first(),
+  ).toBeVisible();
+  await expect(
+    audit.getByText(/Paiement annulé · motif : Erreur de saisie au guichet/).first(),
+  ).toBeVisible();
+  await expect(audit.getByText('finance.payment_reversed')).toHaveCount(0);
+  await expectNoHorizontalOverflow(page);
 });

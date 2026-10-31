@@ -117,3 +117,29 @@ test.describe('rôles et droits par école', () => {
     expect(me.customRoles.map((r) => r.name)).toEqual([name]);
   });
 });
+
+test('lien direct vers une page interdite : refus net, sans les commandes de la page', async ({
+  page,
+}) => {
+  await loginStaff(page, 'prof.maths@demo.cm');
+  for (const [path, label] of [
+    ['/caisse', 'Caisse'],
+    ['/caisse/journal', 'Journal des paiements'],
+    ['/rh/paie', 'Paie'],
+    ['/parametres/roles', 'Rôles et droits'],
+  ] as const) {
+    await page.goto(path);
+    await expect(page.getByRole('heading', { name: 'Accès refusé' })).toBeVisible();
+    await expect(
+      page.getByText(`Vous n’avez pas le droit d’ouvrir la page « ${label} »`),
+    ).toBeVisible();
+    await expect(page.getByText('Permission insuffisante')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Exporter|Barèmes|Nouveau rôle/ })).toHaveCount(
+      0,
+    );
+    await expect(page.getByPlaceholder('Nom, matricule ou téléphone du parent')).toHaveCount(0);
+    await expectNoHorizontalOverflow(page);
+  }
+  await page.getByRole('link', { name: 'Retour à l’accueil' }).click();
+  await expect(page).toHaveURL(/\/enseignant$/);
+});

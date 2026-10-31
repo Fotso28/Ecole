@@ -85,6 +85,55 @@ describe('service worker', () => {
     expect([...stored]).toEqual(['https://ecole.test/api/portal/children']);
   });
 
+  it('garde aussi l’appel du car et les surveillances de « Ma journée », rien d’autre', () => {
+    expect(intercepts('/api/transport/my-lines')).toBe(true);
+    expect(intercepts('/api/transport/trips')).toBe(true);
+    expect(intercepts('/api/exams/my-supervisions')).toBe(true);
+    expect(intercepts('/api/transport/lines')).toBe(false);
+    expect(intercepts('/api/exams/sessions')).toBe(false);
+    expect(intercepts('/api/grades/sheets')).toBe(false);
+  });
+
+  it('page de secours : message juste et retour à l’accueil du rôle', async () => {
+    const listeners = new Map<string, Listener>();
+    const source = readFileSync(
+      fileURLToPath(new URL('../../public/sw.js', import.meta.url)),
+      'utf8',
+    );
+    runInNewContext(source, {
+      self: {
+        location: { origin: 'https://ecole.test' },
+        addEventListener: (type: string, listener: Listener) => listeners.set(type, listener),
+      },
+      URL,
+      Response,
+      Headers,
+      caches: { match: async () => undefined, open: async () => ({ put: async () => undefined }) },
+      fetch: async () => {
+        throw new TypeError('Failed to fetch');
+      },
+    });
+    const page = async (path: string) => {
+      let response: Promise<Response> | null = null;
+      listeners.get('fetch')?.({
+        request: { method: 'GET', url: `https://ecole.test${path}`, mode: 'navigate' },
+        respondWith: (r: Promise<Response>) => (response = r),
+      });
+      if (!response) throw new Error('navigation non interceptée');
+      return (await (response as Promise<Response>)).text();
+    };
+    const notes = await page('/notes');
+    expect(notes).toContain('Cette page n’est pas disponible hors connexion');
+    expect(notes).not.toContain('pas encore été');
+    expect(notes).not.toContain('href="/portail"');
+    // Le lien suit le profil gardé sur l'appareil : enseignant, chauffeur ou parent.
+    expect(notes).toContain("'/enseignant'");
+    expect(notes).toContain("'/transport/appel'");
+    const rollCall = await page('/transport/appel');
+    expect(rollCall).toContain('pas encore été ouverte sur cet appareil');
+    expect(await page('/portail/notes')).toContain('href="/portail"');
+  });
+
   it('ne met jamais en cache l’authentification ni les fichiers', () => {
     expect(intercepts('/api/auth/me')).toBe(false);
     expect(intercepts('/api/portal/materials/abc/file')).toBe(false);

@@ -55,3 +55,14 @@ export const LINE_BADGE = {
   PARTIAL: { tone: 'warn', label: 'Partiel' },
   UNPAID: { tone: 'neutral', label: 'À venir' },
 } as const;
+
+/** Badge d'une échéance : une échéance échue et non soldée est « En retard », jamais « À venir ». */
+export function lineBadge(line: { status: keyof typeof LINE_BADGE; overdue?: boolean }): {
+  tone: 'success' | 'warn' | 'neutral' | 'danger';
+  label: string;
+} {
+  if (line.overdue && line.status === 'UNPAID') return { tone: 'danger', label: 'En retard' };
+  if (line.overdue && line.status === 'PARTIAL')
+    return { tone: 'danger', label: 'Partiel, en retard' };
+  return LINE_BADGE[line.status];
+}

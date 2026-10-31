@@ -432,6 +432,20 @@ export function advanceInstallment(amount: number, installments: number, repaid:
   return Math.max(0, Math.min(monthly, amount - repaid));
 }
 
+/**
+ * Alerte quand la retenue mensuelle d'une avance dépasse le tiers du salaire de base mensuel
+ * (contrat mensualisé) : l'avance reste possible, mais la direction l'accorde en connaissance de
+ * cause. Sans salaire mensuel connu (vacataire), aucune alerte.
+ */
+export function advanceShareTooHigh(
+  monthly: number,
+  baseSalary: number | null | undefined,
+): boolean {
+  assertInt(monthly, 'mensualité');
+  if (!baseSalary || baseSalary <= 0) return false;
+  return monthly * 3 > baseSalary;
+}
+
 // ---------------------------------------------------------------------------------------------
 // Mois, heures prévues, échéances
 // ---------------------------------------------------------------------------------------------
@@ -473,6 +487,12 @@ const MONTH_NAMES = [
 export function formatPayrollMonth(month: string): string {
   const [y, m] = month.split('-').map(Number) as [number, number];
   return `${MONTH_NAMES[m - 1]} ${y}`;
+}
+
+/** « d’octobre 2026 », « de mars 2026 » : « de » élidé devant avril, août et octobre. */
+export function ofPayrollMonth(month: string): string {
+  const label = formatPayrollMonth(month);
+  return /^[aeiouâéèêîôû]/i.test(label) ? `d’${label}` : `de ${label}`;
 }
 
 /** Nombre de jours du mois couverts par un contrat [start, end]. */
@@ -731,6 +751,11 @@ export const advanceCreateSchema = z.object({
 });
 
 export const advanceDecisionSchema = z.object({ reason: optionalText(300) });
+
+/** Refus d'une avance : motif obligatoire, communiqué à la comptabilité et journalisé. */
+export const advanceRejectSchema = z.object({
+  reason: z.string().trim().min(5, 'Motif du refus obligatoire (5 caractères minimum)').max(300),
+});
 
 export const sensitiveReadSchema = z.object({
   reason: z

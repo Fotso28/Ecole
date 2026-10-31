@@ -41,6 +41,7 @@ test('écrans de la direction', async ({ page }) => {
     '/bulletins',
     '/releves',
     '/caisse',
+    '/caisse/clotures',
     '/impayes',
     '/emploi-du-temps',
     '/cahier-de-texte',
@@ -142,6 +143,14 @@ test('dossier du personnel et fenêtres du module RH', async ({ page }) => {
   await page.getByRole('button', { name: 'Nouvelle demande' }).click();
   await expect(page.getByRole('dialog', { name: 'Demande d’avance sur salaire' })).toBeVisible();
   await expectAccessible(page, '/rh/avances (demande)');
+  // Première retenue : le mois en cours ou un mois à venir, jamais un mois passé.
+  const firstMonth = page
+    .getByRole('dialog', { name: 'Demande d’avance sur salaire' })
+    .getByLabel('Première retenue');
+  await expect(firstMonth.locator('option').first()).toHaveAttribute(
+    'value',
+    new Date(Date.now() + 3_600_000).toISOString().slice(0, 7),
+  );
   await page.goto('/rh/baremes');
   await page.getByRole('button', { name: 'Nouvelle version' }).click();
   await expect(page.getByRole('dialog', { name: 'Nouvelle version du barème' })).toBeVisible();
@@ -315,6 +324,10 @@ test('appel et notes de l’enseignant', async ({ page }) => {
   await page.getByRole('button', { name: 'Mois', exact: true }).click();
   await expect(page.getByRole('table')).toBeVisible();
   await expectAccessible(page, '/calendrier (mois)');
+  // Lien direct vers une page non autorisée.
+  await page.goto('/caisse/journal');
+  await expect(page.getByRole('heading', { name: 'Accès refusé' })).toBeVisible();
+  await expectAccessible(page, '/caisse/journal (accès refusé)');
 });
 
 test('transport, bibliothèque et stock', async ({ page }) => {
@@ -417,6 +430,10 @@ test('facturation de la plateforme', async ({ page, request }) => {
   await page.getByRole('button', { name: 'Nouvelle offre' }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
   await expectAccessible(page, '/plateforme/facturation (nouvelle offre)');
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Nouvel établissement' }).click();
+  await expect(page.getByRole('dialog', { name: 'Nouvel établissement' })).toBeVisible();
+  await expectAccessible(page, '/plateforme/facturation (nouvel établissement)');
   await page.keyboard.press('Escape');
   await page
     .getByRole('link', { name: /Collège Démo/ })

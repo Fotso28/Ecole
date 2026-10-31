@@ -12,6 +12,9 @@ import {
   daysInMonth,
   formatMinutes,
   formatPayrollMonth,
+  ofPayrollMonth,
+  advanceShareTooHigh,
+  advanceRejectSchema,
   formatRateBp,
   isContractEndingSoon,
   nextMonth,
@@ -294,6 +297,28 @@ describe('mois, heures prévues et échéances', () => {
     expect(nextMonth('2026-12')).toBe('2027-01');
     expect(nextMonth('2026-09')).toBe('2026-10');
     expect(formatPayrollMonth('2026-11')).toBe('novembre 2026');
+  });
+
+  it('signale une retenue d’avance supérieure au tiers du salaire', () => {
+    // 900 000 FCFA en 3 mensualités sur un salaire de 250 000 : alerte.
+    expect(advanceShareTooHigh(advanceInstallment(900_000, 3, 0), 250_000)).toBe(true);
+    expect(advanceShareTooHigh(83_334, 250_000)).toBe(true);
+    expect(advanceShareTooHigh(83_333, 250_000)).toBe(false);
+    expect(advanceShareTooHigh(25_000, 158_000)).toBe(false);
+    // Vacataire (pas de salaire mensuel) : pas d'alerte.
+    expect(advanceShareTooHigh(50_000, null)).toBe(false);
+    expect(advanceShareTooHigh(50_000, 0)).toBe(false);
+    expect(advanceRejectSchema.safeParse({ reason: '' }).success).toBe(false);
+    expect(advanceRejectSchema.safeParse({}).success).toBe(false);
+    expect(advanceRejectSchema.parse({ reason: ' Trop élevée ' }).reason).toBe('Trop élevée');
+  });
+
+  it('élide « de » devant avril, août et octobre', () => {
+    expect(ofPayrollMonth('2026-10')).toBe('d’octobre 2026');
+    expect(ofPayrollMonth('2027-04')).toBe('d’avril 2027');
+    expect(ofPayrollMonth('2027-08')).toBe('d’août 2027');
+    expect(ofPayrollMonth('2026-11')).toBe('de novembre 2026');
+    expect(ofPayrollMonth('2027-03')).toBe('de mars 2027');
   });
 
   it('compte les jours de contrat dans le mois', () => {

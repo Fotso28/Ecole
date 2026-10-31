@@ -111,7 +111,7 @@ describe('écritures de paie', () => {
     const { entry, by } = await lines('PAYROLL', run.id);
     expect(entry.journalCode).toBe('OD');
     expect(entry.date.toISOString().slice(0, 10)).toBe('2026-10-31');
-    expect(entry.label).toBe('Paie de octobre 2026 (2 bulletins)');
+    expect(entry.label).toBe('Paie d’octobre 2026 (2 bulletins)');
     expect(entry.total).toBe(summary.employerCost);
     expect((by.get('661') ?? 0) + (by.get('663') ?? 0)).toBe(summary.gross);
     expect(by.get('664')).toBe(summary.employer.total);
@@ -476,6 +476,244 @@ describe('avances sur salaire', () => {
       balance.rows.find((r: { accountNumber: string }) => r.accountNumber === '421'),
     ).toMatchObject({ debit: 60_000, credit: 60_000, balanceDebit: 0, balanceCredit: 0 });
     await expectIntegrity(f.schoolId);
+  });
+});
+
+describe('écarts de caisse', () => {
+  it('manquant en 6588 et excédent en 7588 contre la caisse 571, à l’approbation, une seule fois', async () => {
+    await enable(f.schoolId, ['accounting']);
+    const student = await enrollStudent(app, s.secretariat, {
+      firstName: 'Awa',
+      lastName: 'Bello',
+      classId: f.class4AId,
+    });
+    const pay = (amount: number) =>
+      http()
+        .post('/finance/payments')
+        .set(s.compta.auth)
+        .send({ studentId: student.id, amount, method: 'CASH', idempotencyKey: randomUUID() })
+        .expect(201);
+    const closeWith = async (paid: number, counted: number, note?: string) => {
+      const session = await http().post('/finance/cash-sessions/open').set(s.compta.auth);
+      await pay(paid);
+      await http()
+        .post(`/finance/cash-sessions/${session.body.id}/close`)
+        .set(s.compta.auth)
+        .send({ countedAmount: counted, note })
+        .expect(201);
+      return session.body.id as string;
+    };
+
+    // Manquant de 500 FCFA : rien n'est passé avant l'approbation.
+    const short = await closeWith(25_000, 24_500, 'Erreur de monnaie rendue');
+    expect(await prisma.accountingEntry.count({ where: { sourceType: 'CASH_DIFFERENCE' } })).toBe(
+      0,
+    );
+    const approved = await http()
+      .post(`/finance/cash-sessions/${short}/approve`)
+      .set(s.direction.auth)
+      .expect(201);
+    const shortage = await lines('CASH_DIFFERENCE', short);
+    expect(approved.body.entry).toBe(shortage.entry.reference);
+    expect(shortage.entry.journalCode).toBe('CA');
+    expect(shortage.entry.label).toMatch(/^Manquant de caisse · clôture du \d\d\/\d\d\/\d{4}/);
+    expect([...shortage.by.entries()]).toEqual([
+      ['6588', 500],
+      ['571', -500],
+    ]);
+    const log = await prisma.auditLog.findFirstOrThrow({
+      where: { action: 'finance.cash_approved', entityId: short },
+    });
+    expect(log.after).toMatchObject({ difference: -500, entry: shortage.entry.reference });
+
+    // Excédent de 250 FCFA ; une caisse juste ne crée aucune écriture.
+    const surplus = await closeWith(10_000, 10_250, 'Monnaie non reprise par un parent');
+    const exact = await closeWith(5_000, 5_000);
+    for (const id of [surplus, exact])
+      await http().post(`/finance/cash-sessions/${id}/approve`).set(s.direction.auth).expect(201);
+    expect([...(await lines('CASH_DIFFERENCE', surplus)).by.entries()]).toEqual([
+      ['571', 250],
+      ['7588', -250],
+    ]);
+    expect(
+      await prisma.accountingEntry.count({
+        where: { sourceType: 'CASH_DIFFERENCE', sourceId: exact },
+      }),
+    ).toBe(0);
+
+    // Le rattrapage automatique ne repasse pas un écart déjà comptabilisé.
+    await runAsSystem('test', () => app.get(AccountingService).syncAll(), f.schoolId);
+    expect(await prisma.accountingEntry.count({ where: { sourceType: 'CASH_DIFFERENCE' } })).toBe(
+      2,
+    );
+    const balance = (
+      await http()
+        .get('/accounting/reports/balance?from=2026-01-01&to=2026-12-31')
+        .set(s.compta.auth)
+        .expect(200)
+    ).body.balance;
+    // Caisse 571 : 40 000 encaissés, moins le manquant, plus l'excédent.
+    expect(
+      balance.rows.find((r: { accountNumber: string }) => r.accountNumber === '571'),
+    ).toMatchObject({ balanceDebit: 40_000 - 500 + 250 });
+    await expectIntegrity(f.schoolId);
+  });
+
+  it('rattrape l’écart d’une clôture approuvée avant l’activation de la comptabilité', async () => {
+    const student = await enrollStudent(app, s.secretariat, {
+      firstName: 'Awa',
+      lastName: 'Bello',
+      classId: f.class4AId,
+    });
+    const session = await http().post('/finance/cash-sessions/open').set(s.compta.auth);
+    await http()
+      .post('/finance/payments')
+      .set(s.compta.auth)
+      .send({ studentId: student.id, amount: 3000, method: 'CASH', idempotencyKey: randomUUID() })
+      .expect(201);
+    await http()
+      .post(`/finance/cash-sessions/${session.body.id}/close`)
+      .set(s.compta.auth)
+      .send({ countedAmount: 2000, note: 'Billet déchiré refusé à la banque' })
+      .expect(201);
+    await http()
+      .post(`/finance/cash-sessions/${session.body.id}/approve`)
+      .set(s.direction.auth)
+      .expect(201);
+    await enable(f.schoolId, ['accounting']);
+    await runAsSystem('test', () => app.get(AccountingService).syncAll(), f.schoolId);
+    expect([...(await lines('CASH_DIFFERENCE', session.body.id)).by.entries()]).toEqual([
+      ['6588', 1000],
+      ['571', -1000],
+    ]);
+  });
+
+  it('une école ne voit ni n’approuve les clôtures d’une autre', async () => {
+    await enable(f.schoolId, ['accounting']);
+    const other = await seedSchool('autre', 'AU');
+    await enable(other.schoolId, ['accounting']);
+    const so = await sessions(app, 'autre');
+    const session = await http().post('/finance/cash-sessions/open').set(s.compta.auth);
+    await http()
+      .post(`/finance/cash-sessions/${session.body.id}/close`)
+      .set(s.compta.auth)
+      .send({ countedAmount: 100, note: 'Pièce trouvée' })
+      .expect(201);
+    expect(
+      (await http().get('/finance/cash-sessions').set(so.direction.auth).expect(200)).body,
+    ).toEqual([]);
+    await http()
+      .post(`/finance/cash-sessions/${session.body.id}/approve`)
+      .set(so.direction.auth)
+      .expect(404);
+    await http()
+      .post(`/finance/cash-sessions/${session.body.id}/close`)
+      .set(so.compta.auth)
+      .send({ countedAmount: 0 })
+      .expect(404);
+    expect(
+      (await prisma.cashSession.findUniqueOrThrow({ where: { id: session.body.id } })).status,
+    ).toBe('CLOSED');
+    expect(await prisma.accountingEntry.count({ where: { sourceType: 'CASH_DIFFERENCE' } })).toBe(
+      0,
+    );
+  });
+});
+
+describe('tableau de bord : ce qui attend une seconde personne', () => {
+  it('compte dépenses, écritures, paie, avances et clôtures, jamais ce que la personne a saisi', async () => {
+    await enable(f.schoolId, ['accounting']);
+    const file = await employee(s.compta, f.users.teacher);
+    const todo = async (session: Session) =>
+      (await http().get('/dashboard').set(session.auth).expect(200)).body.todo;
+    expect(await todo(s.direction)).toMatchObject({
+      expensesToApprove: 0,
+      entriesToApprove: 0,
+      payrollToValidate: 0,
+      advancesToDecide: 0,
+      advancesToPay: 0,
+      cashSessionsToApprove: 0,
+    });
+
+    // Saisies de la comptabilité qui attendent la direction.
+    await http()
+      .post('/accounting/expenses')
+      .set(s.compta.auth)
+      .send({
+        supplierName: 'Librairie Saint-Paul',
+        date: today(),
+        label: 'Manuels scolaires',
+        amount: 350_000,
+        accountNumber: '6055',
+        method: 'BANK',
+        pieceRef: 'FAC-LSP-0460',
+      })
+      .expect(201);
+    await http()
+      .post('/accounting/entries')
+      .set(s.compta.auth)
+      .send({
+        journal: 'CA',
+        date: today(),
+        label: 'Versement des espèces à la banque',
+        lines: [
+          { accountNumber: '658', debit: 250_000 },
+          { accountNumber: '571', credit: 250_000 },
+        ],
+      })
+      .expect(201);
+    const adv = await http()
+      .post('/hr/advances')
+      .set(s.compta.auth)
+      .send({
+        employeeId: file,
+        amount: 50_000,
+        installments: 2,
+        firstMonth: '2026-11',
+        reason: 'Frais médicaux',
+      })
+      .expect(201);
+    await http().post(`/hr/payroll/${MONTH}/compute`).set(s.compta.auth).expect(201);
+    await http().post(`/hr/payroll/${MONTH}/submit`).set(s.compta.auth).expect(201);
+    const session = await http().post('/finance/cash-sessions/open').set(s.compta.auth);
+    await http()
+      .post(`/finance/cash-sessions/${session.body.id}/close`)
+      .set(s.compta.auth)
+      .send({ countedAmount: 0 })
+      .expect(201);
+
+    expect(await todo(s.direction)).toMatchObject({
+      expensesToApprove: 1,
+      entriesToApprove: 1,
+      payrollToValidate: 1,
+      advancesToDecide: 1,
+      advancesToPay: 0,
+      cashSessionsToApprove: 1,
+    });
+    // La personne qui a tout saisi n'a rien à valider elle-même.
+    expect(await todo(s.compta)).toMatchObject({
+      expensesToApprove: 0,
+      entriesToApprove: 0,
+      payrollToValidate: 0,
+      advancesToDecide: 0,
+      advancesToPay: 0,
+      cashSessionsToApprove: 0,
+    });
+
+    // Avance accordée par la direction : à verser par la comptabilité, puis plus rien.
+    await http()
+      .post(`/hr/advances/${adv.body.id}/approve`)
+      .set(s.direction.auth)
+      .send({})
+      .expect(201);
+    expect(await todo(s.direction)).toMatchObject({ advancesToDecide: 0, advancesToPay: 0 });
+    expect((await todo(s.compta)).advancesToPay).toBe(1);
+    await http()
+      .post(`/hr/advances/${adv.body.id}/pay`)
+      .set(s.compta.auth)
+      .send({ date: today(), method: 'CASH' })
+      .expect(201);
+    expect((await todo(s.compta)).advancesToPay).toBe(0);
   });
 });
 

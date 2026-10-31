@@ -4,6 +4,7 @@ import {
   CONTRACT_TYPE_LABELS,
   formatFcfa,
   formatPayrollMonth,
+  ofPayrollMonth,
   PAY_ELEMENT_KINDS,
   PAY_ELEMENT_LABELS,
   PAYROLL_STATUS_LABELS,
@@ -389,7 +390,7 @@ export default function PayrollPage() {
         <>
           <Card className="flex flex-col gap-2 text-sm">
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-base font-bold">Paie de {formatPayrollMonth(month)}</h2>
+              <h2 className="text-base font-bold">Paie {ofPayrollMonth(month)}</h2>
               {status ? (
                 <Badge tone={STATUS_TONE[status]}>{PAYROLL_STATUS_LABELS[status]}</Badge>
               ) : (
@@ -546,7 +547,7 @@ export default function PayrollPage() {
         amount={run?.totals?.net ?? 0}
         debitAccount="422 (rémunérations dues)"
         success="Paie marquée comme versée"
-        intro={`Salaires de ${formatPayrollMonth(month)} exécutés auprès de la banque, en caisse ou par Mobile Money.`}
+        intro={`Salaires ${ofPayrollMonth(month)} exécutés auprès de la banque, en caisse ou par Mobile Money.`}
       />
       <Sheet
         open={confirming}

@@ -9,6 +9,7 @@ import {
 } from '@ecole/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { TriangleAlert } from 'lucide-react';
+import { AuditLogCard } from '@/components/audit-log';
 import { StateBadge } from '@/components/billing';
 import { Button, ButtonLink } from '@/components/ui/button';
 import { Card, CardHeader, ErrorBlock, LoadingBlock, PageHeader } from '@/components/ui/card';
@@ -17,7 +18,7 @@ import { useToast } from '@/components/ui/toast';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import type { BillingWarning, Invoice, Plan } from '@/lib/billing';
-import { formatDate, formatDateTime, formatFcfa, plural } from '@/lib/format';
+import { formatDate, formatFcfa, plural } from '@/lib/format';
 
 interface SchoolSettings {
   id: string;
@@ -141,17 +142,6 @@ function CouncilRulesCard({
     </Card>
   );
 }
-interface AuditPage {
-  total: number;
-  items: {
-    id: string;
-    action: string;
-    entity: string;
-    createdAt: string;
-    reason: string | null;
-    actor: { firstName: string; lastName: string } | null;
-  }[];
-}
 
 interface Subscription {
   plan: Plan | null;
@@ -245,11 +235,6 @@ export default function SettingsPage() {
   const toast = useToast();
   const queryClient = useQueryClient();
   const q = useQuery({ queryKey: ['settings'], queryFn: () => api<SchoolSettings>('/settings') });
-  const audit = useQuery({
-    queryKey: ['audit'],
-    queryFn: () => api<AuditPage>('/audit-logs?pageSize=30'),
-    enabled: can('audit.read'),
-  });
   const save = useMutation({
     mutationFn: (body: Record<string, unknown>) => api('/settings', { method: 'PATCH', body }),
     onSuccess: () => {
@@ -379,33 +364,7 @@ export default function SettingsPage() {
           ))}
         </ul>
       </Card>
-      {can('audit.read') ? (
-        <Card id="audit">
-          <CardHeader
-            title="Journal d’audit"
-            subtitle={audit.data ? `${audit.data.total} actions enregistrées` : undefined}
-          />
-          <ol className="flex flex-col">
-            {audit.data?.items.map((a) => (
-              <li
-                key={a.id}
-                className="flex flex-col gap-0.5 border-t border-line py-2 text-sm first:border-t-0 sm:flex-row sm:gap-3"
-              >
-                <span className="w-36 shrink-0 text-muted tabular">
-                  {formatDateTime(a.createdAt)}
-                </span>
-                <span className="flex-1">
-                  <strong className="font-semibold">
-                    {a.actor ? `${a.actor.lastName} ${a.actor.firstName}` : 'Système'}
-                  </strong>{' '}
-                  · {a.action}
-                  {a.reason ? <span className="text-muted"> · motif : {a.reason}</span> : null}
-                </span>
-              </li>
-            ))}
-          </ol>
-        </Card>
-      ) : null}
+      {can('audit.read') ? <AuditLogCard /> : null}
     </>
   );
 }

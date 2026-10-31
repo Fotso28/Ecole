@@ -1,7 +1,7 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Bus, CircleAlert } from 'lucide-react';
+import { Bus, CircleAlert, Receipt } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
 import { Button, ButtonLink } from '@/components/ui/button';
@@ -9,15 +9,21 @@ import { Card, CardHeader, EmptyState, ErrorBlock, LoadingBlock } from '@/compon
 import { ChildSwitcher, useChildren } from '@/components/shell/parent-shell';
 import { InputField } from '@/components/ui/field';
 import { useToast } from '@/components/ui/toast';
-import { api } from '@/lib/api';
+import { Badge } from '@/components/ui/badge';
+import { api, openPdf } from '@/lib/api';
 import { formatCameroonPhone } from '@/lib/format';
 import { formatFcfa, formatShortDate, formatWeekday } from '@/lib/format';
 import { useChildOverview } from '@/lib/portal';
+import type { PaymentView } from '@/lib/types';
+import { cn } from '@/lib/utils';
 
 export default function PortalHome() {
-  const { children, selected } = useChildren();
+  const { children, selected, loading, error, retry } = useChildren();
   const q = useChildOverview(selected?.id);
-  if (!selected)
+  if (!selected) {
+    // « Aucun enfant » seulement une fois la liste reçue, jamais pendant le chargement.
+    if (loading) return <LoadingBlock label="Chargement de vos enfants…" />;
+    if (error) return <ErrorBlock error={error} onRetry={retry} />;
     return children.length === 0 ? (
       <EmptyState title="Aucun enfant rattaché à ce numéro">
         Contactez le secrétariat de l’école.
@@ -25,6 +31,7 @@ export default function PortalHome() {
     ) : (
       <LoadingBlock />
     );
+  }
   const unjustified =
     q.data?.absences.filter((a) => a.status === 'ABSENT' && !a.justification) ?? [];
   return (
@@ -146,6 +153,8 @@ export default function PortalHome() {
             )}
           </Card>
 
+          {q.data.finance ? <PaymentsCard payments={q.data.finance.payments} /> : null}
+
           <Link
             href="/portail/transport"
             className="flex min-h-14 items-center gap-3 rounded-[14px] border border-line bg-white px-4 py-3"
@@ -170,6 +179,61 @@ export default function PortalHome() {
       )}
       <ContactCard />
     </>
+  );
+}
+
+/** Derniers paiements de l'enfant (guichet, banque, Mobile Money) et leurs reçus. */
+function PaymentsCard({ payments }: { payments: PaymentView[] }) {
+  const toast = useToast();
+  const shown = payments.filter((p) => p.status === 'SUCCESS' || p.status === 'PENDING');
+  return (
+    <Card>
+      <CardHeader
+        title="Derniers paiements"
+        subtitle="Paiements faits au guichet, par banque ou par Mobile Money."
+      />
+      {shown.length === 0 ? (
+        <p className="text-sm text-muted">Aucun paiement enregistré pour l’instant.</p>
+      ) : (
+        <ul className="flex flex-col" aria-label="Derniers paiements">
+          {shown.map((p) => (
+            <li
+              key={p.id}
+              className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-line py-2.5 first:border-t-0"
+            >
+              <span className="flex min-w-0 flex-1 flex-col">
+                <strong className={cn('text-[15px] tabular', p.reversed && 'line-through')}>
+                  {formatFcfa(p.amount)}
+                </strong>
+                <span className="text-[13px] text-muted">
+                  {formatShortDate(p.confirmedAt ?? p.createdAt)} · {p.methodLabel}
+                  {p.receipt ? ` · reçu ${p.receipt.number}` : ''}
+                </span>
+              </span>
+              {p.reversed ? (
+                <Badge tone="danger">Annulé</Badge>
+              ) : p.status === 'PENDING' ? (
+                <Badge tone="info">En attente</Badge>
+              ) : null}
+              {p.receipt ? (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() =>
+                    openPdf(`/portal/payments/${p.id}/receipt.pdf`).catch(() =>
+                      toast('Reçu indisponible', 'error'),
+                    )
+                  }
+                >
+                  <Receipt className="size-4" aria-hidden />
+                  Reçu<span className="sr-only"> {p.receipt.number}</span>
+                </Button>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
   );
 }
 

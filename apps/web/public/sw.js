@@ -1,16 +1,20 @@
 /*
- * Service worker d'Ecole : lecture hors connexion du portail des parents et de « Ma journée ».
+ * Service worker d'Ecole : lecture hors connexion du portail des parents et de « Ma journée »,
+ * appel du car sans réseau.
  *
  * - Fichiers statiques (/_next/static, icônes) : cache d'abord.
- * - Pages du portail et de « Ma journée » : réseau d'abord, dernière version en secours. Ces pages
- *   sont des coquilles statiques, identiques pour tous : aucune donnée personnelle dedans.
- * - Données (GET /api/portal/*, /api/teacher/*) : réseau d'abord, dernière réponse en secours,
- *   marquée de l'heure d'enregistrement (en-tête x-ecole-cached-at) pour le bandeau.
+ * - Pages du portail, de « Ma journée » et de l'appel du car : réseau d'abord, dernière version en
+ *   secours. Ces pages sont des coquilles statiques, identiques pour tous : aucune donnée
+ *   personnelle dedans.
+ * - Données (GET /api/portal/*, /api/teacher/*, surveillances d'examen de l'enseignant, lignes et
+ *   feuilles d'appel du car) : réseau d'abord, dernière réponse en secours, marquée de l'heure
+ *   d'enregistrement (en-tête x-ecole-cached-at) pour le bandeau. L'appel du car pointé sans
+ *   réseau est gardé par la page elle-même (localStorage) et envoyé au retour du réseau.
  * - Jamais de cache : authentification, paiements, santé, fichiers et documents PDF (bulletins,
  *   relevés, reçus), toute requête autre que GET.
  *   Le cache des données est purgé par le site à la déconnexion.
  */
-const VERSION = 'v1';
+const VERSION = 'v2';
 const STATIC_CACHE = `ecole-static-${VERSION}`;
 const PAGE_CACHE = `ecole-pages-${VERSION}`;
 const DATA_CACHE = 'ecole-data';
@@ -24,13 +28,26 @@ const OFFLINE_PAGES = [
   '/portail/messages',
   '/portail/calendrier',
   '/enseignant',
+  '/transport/appel',
 ];
-const PAGE_SCOPE = /^\/(portail|enseignant)(\/|$)/;
-const DATA_SCOPE = /^\/api\/(portal|teacher)\//;
+const PAGE_SCOPE = /^\/(portail|enseignant|transport\/appel)(\/|$)/;
+const DATA_SCOPE =
+  /^\/api\/(portal\/|teacher\/|exams\/my-supervisions$|transport\/(my-lines|trips)$)/;
 const NEVER_CACHED =
   /\/(auth|health|payments?|paiement|finance|files?|webhooks?)(\/|$)|(\/|\.)pdf$/;
 
-const OFFLINE_HTML = `<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Hors connexion · Ecole</title></head><body style="font-family:system-ui,sans-serif;background:#F6F5F0;color:#14201A;padding:24px;max-width:28rem;margin:auto"><h1 style="font-size:1.5rem">Hors connexion</h1><p>Cette page n’a pas encore été consultée sur ce téléphone. Elle sera disponible au retour du réseau.</p><p><a href="/portail" style="color:#0E6B4A;font-weight:600">Retour à l’accueil</a></p></body></html>`;
+/**
+ * Page de secours hors connexion. Le lien de retour mène à l'accueil du rôle (profil gardé sur
+ * l'appareil) : portail pour un parent, « Ma journée » pour un enseignant, appel du car pour un
+ * chauffeur.
+ */
+function offlineHtml(path) {
+  const message = PAGE_SCOPE.test(path)
+    ? 'Cette page n’a pas encore été ouverte sur cet appareil avec le réseau. Elle sera disponible au retour du réseau.'
+    : 'Cette page n’est pas disponible hors connexion. Elle s’ouvrira au retour du réseau.';
+  const fallback = path.startsWith('/portail') ? '/portail' : '/connexion';
+  return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Hors connexion · Ecole</title></head><body style="font-family:system-ui,sans-serif;background:#F6F5F0;color:#14201A;padding:24px;max-width:28rem;margin:auto"><h1 style="font-size:1.5rem">Hors connexion</h1><p>${message}</p><p><a id="accueil" href="${fallback}" style="color:#0E6B4A;font-weight:600;display:inline-block;min-height:44px;line-height:44px">Retour à l’accueil</a></p><script>try{var m=JSON.parse(localStorage.getItem('ecole.offline.me')||'null');if(m){var r=m.roles||[];var h=m.kind==='parent'?'/portail':r.length&&r.every(function(x){return x==='TRANSPORT'})?'/transport/appel':r.indexOf('TEACHER')>=0?'/enseignant':r.indexOf('TRANSPORT')>=0?'/transport/appel':null;if(h)document.getElementById('accueil').href=h;}}catch(e){}</script></body></html>`;
+}
 
 /** Met en cache une page et les fichiers statiques qu'elle charge (JS, CSS). */
 async function cachePage(path) {
@@ -113,7 +130,7 @@ async function pageNetworkFirst(request, path) {
     const cached = await caches.match(path, { cacheName: PAGE_CACHE });
     return (
       cached ??
-      new Response(OFFLINE_HTML, {
+      new Response(offlineHtml(path), {
         status: 503,
         headers: { 'content-type': 'text/html; charset=utf-8' },
       })

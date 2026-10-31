@@ -8,7 +8,7 @@ import {
   type SubscriptionPricing,
 } from '@ecole/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, Plus } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
@@ -140,8 +140,139 @@ function NewPlanSheet({ open, onClose }: { open: boolean; onClose: () => void })
   );
 }
 
+/** « Lycée Bilingue de Bafoussam » → « lycee-bilingue-de-bafoussam ». */
+function slugify(name: string): string {
+  return name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40)
+    .replace(/-+$/, '');
+}
+
+function NewSchoolSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const [name, setName] = useState('');
+  const [slug, setSlug] = useState('');
+  const [slugEdited, setSlugEdited] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const create = useMutation({
+    mutationFn: (body: Record<string, unknown>) =>
+      api<{ school: { name: string }; existingUser: boolean }>('/platform/schools', {
+        method: 'POST',
+        body,
+      }),
+    onSuccess: (r, body) => {
+      const email = (body.director as { email: string }).email;
+      toast(
+        r.existingUser
+          ? `Établissement « ${r.school.name} » créé · ${email} y est rattaché comme direction (mot de passe inchangé)`
+          : `Établissement « ${r.school.name} » créé · la direction se connecte avec ${email}`,
+      );
+      void queryClient.invalidateQueries({ queryKey: ['billing-overview'] });
+      onClose();
+    },
+    onError: (e) => setError(e instanceof Error ? e.message : 'Erreur'),
+  });
+  return (
+    <Sheet open={open} onClose={onClose} title="Nouvel établissement">
+      <form
+        className="flex flex-col gap-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          setError(null);
+          const fd = new FormData(e.currentTarget);
+          const text = (k: string) => String(fd.get(k) ?? '').trim();
+          create.mutate({
+            name: name.trim(),
+            slug,
+            city: text('city'),
+            matriculePrefix: text('matriculePrefix').toUpperCase(),
+            director: {
+              firstName: text('firstName'),
+              lastName: text('lastName'),
+              email: text('email'),
+              password: String(fd.get('password') ?? ''),
+            },
+          });
+        }}
+      >
+        <InputField
+          label="Nom de l’établissement"
+          value={name}
+          onChange={(e) => {
+            setName(e.target.value);
+            if (!slugEdited) setSlug(slugify(e.target.value));
+          }}
+          required
+          maxLength={80}
+        />
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <InputField label="Ville" name="city" required maxLength={80} />
+          <InputField
+            label="Préfixe des matricules"
+            name="matriculePrefix"
+            required
+            pattern="[A-Za-z0-9]{1,6}"
+            maxLength={6}
+            hint="1 à 6 lettres ou chiffres, par exemple LBB"
+            autoCapitalize="characters"
+          />
+        </div>
+        <InputField
+          label="Identifiant"
+          value={slug}
+          onChange={(e) => {
+            setSlugEdited(true);
+            setSlug(e.target.value.toLowerCase());
+          }}
+          required
+          pattern="[a-z0-9\-]{3,40}"
+          hint="Minuscules, chiffres et tirets ; unique sur la plateforme"
+        />
+        <fieldset className="flex flex-col gap-3">
+          <legend className="mb-1 text-sm font-semibold">Direction de l’établissement</legend>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <InputField label="Prénom" name="firstName" required maxLength={80} />
+            <InputField label="Nom" name="lastName" required maxLength={80} />
+          </div>
+          <InputField
+            label="Adresse e-mail"
+            name="email"
+            type="email"
+            required
+            autoComplete="off"
+            hint="Un compte existant est rattaché tel quel, sans changer son mot de passe."
+          />
+          <InputField
+            label="Mot de passe provisoire"
+            name="password"
+            type="password"
+            required
+            minLength={10}
+            autoComplete="new-password"
+            hint="10 caractères au minimum, à transmettre à la direction."
+          />
+        </fieldset>
+        {error ? (
+          <p role="alert" className="text-sm font-medium text-danger">
+            {error}
+          </p>
+        ) : null}
+        <Button type="submit" loading={create.isPending}>
+          Créer l’établissement
+        </Button>
+      </form>
+    </Sheet>
+  );
+}
+
 export default function PlatformBillingPage() {
   const [newPlan, setNewPlan] = useState(false);
+  const [newSchool, setNewSchool] = useState(0);
   const q = useQuery({
     queryKey: ['billing-overview'],
     queryFn: () => api<Overview>('/platform/billing/schools'),
@@ -158,6 +289,12 @@ export default function PlatformBillingPage() {
       <PageHeader
         title="Facturation des écoles"
         subtitle="Abonnements calculés sur les effectifs et les modules activés. Aucune donnée d’élève n’est consultée."
+        actions={
+          <Button onClick={() => setNewSchool((n) => n + 1)}>
+            <Plus className="size-4" aria-hidden />
+            Nouvel établissement
+          </Button>
+        }
       />
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Facturé" value={formatFcfa(summary.invoiced, false)} hint="FCFA" />
@@ -202,7 +339,7 @@ export default function PlatformBillingPage() {
       <h2 className="text-lg font-bold">Établissements</h2>
       {schools.length === 0 ? (
         <EmptyState title="Aucun établissement">
-          Créez un établissement pour le facturer.
+          Créez un établissement avec le bouton « Nouvel établissement » pour le facturer.
         </EmptyState>
       ) : (
         <>
@@ -291,6 +428,8 @@ export default function PlatformBillingPage() {
         </>
       )}
       <NewPlanSheet open={newPlan} onClose={() => setNewPlan(false)} />
+      {/* Nouvelle clé à chaque ouverture : formulaire vide. */}
+      <NewSchoolSheet key={newSchool} open={newSchool > 0} onClose={() => setNewSchool(0)} />
     </>
   );
 }

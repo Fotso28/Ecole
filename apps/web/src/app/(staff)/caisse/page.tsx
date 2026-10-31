@@ -5,14 +5,21 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, Clock, Printer, Search, X } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useMemo, useState } from 'react';
-import { Badge, LINE_BADGE } from '@/components/ui/badge';
+import { Badge, lineBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, ErrorBlock, LoadingBlock, PageHeader } from '@/components/ui/card';
-import { InputField } from '@/components/ui/field';
+import { InputField, TextareaField } from '@/components/ui/field';
 import { Sheet } from '@/components/ui/sheet';
 import { useToast } from '@/components/ui/toast';
 import { api, ApiError, openPdf } from '@/lib/api';
-import { formatFcfa, formatShortDate, initials, PAYMENT_METHOD_LABELS, plural } from '@/lib/format';
+import {
+  formatFcfa,
+  formatShortDate,
+  formatSignedFcfa,
+  initials,
+  PAYMENT_METHOD_LABELS,
+  plural,
+} from '@/lib/format';
 import type { Account, Paged, PaymentView, StudentListItem } from '@/lib/types';
 import { cn, newIdempotencyKey } from '@/lib/utils';
 
@@ -56,6 +63,7 @@ function CashContent() {
   const [result, setResult] = useState<PaymentResult | null>(null);
   const [closeOpen, setCloseOpen] = useState(false);
   const [counted, setCounted] = useState('');
+  const [closeNote, setCloseNote] = useState('');
 
   useEffect(() => {
     const id = setTimeout(() => setDebounced(search.trim()), 300);
@@ -148,21 +156,27 @@ function CashContent() {
     mutationFn: () =>
       api<{ difference: number; expectedAmount: number }>(
         `/finance/cash-sessions/${session.data?.id}/close`,
-        { method: 'POST', body: { countedAmount: toInt(counted) } },
+        {
+          method: 'POST',
+          body: { countedAmount: toInt(counted), note: closeNote.trim() || undefined },
+        },
       ),
     onSuccess: (r) => {
       setCloseOpen(false);
       setCounted('');
+      setCloseNote('');
       toast(
         r.difference === 0
           ? 'Caisse clôturée sans écart'
-          : `Caisse clôturée · écart de ${formatFcfa(r.difference)}`,
+          : `Caisse clôturée · écart de ${formatSignedFcfa(r.difference)}, à faire approuver`,
         r.difference === 0 ? 'success' : 'error',
       );
       void queryClient.invalidateQueries({ queryKey: ['cash-session'] });
     },
     onError: (e) => toast(e instanceof Error ? e.message : 'Erreur', 'error'),
   });
+
+  const closeDifference = toInt(counted) - (session.data?.expected ?? 0);
 
   const reset = () => {
     setResult(null);
@@ -371,9 +385,7 @@ function CashContent() {
                               <span className="text-sm font-semibold tabular">
                                 {payable ? formatFcfa(l.outstanding) : formatFcfa(l.due)}
                               </span>
-                              <Badge tone={LINE_BADGE[l.status].tone}>
-                                {LINE_BADGE[l.status].label}
-                              </Badge>
+                              <Badge tone={lineBadge(l).tone}>{lineBadge(l).label}</Badge>
                             </span>
                           </label>
                         </li>
@@ -543,7 +555,33 @@ function CashContent() {
             onChange={(e) => setCounted(e.target.value.replace(/[^\d]/g, ''))}
             required
           />
-          <Button type="submit" loading={closeSession.isPending} disabled={!counted}>
+          {counted && closeDifference !== 0 ? (
+            <p
+              className={cn(
+                'rounded-[10px] p-3 text-sm font-semibold',
+                closeDifference < 0 ? 'bg-danger-soft text-danger' : 'bg-warn-soft text-warn',
+              )}
+              aria-live="polite"
+            >
+              {closeDifference < 0 ? 'Manquant' : 'Excédent'} :{' '}
+              <span className="tabular">{formatSignedFcfa(closeDifference)}</span>
+            </p>
+          ) : null}
+          <TextareaField
+            label="Motif de l’écart"
+            value={closeNote}
+            onChange={(e) => setCloseNote(e.target.value)}
+            maxLength={300}
+            rows={2}
+            optional={!counted || closeDifference === 0}
+            required={!!counted && closeDifference !== 0}
+            hint="Obligatoire en cas d’écart. La clôture est ensuite approuvée par une autre personne."
+          />
+          <Button
+            type="submit"
+            loading={closeSession.isPending}
+            disabled={!counted || (closeDifference !== 0 && !closeNote.trim())}
+          >
             Clôturer
           </Button>
         </form>

@@ -140,6 +140,7 @@ export const SYSCOHADA_CHART: readonly ChartAccount[] = [
   { number: '641', label: 'Impôts et taxes directs' },
   { number: '65', label: 'Autres charges' },
   { number: '658', label: 'Charges diverses' },
+  { number: '6588', label: 'Autres charges diverses (manquants de caisse)' },
   { number: '66', label: 'Charges de personnel' },
   { number: '661', label: 'Rémunérations directes versées au personnel' },
   { number: '663', label: 'Indemnités forfaitaires versées au personnel' },
@@ -164,6 +165,7 @@ export const SYSCOHADA_CHART: readonly ChartAccount[] = [
   { number: '718', label: 'Autres subventions d’exploitation' },
   { number: '75', label: 'Autres produits' },
   { number: '758', label: 'Produits divers (dons)' },
+  { number: '7588', label: 'Autres produits divers (excédents de caisse)' },
   { number: '77', label: 'Revenus financiers et produits assimilés' },
   { number: '771', label: 'Intérêts de prêts et placements' },
 
@@ -437,6 +439,39 @@ export function expensePostings(e: {
       ],
     },
   ];
+}
+
+/** Comptes des écarts de caisse constatés à la clôture : manquant en charge, excédent en produit. */
+export const CASH_DIFFERENCE_ACCOUNTS = { shortage: '6588', surplus: '7588' } as const;
+
+/**
+ * Écart de caisse d'une clôture approuvée, au journal de caisse :
+ * - manquant (compté < attendu) : 6588 au débit, 571 au crédit ;
+ * - excédent (compté > attendu) : 571 au débit, 7588 au crédit ;
+ * - aucun écart : aucune écriture (null).
+ */
+export function cashDifferencePosting(p: {
+  expected: number;
+  counted: number;
+  label: string;
+}): TuitionPosting | null {
+  assertAmount(p.expected, 'montant attendu');
+  assertAmount(p.counted, 'montant compté');
+  const difference = p.counted - p.expected;
+  if (difference === 0) return null;
+  const amount = Math.abs(difference);
+  const cash = PAYMENT_METHOD_ACCOUNTS.CASH;
+  const lines: EntryLine[] =
+    difference < 0
+      ? [
+          { accountNumber: CASH_DIFFERENCE_ACCOUNTS.shortage, debit: amount, credit: 0 },
+          { accountNumber: cash, debit: 0, credit: amount },
+        ]
+      : [
+          { accountNumber: cash, debit: amount, credit: 0 },
+          { accountNumber: CASH_DIFFERENCE_ACCOUNTS.surplus, debit: 0, credit: amount },
+        ];
+  return { journal: PAYMENT_METHOD_JOURNALS.CASH, label: p.label.slice(0, 200), lines };
 }
 
 /** Une dépense doit être validée par une autre personne à partir du seuil (0 : toujours). */
@@ -770,7 +805,13 @@ export function carryForwardLines(balances: readonly AccountBalance[]): EntryLin
 
 // ---------------------------------------------------------------- Schémas
 
-const fcfa = z.number().int().min(0).max(10_000_000_000);
+/** Plafond d'un montant comptable : reste loin de la limite des entiers 32 bits de la base. */
+const MAX_ACCOUNTING_AMOUNT = 1_000_000_000;
+const fcfa = z
+  .number()
+  .int('Montant entier en FCFA')
+  .min(0, 'Le montant ne peut pas être négatif')
+  .max(MAX_ACCOUNTING_AMOUNT, 'Montant trop élevé (1 000 000 000 FCFA au plus)');
 const accountNumber = z.string().trim().regex(ACCOUNT_NUMBER_RE, 'Numéro de compte invalide');
 
 export const accountCreateSchema = z.object({
@@ -820,6 +861,8 @@ export const expenseCreateSchema = z
     accountNumber,
     method: z.enum(PAYMENT_METHODS),
     pieceRef: z.string().trim().min(1).max(60),
+    /** Confirmation explicite d'une pièce déjà saisie pour le même fournisseur. */
+    allowDuplicatePiece: z.boolean().optional(),
   })
   .refine((e) => e.supplierId || e.supplierName, {
     message: 'Indiquez le fournisseur',

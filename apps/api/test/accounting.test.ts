@@ -402,6 +402,76 @@ describe('dépenses', () => {
     await expense({ amount: 1_000, supplierName: undefined }).expect(400);
   });
 
+  it('refus de validation précis : le champ et la raison', async () => {
+    // Montant collé à la saisie précédente : 45000 puis 350000.
+    const tooBig = await expense({ amount: 45000350000 }).expect(400);
+    expect(tooBig.body.message).toBe('Montant : Montant trop élevé (1 000 000 000 FCFA au plus)');
+    expect(tooBig.body.errors).toEqual([
+      { path: 'amount', message: 'Montant trop élevé (1 000 000 000 FCFA au plus)' },
+    ]);
+    const empty = await expense({ amount: 1_000, pieceRef: '' }).expect(400);
+    expect(empty.body.message).toBe('Pièce de référence : Champ obligatoire');
+    const entry = await http()
+      .post('/accounting/entries')
+      .set(s.compta.auth)
+      .send({
+        journal: 'OD',
+        date: new Date().toISOString().slice(0, 10),
+        label: 'Régularisation',
+        lines: [
+          { accountNumber: '658', debit: 1000 },
+          { accountNumber: '571', credit: 'mille' },
+        ],
+      })
+      .expect(400);
+    expect(entry.body.message).toBe('Ligne 2 · Crédit : Nombre attendu');
+  });
+
+  it('avertit quand la même pièce du même fournisseur est saisie deux fois', async () => {
+    const first = await expense({
+      supplierName: 'Librairie Saint-Paul',
+      label: 'Ramette de papier A4',
+      amount: 3500,
+      accountNumber: '6055',
+      method: 'CASH',
+      pieceRef: 'FAC-LSP-0458',
+    }).expect(201);
+    const again = await expense({
+      supplierName: 'Librairie Saint-Paul',
+      label: 'Ramette de papier A4',
+      amount: 3500,
+      accountNumber: '6055',
+      method: 'CASH',
+      pieceRef: 'fac-lsp-0458',
+    }).expect(409);
+    expect(again.body.code).toBe('DUPLICATE_PIECE');
+    expect(again.body.message).toMatch(
+      /^La pièce FAC-LSP-0458 de Librairie Saint-Paul est déjà enregistrée \(dépense du \d\d\/\d\d\/\d{4}, 3.500.FCFA : « Ramette de papier A4 »\)\.$/,
+    );
+    expect(await prisma.expense.count()).toBe(1);
+    // Même numéro chez un autre fournisseur : aucun avertissement.
+    await expense({
+      supplierName: 'Papeterie du Centre',
+      amount: 3500,
+      pieceRef: 'FAC-LSP-0458',
+    }).expect(201);
+    // Confirmation explicite : enregistrée et journalisée comme telle.
+    const confirmed = await expense({
+      supplierName: 'Librairie Saint-Paul',
+      label: 'Ramette de papier A4 (seconde livraison)',
+      amount: 3500,
+      accountNumber: '6055',
+      method: 'CASH',
+      pieceRef: 'FAC-LSP-0458',
+      allowDuplicatePiece: true,
+    }).expect(201);
+    expect(confirmed.body.id).not.toBe(first.body.id);
+    const log = await prisma.auditLog.findFirstOrThrow({
+      where: { action: 'accounting.expense_created', entityId: confirmed.body.id },
+    });
+    expect(log.after).toMatchObject({ duplicatePiece: true });
+  });
+
   it('au-delà du seuil : validation par une autre personne', async () => {
     const res = await expense({ amount: 150_000 }).expect(201);
     expect(res.body).toMatchObject({

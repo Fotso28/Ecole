@@ -473,7 +473,7 @@ function NotesContent() {
                           error
                             ? 'border-2 border-danger'
                             : raw === ''
-                              ? 'border-dashed border-[#b9b6aa]'
+                              ? 'border-dashed border-[#b4bbd0]'
                               : 'border-line',
                         )}
                       >
@@ -563,13 +563,13 @@ function NotesContent() {
                           ) : null}
                         </th>
                       ))}
-                      <th className="w-24 border-l-2 border-line-strong bg-[#eef5f1] px-3 py-2.5 text-right text-xs font-bold tracking-[0.06em] text-primary uppercase">
+                      <th className="w-24 border-l-2 border-line-strong bg-[#eef2fc] px-3 py-2.5 text-right text-xs font-bold tracking-[0.06em] text-primary uppercase">
                         Moyenne
                       </th>
-                      <th className="w-20 bg-[#eef5f1] px-3 py-2.5 text-right text-xs font-bold tracking-[0.06em] text-primary uppercase">
+                      <th className="w-20 bg-[#eef2fc] px-3 py-2.5 text-right text-xs font-bold tracking-[0.06em] text-primary uppercase">
                         Rang
                       </th>
-                      <th className="w-28 bg-[#eef5f1] px-3 py-2.5 text-left text-xs font-bold tracking-[0.06em] text-primary uppercase">
+                      <th className="w-28 bg-[#eef2fc] px-3 py-2.5 text-left text-xs font-bold tracking-[0.06em] text-primary uppercase">
                         Appréciation
                       </th>
                     </tr>
@@ -608,7 +608,7 @@ function NotesContent() {
                                   error
                                     ? 'border-2 border-danger bg-danger-soft'
                                     : raw === ''
-                                      ? 'border-dashed border-[#b9b6aa]'
+                                      ? 'border-dashed border-[#b4bbd0]'
                                       : raw === 'abs' || raw === 'disp'
                                         ? 'border-line bg-info-soft text-info'
                                         : 'border-line',
@@ -620,16 +620,16 @@ function NotesContent() {
                         <td
                           title={r.formula ?? 'Moyenne non calculée : note manquante ou invalide'}
                           className={cn(
-                            'border-l-2 border-line-strong bg-[#f7faf8] px-3 py-1.5 text-right font-bold tabular',
+                            'border-l-2 border-line-strong bg-[#f6f8fd] px-3 py-1.5 text-right font-bold tabular',
                             r.averageCenti !== null && r.averageCenti < 1000 && 'text-danger',
                           )}
                         >
                           {formatGrade(r.averageCenti)}
                         </td>
-                        <td className="bg-[#f7faf8] px-3 py-1.5 text-right tabular">
+                        <td className="bg-[#f6f8fd] px-3 py-1.5 text-right tabular">
                           {r.rank?.label ?? '—'}
                         </td>
-                        <td className="bg-[#f7faf8] px-3 py-1.5 text-[13px] text-muted">
+                        <td className="bg-[#f6f8fd] px-3 py-1.5 text-[13px] text-muted">
                           {r.appreciation ?? (r.incomplete ? 'Note manquante' : '—')}
                         </td>
                       </tr>

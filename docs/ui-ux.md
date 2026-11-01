@@ -2,25 +2,25 @@
 
 Maquettes interactives : https://claude.ai/artifact/Efakhub7NCyMYe14QyDzAy (privées tant qu'elles ne sont pas partagées depuis le menu Partager).
 
-## 1. Direction visuelle « Vert kola »
+## 1. Direction visuelle « Bleu encre »
 
-Un outil de travail calme : fond papier chaud, vert profond pour l'action, safran réservé à ce qui demande l'attention. Pas de dégradés, pas d'images décoratives (connexions lentes).
+Le bleu du stylo et le jaune du surligneur, comme dans un cahier d'écolier : fond blanc légèrement bleuté, bleu encre pour l'action, jaune réservé à ce qui demande l'attention. Le rouge n'est utilisé que pour les alertes (impayé, absence, erreur). Pas de dégradés, pas d'images décoratives (connexions lentes). Cette direction remplace « Vert kola » (novembre 2026) ; les maquettes interactives ci-dessus restent dans l'ancienne palette.
 
-### Couleurs (tokens du thème shadcn/ui)
+### Couleurs (tokens du thème, `apps/web/src/app/globals.css`)
 
-| Token                                  | Valeur                | Usage                                                |
-| -------------------------------------- | --------------------- | ---------------------------------------------------- |
-| `--primary`                            | `#0B6447`             | Action principale, lien, sélection (7,2:1 sur blanc) |
-| `--primary-soft`                       | `#E3F0EA`             | Fond des états « succès », éléments sélectionnés     |
-| `--sidebar`                            | `#0E2A20`             | Barre latérale, en-têtes de documents                |
-| `--accent`                             | `#E8A317`             | Élément actif, badge de compteur. Jamais en texte    |
-| `--foreground`                         | `#14201A`             | Texte principal                                      |
-| `--muted-foreground`                   | `#55615A`             | Texte secondaire (5,9:1 sur le fond)                 |
-| `--background`                         | `#F6F5F0`             | Fond d'application ; surfaces en `#FFFFFF`           |
-| `--border`                             | `#E4E2DA`             | Bordures des cartes ; `#D5D3CA` pour les champs      |
-| `--warning` / `--warning-soft`         | `#8A5A00` / `#FDF3DC` | Partiel, retard, seuil atteint                       |
-| `--destructive` / `--destructive-soft` | `#B3261E` / `#FBE9E7` | Impayé, absence, erreur                              |
-| `--info` / `--info-soft`               | `#1F5FBF` / `#E7EEFA` | Justifié, transféré, en attente                      |
+| Token                                  | Valeur                | Usage                                                        |
+| -------------------------------------- | --------------------- | ------------------------------------------------------------ |
+| `--primary`                            | `#2443B5`             | Action principale, lien, sélection (8,3:1 sur blanc)         |
+| `--primary-soft`                       | `#E8EDFB`             | Fond des états « succès », éléments sélectionnés             |
+| `--sidebar` (`night`)                  | `#16205C`             | Barre latérale, cartes mises en avant, en-têtes de documents |
+| `--accent` (`saffron`)                 | `#FFDD55`             | Élément actif, badge de compteur, retard. Jamais en texte    |
+| `--foreground`                         | `#12183A`             | Texte principal                                              |
+| `--muted-foreground`                   | `#525A78`             | Texte secondaire (6,4:1 sur le fond)                         |
+| `--background`                         | `#F7F8FB`             | Fond d'application ; surfaces en `#FFFFFF`                   |
+| `--border`                             | `#E1E5EF`             | Bordures des cartes ; `#CCD3E3` pour les champs              |
+| `--warning` / `--warning-soft`         | `#8A5A00` / `#FDF3DC` | Partiel, retard, seuil atteint                               |
+| `--destructive` / `--destructive-soft` | `#B3261E` / `#FBE9E7` | Impayé, absence, erreur                                      |
+| `--info` / `--info-soft`               | `#0F6E8C` / `#E3F2F6` | Justifié, transféré, en attente                              |
 
 Tous les couples texte/fond dépassent 4,5:1. Un statut n'est jamais porté par la couleur seule : il a toujours un libellé.
 

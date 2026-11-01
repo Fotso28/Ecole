@@ -32,7 +32,7 @@ export function renderConvocations(data: Convocations): Promise<Buffer> {
       .fontSize(8)
       .text(t(`${data.school.city} · Année scolaire ${data.year}`), left, y + 15);
     y += 30;
-    doc.rect(left, y, W, 22).fill('#E3F0EA');
+    doc.rect(left, y, W, 22).fill('#E8EDFB');
     doc
       .fillColor(NIGHT)
       .font('Helvetica-Bold')
@@ -88,7 +88,7 @@ export function renderConvocations(data: Convocations): Promise<Buffer> {
       { label: 'Durée', w: W * 0.14 },
       { label: 'Épreuve', w: W * 0.42 },
     ];
-    doc.rect(left, y, W, 14).fill('#F1F3F2');
+    doc.rect(left, y, W, 14).fill('#F1F3F8');
     let x = left;
     doc.fillColor(MUTED).font('Helvetica-Bold').fontSize(7.5);
     for (const c of cols) {
@@ -181,7 +181,7 @@ export function renderAttendanceSheets(data: Sheets): Promise<Buffer> {
       .fontSize(8)
       .text(t(data.school.city), left, y + 15);
     y += 30;
-    doc.rect(left, y, W, 22).fill('#E3F0EA');
+    doc.rect(left, y, W, 22).fill('#E8EDFB');
     doc
       .fillColor(NIGHT)
       .font('Helvetica-Bold')
@@ -211,7 +211,7 @@ export function renderAttendanceSheets(data: Sheets): Promise<Buffer> {
         y,
       );
     y += 18;
-    doc.rect(left, y, W, 16).fill('#F1F3F2');
+    doc.rect(left, y, W, 16).fill('#F1F3F8');
     let x = left;
     doc.fillColor(MUTED).font('Helvetica-Bold').fontSize(8);
     for (const c of cols) {

@@ -17,7 +17,7 @@ const path = require('node:path');
   const fonts = await page.evaluate(() =>
     [...document.fonts].filter((f) => f.status === 'loaded').map((f) => f.family),
   );
-  if (!fonts.includes('Bricolage Grotesque') || !fonts.includes('Plus Jakarta Sans'))
+  if (!fonts.includes('Lexend'))
     console.warn('Attention : polices Google Fonts non chargées (accès réseau ?)');
   // Un contenu qui dépasse le bas de sa page serait coupé à l'impression.
   const overflow = await page.evaluate(() =>

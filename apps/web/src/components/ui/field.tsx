@@ -10,7 +10,7 @@ import { cn } from '@/lib/utils';
 
 // 16 px sur téléphone : évite le zoom automatique d'iOS au focus.
 export const controlClass =
-  'w-full rounded-[10px] border border-line-strong bg-white px-3 text-base text-ink placeholder:text-[#6b7570] lg:text-sm aria-[invalid=true]:border-2 aria-[invalid=true]:border-danger disabled:bg-paper disabled:text-muted';
+  'w-full rounded-[10px] border border-line-strong bg-white px-3 text-base text-ink placeholder:text-[#6b7190] lg:text-sm aria-[invalid=true]:border-2 aria-[invalid=true]:border-danger disabled:bg-paper disabled:text-muted';
 
 interface FieldShellProps {
   label: ReactNode;

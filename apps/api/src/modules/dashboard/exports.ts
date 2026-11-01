@@ -60,7 +60,7 @@ export async function indicatorsWorkbook(e: IndicatorsExport): Promise<Buffer> {
   const header = (ws: ExcelJS.Worksheet) => {
     const row = ws.getRow(1);
     row.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0E2A20' } };
+    row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF16205C' } };
     ws.views = [{ state: 'frozen', ySplit: 1 }];
   };
 

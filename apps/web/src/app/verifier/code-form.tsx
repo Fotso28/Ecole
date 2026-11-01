@@ -21,7 +21,7 @@ export function VerifyCodeForm({ defaultValue = '' }: { defaultValue?: string })
           defaultValue={defaultValue}
           placeholder="Par exemple MXHE RZZB 6PEM"
           aria-describedby="verify-code-hint"
-          className="h-12 w-full rounded-[10px] border border-line-strong bg-white px-3 text-base tracking-wide text-ink uppercase placeholder:normal-case placeholder:tracking-normal placeholder:text-[#6b7570]"
+          className="h-12 w-full rounded-[10px] border border-line-strong bg-white px-3 text-base tracking-wide text-ink uppercase placeholder:normal-case placeholder:tracking-normal placeholder:text-[#6b7190]"
         />
         <span id="verify-code-hint" className="text-[13px] text-muted">
           Le code figure sous le QR code, en bas du document.

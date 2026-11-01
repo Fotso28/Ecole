@@ -37,7 +37,7 @@ export function renderTranscript(data: TranscriptData): Promise<Buffer> {
     .strokeColor(NIGHT)
     .stroke();
   y += 8;
-  doc.rect(left, y, W, 22).fill('#E3F0EA');
+  doc.rect(left, y, W, 22).fill('#E8EDFB');
   doc
     .fillColor(NIGHT)
     .font('Helvetica-Bold')
@@ -130,7 +130,7 @@ export function renderTranscript(data: TranscriptData): Promise<Buffer> {
 
   row(Object.fromEntries(cols.map((c) => [c.key, c.label])), {
     bold: true,
-    fill: '#F1F0EA',
+    fill: '#EFF1F6',
     height: 17,
   });
   for (const g of data.groups) {
@@ -138,7 +138,7 @@ export function renderTranscript(data: TranscriptData): Promise<Buffer> {
       doc.addPage();
       y = 30;
     }
-    doc.rect(left, y, W, 14).fill('#FAFAF7');
+    doc.rect(left, y, W, 14).fill('#F8F9FC');
     doc.rect(left, y, W, 14).lineWidth(0.6).strokeColor(RULE).stroke();
     doc
       .fillColor(NIGHT)
@@ -174,7 +174,7 @@ export function renderTranscript(data: TranscriptData): Promise<Buffer> {
   data.columnGeneralAverages.forEach((v, i) => {
     totals[`c${i}`] = grade(v);
   });
-  row(totals, { bold: true, fill: '#E3F0EA', height: 18 });
+  row(totals, { bold: true, fill: '#E8EDFB', height: 18 });
   y += 10;
 
   if (y + 90 > bottom) {

@@ -146,7 +146,7 @@ function StudentsContent() {
               )}
             >
               {label}
-              <span className={cn('tabular', on ? 'text-[#d7ebe1]' : 'text-muted')}>{count}</span>
+              <span className={cn('tabular', on ? 'text-[#dbe3fb]' : 'text-muted')}>{count}</span>
             </button>
           );
         })}

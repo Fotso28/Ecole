@@ -215,7 +215,7 @@ export function EventCalendar({
                             selected
                               ? 'border-2 border-primary'
                               : d.date === today
-                                ? 'border-saffron'
+                                ? 'border-2 border-saffron'
                                 : 'border-line',
                             d.date === today && 'font-bold',
                           )}

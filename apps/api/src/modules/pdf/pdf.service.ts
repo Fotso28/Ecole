@@ -12,10 +12,10 @@ import { env } from '../../config/env';
 import { Db, InjectDb } from '../../common/prisma';
 import type { ReportCardData } from '../report-cards/report-cards.service';
 
-export const INK = '#14201A';
-export const MUTED = '#55615A';
-export const RULE = '#8A928D';
-export const NIGHT = '#0E2A20';
+export const INK = '#12183A';
+export const MUTED = '#525A78';
+export const RULE = '#8A90A8';
+export const NIGHT = '#16205C';
 const SPECIAL_SPACES = new RegExp(
   `[${String.fromCharCode(0x202f)}${String.fromCharCode(0xa0)}]`,
   'g',
@@ -113,7 +113,7 @@ export class PdfService {
     y += 8;
 
     // Titre.
-    doc.rect(left, y, W, 22).fill('#E3F0EA');
+    doc.rect(left, y, W, 22).fill('#E8EDFB');
     doc
       .fillColor(NIGHT)
       .font('Helvetica-Bold')
@@ -227,11 +227,11 @@ export class PdfService {
     };
     drawRow(Object.fromEntries(cols.map((c) => [c.key, c.label])), {
       bold: true,
-      fill: '#F1F0EA',
+      fill: '#EFF1F6',
       height: 17,
     });
     for (const g of data.groups) {
-      doc.rect(left, y, W, 14).fill('#FAFAF7');
+      doc.rect(left, y, W, 14).fill('#F8F9FC');
       doc.rect(left, y, W, 14).lineWidth(0.6).strokeColor(RULE).stroke();
       doc
         .fillColor(NIGHT)
@@ -265,7 +265,7 @@ export class PdfService {
           coef: String(g.totalCoefficient),
           total: grade(g.totalPointsCenti),
         },
-        { bold: true, fill: '#FAFAF7' },
+        { bold: true, fill: '#F8F9FC' },
       );
     }
     drawRow(
@@ -274,7 +274,7 @@ export class PdfService {
         coef: String(data.totals.totalCoefficient),
         total: grade(data.totals.totalPointsCenti),
       },
-      { bold: true, fill: '#E3F0EA', height: 17 },
+      { bold: true, fill: '#E8EDFB', height: 17 },
     );
     y += 8;
 
@@ -369,7 +369,7 @@ export class PdfService {
     // Bilan annuel (bulletin du dernier trimestre).
     if (annual) {
       const annualH = 50;
-      doc.rect(left, y, W, annualH).fill('#E3F0EA');
+      doc.rect(left, y, W, annualH).fill('#E8EDFB');
       doc.rect(left, y, W, annualH).lineWidth(1.5).strokeColor(NIGHT).stroke();
       doc
         .fillColor(NIGHT)
@@ -566,7 +566,7 @@ export class PdfService {
       row('Bordereau', `${payment.bankName ?? ''} ${payment.bankReference}`.trim());
     if (payment.payerPhone) row('Payeur', formatCameroonPhone(payment.payerPhone));
     y += 4;
-    doc.rect(left, y, W, 34).fill('#E3F0EA');
+    doc.rect(left, y, W, 34).fill('#E8EDFB');
     doc
       .fillColor(NIGHT)
       .font('Helvetica')

@@ -4,10 +4,10 @@ import * as QRCode from 'qrcode';
 import { PdfService } from '../pdf/pdf.service';
 import type { AdminDocumentData } from './documents.service';
 
-const INK = '#14201A';
-const MUTED = '#55615A';
-const RULE = '#8A928D';
-const NIGHT = '#0E2A20';
+const INK = '#12183A';
+const MUTED = '#525A78';
+const RULE = '#8A90A8';
+const NIGHT = '#16205C';
 const DANGER = '#B3261E';
 const SPECIAL_SPACES = new RegExp(
   `[${String.fromCharCode(0x202f)}${String.fromCharCode(0xa0)}]`,

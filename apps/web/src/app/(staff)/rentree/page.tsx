@@ -453,7 +453,7 @@ function ClassReenrollment({
                     s.reenrolled
                       ? 'border-line bg-paper'
                       : cur === null
-                        ? 'border-2 border-dashed border-[#b9b6aa]'
+                        ? 'border-2 border-dashed border-[#b4bbd0]'
                         : 'border-line',
                   )}
                 >
@@ -492,7 +492,7 @@ function ClassReenrollment({
                           onClick={() => setDecisions((prev) => ({ ...prev, [s.id]: d }))}
                           className={cn(
                             'min-h-11 rounded-[10px] px-2 text-sm font-semibold',
-                            cur === d ? DECISION_STYLE[d] : 'bg-[#f1f0ea] text-muted',
+                            cur === d ? DECISION_STYLE[d] : 'bg-[#eff1f6] text-muted',
                           )}
                         >
                           {REENROLLMENT_LABELS[d]}

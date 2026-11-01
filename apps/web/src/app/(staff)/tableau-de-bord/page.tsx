@@ -239,7 +239,7 @@ function WeeklyChart({ weeks }: { weeks: Weekly }) {
       ) : (
         <figure className="m-0">
           <div
-            className="flex h-44 items-end gap-1 border-b border-[#8a928d] lg:h-52"
+            className="flex h-44 items-end gap-1 border-b border-[#8a90a8] lg:h-52"
             role="img"
             aria-label="Histogramme des encaissements hebdomadaires ; utilisez le bouton Tableau pour les montants exacts."
           >

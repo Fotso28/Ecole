@@ -262,7 +262,7 @@ function AttendanceContent() {
                   className={cn(
                     'flex items-center gap-3 rounded-[14px] border bg-white p-2 pl-3',
                     cur === null
-                      ? 'border-2 border-dashed border-[#b9b6aa]'
+                      ? 'border-2 border-dashed border-[#b4bbd0]'
                       : cur === 'ABSENT'
                         ? 'border-[#f0c7c2]'
                         : 'border-line',
@@ -293,7 +293,7 @@ function AttendanceContent() {
                         onClick={() => setMarks((prev) => ({ ...prev, [s.id]: m.value }))}
                         className={cn(
                           'h-12 w-12 rounded-[10px] text-[15px] font-bold disabled:opacity-60',
-                          cur === m.value ? m.on : 'bg-[#f1f0ea] text-muted',
+                          cur === m.value ? m.on : 'bg-[#eff1f6] text-muted',
                         )}
                       >
                         {m.short}

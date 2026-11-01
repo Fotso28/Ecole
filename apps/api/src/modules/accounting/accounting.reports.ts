@@ -425,12 +425,12 @@ async function workbook(table: ReportTable, r: Report): Promise<Buffer> {
   const ws = wb.addWorksheet(r.title.slice(0, 31));
   ws.columns = table.columns.map((c) => ({ width: c.width }));
   ws.addRow([r.title]).font = { bold: true, size: 14 };
-  ws.addRow([subtitle(r)]).font = { color: { argb: 'FF55615A' } };
+  ws.addRow([subtitle(r)]).font = { color: { argb: 'FF525A78' } };
   ws.addRow([]);
   const header = ws.addRow(table.columns.map((c) => c.header));
   header.font = { bold: true, color: { argb: 'FFFFFFFF' } };
   header.eachCell((cell) => {
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0E2A20' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF16205C' } };
   });
   ws.views = [{ state: 'frozen', ySplit: 4 }];
   for (const row of table.rows) {

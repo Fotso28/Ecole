@@ -4,8 +4,8 @@
   "description": "Gestion scolaire et portail des parents",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#F6F5F0",
-  "theme_color": "#0E2A20",
+  "background_color": "#F7F8FB",
+  "theme_color": "#16205C",
   "lang": "fr",
   "icons": [
     { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }

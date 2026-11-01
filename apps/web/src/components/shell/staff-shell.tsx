@@ -86,7 +86,7 @@ export function StaffShell({ children }: { children: ReactNode }) {
                   dense ? 'min-h-11 lg:min-h-9' : 'min-h-12',
                   isActive
                     ? 'bg-night-3 font-semibold text-white'
-                    : 'font-medium text-[#d3dfd8] hover:bg-night-2',
+                    : 'font-medium text-[#d4dbf2] hover:bg-night-2',
                 )}
               >
                 <item.icon

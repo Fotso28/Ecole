@@ -12,24 +12,22 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Lexend:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
     <style>
       :root {
-        --vert: #0b6447;
-        --vert-soft: #e3f0ea;
-        --nuit: #0e2a20;
-        --nuit-2: #143a2c;
-        --safran: #e8a317;
+        --vert: #2443b5;
+        --vert-soft: #e8edfb;
+        --nuit: #16205c;
+        --nuit-2: #1c2869;
+        --safran: #ffdd55;
         --safran-soft: #fdf3dc;
-        --encre: #14201a;
-        --gris: #55615a;
-        --papier: #f6f5f0;
+        --encre: #12183a;
+        --gris: #525a78;
+        --papier: #f7f8fb;
         --blanc: #ffffff;
-        --bord: #e4e2da;
-        --rouge: #b3261e;
-        --rouge-soft: #fbe9e7;
+        --bord: #e1e5ef;
       }
       @page {
         size: A4;
@@ -45,9 +43,9 @@
         print-color-adjust: exact;
       }
       body {
-        font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+        font-family: 'Lexend', system-ui, sans-serif;
         color: var(--encre);
-        background: #d9d7cf;
+        background: #d5d9e3;
         font-size: 9pt;
         line-height: 1.45;
         font-variant-numeric: tabular-nums;
@@ -88,7 +86,7 @@
       h2,
       h3,
       .display {
-        font-family: 'Bricolage Grotesque', 'Plus Jakarta Sans', sans-serif;
+        font-family: 'Lexend', sans-serif;
         letter-spacing: -0.01em;
       }
       h2 {
@@ -140,12 +138,12 @@
         color: #fff;
         display: grid;
         place-items: center;
-        font-family: 'Bricolage Grotesque', sans-serif;
+        font-family: 'Lexend', sans-serif;
         font-weight: 800;
         font-size: 15pt;
       }
       .brand .name {
-        font-family: 'Bricolage Grotesque', sans-serif;
+        font-family: 'Lexend', sans-serif;
         font-weight: 800;
         font-size: 17pt;
         line-height: 1;
@@ -178,11 +176,11 @@
         background: var(--blanc);
         border: 0.3mm solid var(--bord);
         overflow: hidden;
-        box-shadow: 0 2mm 6mm rgba(20, 32, 26, 0.12);
+        box-shadow: 0 2mm 6mm rgba(18, 24, 58, 0.12);
       }
       .browser .bar {
         height: 5.5mm;
-        background: #eceae3;
+        background: #e9ecf3;
         display: flex;
         align-items: center;
         gap: 1.4mm;
@@ -192,7 +190,7 @@
         width: 1.8mm;
         height: 1.8mm;
         border-radius: 50%;
-        background: #cfccc2;
+        background: #c9cfdd;
         display: block;
       }
       .browser .bar span {
@@ -214,16 +212,24 @@
       }
 
       /* ---------- Page 1 : couverture ---------- */
+      /* Couverture « cahier » : lignes bleues et surligneur jaune. */
       .cover-top {
-        background: var(--nuit);
-        color: var(--papier);
+        background-color: var(--blanc);
+        background-image: repeating-linear-gradient(
+          to bottom,
+          transparent 0,
+          transparent 7.7mm,
+          #c9d6f3 7.7mm,
+          #c9d6f3 8mm
+        );
+        color: var(--encre);
         height: 188mm;
         padding: 14mm 14mm 0;
         position: relative;
       }
       .cover-top .brand .mark {
-        background: var(--safran);
-        color: var(--nuit);
+        background: var(--vert);
+        color: #fff;
       }
       .cover h1 {
         font-size: 34pt;
@@ -231,13 +237,21 @@
         font-weight: 800;
         margin-top: 27mm;
         max-width: 98mm;
+        color: var(--vert);
       }
       .cover h1 em {
         font-style: normal;
-        color: var(--safran);
+        color: var(--encre);
+        padding: 0 1mm;
+        background: linear-gradient(
+          transparent 58%,
+          var(--safran) 58%,
+          var(--safran) 92%,
+          transparent 92%
+        );
       }
       .cover .lead {
-        color: #c9dad1;
+        color: var(--gris);
         font-size: 10.5pt;
         max-width: 80mm;
         margin-top: 5mm;
@@ -250,12 +264,13 @@
         max-width: 95mm;
       }
       .cover .chips span {
-        border: 0.3mm solid rgba(246, 245, 240, 0.35);
+        border: 0.3mm solid #c9d6f3;
         border-radius: 99mm;
         padding: 1mm 3mm;
         font-size: 7.5pt;
         font-weight: 600;
-        color: #e6eee9;
+        color: var(--vert);
+        background: var(--blanc);
       }
       .cover .p1 {
         width: 58mm;
@@ -350,16 +365,16 @@
         color: var(--vert);
       }
       .block .before {
-        background: var(--rouge-soft);
+        background: #eef0f6;
         border-radius: 2mm;
         padding: 1.8mm 2.6mm;
         font-size: 7.9pt;
-        color: #6e1d18;
+        color: var(--gris);
         margin-bottom: 2.6mm;
       }
       .block .before b {
         font-weight: 700;
-        color: var(--rouge);
+        color: var(--encre);
         margin-right: 1mm;
       }
       .after-label {
@@ -413,7 +428,7 @@
         margin: 1mm 0 2mm;
       }
       .stat .big {
-        font-family: 'Bricolage Grotesque', sans-serif;
+        font-family: 'Lexend', sans-serif;
         font-weight: 800;
         font-size: 26pt;
         color: var(--vert);
@@ -468,7 +483,7 @@
       }
       .role.parents {
         background: var(--vert-soft);
-        border-color: #cfe3d8;
+        border-color: #ccd7f5;
       }
       .note-line {
         font-size: 7.8pt;
@@ -487,7 +502,7 @@
       }
       .modules p.sub {
         font-size: 8.2pt;
-        color: #c9dad1;
+        color: #b9c2e6;
         margin-top: 1mm;
       }
       .modchips {
@@ -498,7 +513,7 @@
       }
       .modchips span {
         background: var(--nuit-2);
-        border: 0.3mm solid #2c5444;
+        border: 0.3mm solid #2e3c82;
         border-radius: 99mm;
         padding: 1.1mm 3mm;
         font-size: 7.8pt;
@@ -567,7 +582,7 @@
         left: 6mm;
         right: 25%;
         top: 5mm;
-        border-top: 0.5mm dashed #b9c9c0;
+        border-top: 0.5mm dashed #b4bdd6;
       }
       .step {
         position: relative;
@@ -580,7 +595,7 @@
         color: #fff;
         display: grid;
         place-items: center;
-        font-family: 'Bricolage Grotesque', sans-serif;
+        font-family: 'Lexend', sans-serif;
         font-weight: 800;
         font-size: 12pt;
         margin-bottom: 2.5mm;
@@ -636,7 +651,7 @@
         font-size: 8.2pt;
       }
       .calc .res strong {
-        font-family: 'Bricolage Grotesque', sans-serif;
+        font-family: 'Lexend', sans-serif;
         font-size: 13pt;
         color: var(--vert);
         display: block;
@@ -672,7 +687,7 @@
         color: var(--safran);
       }
       .contact p {
-        color: #c9dad1;
+        color: #b9c2e6;
         font-size: 8.6pt;
         margin-top: 2mm;
       }
@@ -689,13 +704,13 @@
       .contact .qr {
         width: 30mm;
         height: 30mm;
-        border: 0.5mm dashed #5e7f71;
+        border: 0.5mm dashed #5865a3;
         border-radius: 2.5mm;
         display: grid;
         place-items: center;
         text-align: center;
         font-size: 6.5pt;
-        color: #9fb8ac;
+        color: #aeb8e0;
         padding: 2mm;
       }
       .contact .qr .ico {

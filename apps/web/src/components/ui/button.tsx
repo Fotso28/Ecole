@@ -14,7 +14,7 @@ export const buttonVariants = cva(
         secondary: 'border border-line-strong bg-white text-ink hover:bg-paper',
         ghost: 'text-primary hover:bg-primary-soft',
         danger: 'border border-[#f0c7c2] bg-danger-soft text-danger hover:bg-[#f8dcd8]',
-        saffron: 'bg-saffron text-ink hover:bg-[#d99611]',
+        saffron: 'bg-saffron text-ink hover:bg-[#f2c83a]',
       },
       size: {
         md: 'min-h-12 px-4 text-[15px] lg:min-h-10 lg:text-sm',

@@ -134,7 +134,7 @@ function renderSlip(doc: PDFKit.PDFDocument, batch: PayslipBatch, slip: Printabl
 
   const cols = [left, left + W * 0.55, left + W * 0.78];
   const header = (title: string) => {
-    doc.rect(left, y, W, 18).fill('#E3F0EA');
+    doc.rect(left, y, W, 18).fill('#E8EDFB');
     doc.fillColor(NIGHT).font('Helvetica-Bold').fontSize(9);
     doc.text(t(title), cols[0]! + 6, y + 5);
     doc.text('Retenue', cols[1]!, y + 5, { width: W * 0.21, align: 'right' });
@@ -334,7 +334,7 @@ export async function transfersWorkbook(
   ws.addRow([]);
   const header = ws.addRow(TRANSFER_HEADERS);
   header.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-  header.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0E2A20' } };
+  header.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF16205C' } };
   for (const r of rows) ws.addRow(transferCells(r));
   ws.addRow([]);
   const total = ws.addRow([

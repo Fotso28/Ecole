@@ -1,0 +1,1466 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Plaquette Ecole</title>
+    <!--
+  Plaquette commerciale à remettre au chef d'établissement (4 pages A4).
+  Source de docs/commercial/plaquette.pdf : régénérer le PDF après toute modification
+  (voir docs/commercial/README.md). Coordonnées du commercial : section « contact » en page 4.
+-->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --vert: #0b6447;
+        --vert-soft: #e3f0ea;
+        --nuit: #0e2a20;
+        --nuit-2: #143a2c;
+        --safran: #e8a317;
+        --safran-soft: #fdf3dc;
+        --encre: #14201a;
+        --gris: #55615a;
+        --papier: #f6f5f0;
+        --blanc: #ffffff;
+        --bord: #e4e2da;
+        --rouge: #b3261e;
+        --rouge-soft: #fbe9e7;
+      }
+      @page {
+        size: A4;
+        margin: 0;
+      }
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      html {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      body {
+        font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+        color: var(--encre);
+        background: #d9d7cf;
+        font-size: 9pt;
+        line-height: 1.45;
+        font-variant-numeric: tabular-nums;
+      }
+      @media screen {
+        body {
+          padding: 10mm 0;
+        }
+        .page {
+          margin: 0 auto 10mm;
+          box-shadow: 0 2mm 8mm rgba(0, 0, 0, 0.18);
+        }
+      }
+      @media print {
+        body {
+          background: none;
+        }
+      }
+
+      .page {
+        width: 210mm;
+        height: 297mm;
+        position: relative;
+        overflow: hidden;
+        background: var(--papier);
+        break-after: page;
+        page-break-after: always;
+      }
+      .page:last-child {
+        break-after: auto;
+        page-break-after: auto;
+      }
+      .pad {
+        padding: 14mm 14mm 0;
+      }
+
+      h1,
+      h2,
+      h3,
+      .display {
+        font-family: 'Bricolage Grotesque', 'Plus Jakarta Sans', sans-serif;
+        letter-spacing: -0.01em;
+      }
+      h2 {
+        font-size: 21pt;
+        line-height: 1.08;
+        font-weight: 700;
+      }
+      h3 {
+        font-size: 12pt;
+        line-height: 1.2;
+        font-weight: 700;
+      }
+      .kicker {
+        font-size: 7.5pt;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--vert);
+        margin-bottom: 2mm;
+      }
+      .lead {
+        font-size: 10pt;
+        color: var(--gris);
+        margin-top: 2.5mm;
+        max-width: 150mm;
+      }
+      .ico {
+        width: 1em;
+        height: 1em;
+        stroke: currentColor;
+        fill: none;
+        stroke-width: 2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        flex: none;
+      }
+
+      /* Marque */
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 3mm;
+      }
+      .brand .mark {
+        width: 10mm;
+        height: 10mm;
+        border-radius: 2.6mm;
+        background: var(--vert);
+        color: #fff;
+        display: grid;
+        place-items: center;
+        font-family: 'Bricolage Grotesque', sans-serif;
+        font-weight: 800;
+        font-size: 15pt;
+      }
+      .brand .name {
+        font-family: 'Bricolage Grotesque', sans-serif;
+        font-weight: 800;
+        font-size: 17pt;
+        line-height: 1;
+      }
+      .brand .tag {
+        font-size: 7.5pt;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        opacity: 0.75;
+        margin-top: 0.8mm;
+      }
+
+      /* Cadres d'écran */
+      .phone {
+        position: absolute;
+        border-radius: 8mm;
+        padding: 1.8mm;
+        background: #0a0f0c;
+        box-shadow:
+          0 4mm 10mm rgba(0, 0, 0, 0.35),
+          inset 0 0 0 0.35mm #2a332e;
+      }
+      .phone img {
+        display: block;
+        width: 100%;
+        border-radius: 6.4mm;
+      }
+      .browser {
+        border-radius: 3mm;
+        background: var(--blanc);
+        border: 0.3mm solid var(--bord);
+        overflow: hidden;
+        box-shadow: 0 2mm 6mm rgba(20, 32, 26, 0.12);
+      }
+      .browser .bar {
+        height: 5.5mm;
+        background: #eceae3;
+        display: flex;
+        align-items: center;
+        gap: 1.4mm;
+        padding: 0 2.5mm;
+      }
+      .browser .bar i {
+        width: 1.8mm;
+        height: 1.8mm;
+        border-radius: 50%;
+        background: #cfccc2;
+        display: block;
+      }
+      .browser .bar span {
+        margin-left: 2mm;
+        font-size: 6pt;
+        color: var(--gris);
+        background: #fff;
+        border-radius: 1.2mm;
+        padding: 0.4mm 2.5mm;
+      }
+      .browser img {
+        display: block;
+        width: 100%;
+      }
+      .caption {
+        font-size: 7.5pt;
+        color: var(--gris);
+        margin-top: 1.8mm;
+      }
+
+      /* ---------- Page 1 : couverture ---------- */
+      .cover-top {
+        background: var(--nuit);
+        color: var(--papier);
+        height: 188mm;
+        padding: 14mm 14mm 0;
+        position: relative;
+      }
+      .cover-top .brand .mark {
+        background: var(--safran);
+        color: var(--nuit);
+      }
+      .cover h1 {
+        font-size: 34pt;
+        line-height: 1.02;
+        font-weight: 800;
+        margin-top: 27mm;
+        max-width: 98mm;
+      }
+      .cover h1 em {
+        font-style: normal;
+        color: var(--safran);
+      }
+      .cover .lead {
+        color: #c9dad1;
+        font-size: 10.5pt;
+        max-width: 80mm;
+        margin-top: 5mm;
+      }
+      .cover .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1.8mm;
+        margin-top: 7mm;
+        max-width: 95mm;
+      }
+      .cover .chips span {
+        border: 0.3mm solid rgba(246, 245, 240, 0.35);
+        border-radius: 99mm;
+        padding: 1mm 3mm;
+        font-size: 7.5pt;
+        font-weight: 600;
+        color: #e6eee9;
+      }
+      .cover .p1 {
+        width: 58mm;
+        right: 14mm;
+        top: 38mm;
+        z-index: 2;
+      }
+      .cover .p2 {
+        width: 51mm;
+        right: 58mm;
+        top: 65mm;
+        z-index: 1;
+        transform: rotate(-4deg);
+      }
+      .cover-bottom {
+        padding: 12mm 14mm 0;
+      }
+      .reasons {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 4mm;
+        margin-top: 4mm;
+      }
+      .reason {
+        background: var(--blanc);
+        border: 0.3mm solid var(--bord);
+        border-radius: 3.5mm;
+        padding: 5mm 4.5mm 5mm;
+      }
+      .reason .n {
+        width: 8mm;
+        height: 8mm;
+        border-radius: 50%;
+        background: var(--vert-soft);
+        color: var(--vert);
+        display: grid;
+        place-items: center;
+        font-size: 12pt;
+        margin-bottom: 3mm;
+      }
+      .reason h3 {
+        font-size: 11.5pt;
+        margin-bottom: 1.6mm;
+      }
+      .reason p {
+        color: var(--gris);
+        font-size: 8.8pt;
+      }
+      .cover .attn {
+        position: absolute;
+        left: 14mm;
+        right: 14mm;
+        bottom: 10mm;
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+        border-top: 0.3mm solid var(--bord);
+        padding-top: 3.5mm;
+        font-size: 8pt;
+        color: var(--gris);
+      }
+      .cover .attn strong {
+        color: var(--encre);
+        font-weight: 700;
+      }
+
+      /* ---------- Page 2 : bénéfices ---------- */
+      .blocks {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 4.5mm;
+        margin-top: 6mm;
+      }
+      .block {
+        background: var(--blanc);
+        border: 0.3mm solid var(--bord);
+        border-radius: 3.5mm;
+        padding: 4.5mm 4.5mm 4mm;
+      }
+      .block .head {
+        display: flex;
+        align-items: center;
+        gap: 2.5mm;
+        margin-bottom: 2.6mm;
+      }
+      .block .head .ico {
+        width: 8.5mm;
+        height: 8.5mm;
+        padding: 1.9mm;
+        border-radius: 2.4mm;
+        background: var(--vert-soft);
+        color: var(--vert);
+      }
+      .block .before {
+        background: var(--rouge-soft);
+        border-radius: 2mm;
+        padding: 1.8mm 2.6mm;
+        font-size: 7.9pt;
+        color: #6e1d18;
+        margin-bottom: 2.6mm;
+      }
+      .block .before b {
+        font-weight: 700;
+        color: var(--rouge);
+        margin-right: 1mm;
+      }
+      .after-label {
+        font-size: 7pt;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--vert);
+        margin-bottom: 1.4mm;
+      }
+      ul.checks {
+        list-style: none;
+        display: grid;
+        gap: 1.25mm;
+      }
+      ul.checks li {
+        display: flex;
+        gap: 2mm;
+        font-size: 8.2pt;
+        line-height: 1.38;
+      }
+      ul.checks li .ico {
+        color: var(--vert);
+        width: 3.4mm;
+        height: 3.4mm;
+        margin-top: 0.45mm;
+        stroke-width: 2.6;
+      }
+      .proof {
+        display: grid;
+        grid-template-columns: 112mm 1fr;
+        gap: 6mm;
+        margin-top: 5mm;
+        align-items: start;
+      }
+      .proof .note {
+        padding-top: 1mm;
+      }
+      .proof .note h3 {
+        margin-bottom: 2mm;
+      }
+      .proof .note p {
+        color: var(--gris);
+        font-size: 8.4pt;
+        margin-bottom: 2.2mm;
+      }
+      .stat {
+        display: flex;
+        align-items: baseline;
+        gap: 2mm;
+        margin: 1mm 0 2mm;
+      }
+      .stat .big {
+        font-family: 'Bricolage Grotesque', sans-serif;
+        font-weight: 800;
+        font-size: 26pt;
+        color: var(--vert);
+        line-height: 1;
+      }
+      .stat .small {
+        font-size: 8pt;
+        color: var(--encre);
+        font-weight: 600;
+        line-height: 1.3;
+      }
+
+      /* ---------- Page 3 : équipe et modules ---------- */
+      .showcase {
+        display: grid;
+        grid-template-columns: 1fr 41mm;
+        gap: 6mm;
+        margin-top: 5mm;
+        align-items: end;
+      }
+      .showcase .phone {
+        position: relative;
+      }
+      .roles {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 3mm;
+        margin-top: 5mm;
+      }
+      .role {
+        background: var(--blanc);
+        border: 0.3mm solid var(--bord);
+        border-radius: 3mm;
+        padding: 3.2mm 3.2mm 3mm;
+      }
+      .role h3 {
+        font-size: 9.6pt;
+        margin-bottom: 1.2mm;
+        display: flex;
+        align-items: center;
+        gap: 1.6mm;
+      }
+      .role h3 .ico {
+        color: var(--vert);
+        width: 3.8mm;
+        height: 3.8mm;
+      }
+      .role p {
+        font-size: 7.6pt;
+        color: var(--gris);
+        line-height: 1.38;
+      }
+      .role.parents {
+        background: var(--vert-soft);
+        border-color: #cfe3d8;
+      }
+      .note-line {
+        font-size: 7.8pt;
+        color: var(--gris);
+        margin-top: 2.5mm;
+      }
+      .modules {
+        margin-top: 5mm;
+        background: var(--nuit);
+        color: var(--papier);
+        border-radius: 3.5mm;
+        padding: 5mm 5mm 5mm;
+      }
+      .modules h3 {
+        font-size: 12pt;
+      }
+      .modules p.sub {
+        font-size: 8.2pt;
+        color: #c9dad1;
+        margin-top: 1mm;
+      }
+      .modchips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1.8mm;
+        margin-top: 3.5mm;
+      }
+      .modchips span {
+        background: var(--nuit-2);
+        border: 0.3mm solid #2c5444;
+        border-radius: 99mm;
+        padding: 1.1mm 3mm;
+        font-size: 7.8pt;
+        font-weight: 600;
+      }
+      .modchips span b {
+        color: var(--safran);
+        font-weight: 700;
+      }
+
+      /* ---------- Page 4 : confiance, démarrage, offre ---------- */
+      .two {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 5mm;
+        margin-top: 5mm;
+      }
+      .panel {
+        background: var(--blanc);
+        border: 0.3mm solid var(--bord);
+        border-radius: 3.5mm;
+        padding: 4.5mm;
+      }
+      .panel h3 {
+        margin-bottom: 3mm;
+        display: flex;
+        align-items: center;
+        gap: 2mm;
+      }
+      .panel h3 .ico {
+        color: var(--vert);
+        width: 5mm;
+        height: 5mm;
+      }
+      .panel ul {
+        list-style: none;
+        display: grid;
+        gap: 2mm;
+      }
+      .panel li {
+        display: grid;
+        grid-template-columns: 5.5mm 1fr;
+        gap: 1.6mm;
+        font-size: 8.1pt;
+        line-height: 1.38;
+      }
+      .panel li .ico {
+        width: 4.4mm;
+        height: 4.4mm;
+        color: var(--vert);
+        margin-top: 0.2mm;
+      }
+      .panel li b {
+        font-weight: 700;
+      }
+      .steps {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 3.5mm;
+        margin-top: 4mm;
+        position: relative;
+      }
+      .steps::before {
+        content: '';
+        position: absolute;
+        left: 6mm;
+        right: 25%;
+        top: 5mm;
+        border-top: 0.5mm dashed #b9c9c0;
+      }
+      .step {
+        position: relative;
+      }
+      .step .num {
+        width: 10mm;
+        height: 10mm;
+        border-radius: 50%;
+        background: var(--vert);
+        color: #fff;
+        display: grid;
+        place-items: center;
+        font-family: 'Bricolage Grotesque', sans-serif;
+        font-weight: 800;
+        font-size: 12pt;
+        margin-bottom: 2.5mm;
+        box-shadow: 0 0 0 1.5mm var(--papier);
+      }
+      .step h3 {
+        font-size: 10pt;
+        margin-bottom: 1mm;
+      }
+      .step p {
+        font-size: 7.8pt;
+        color: var(--gris);
+        line-height: 1.38;
+      }
+      .offer {
+        display: grid;
+        grid-template-columns: 1fr 72mm;
+        gap: 5mm;
+        margin-top: 6mm;
+      }
+      .offer .panel ul {
+        gap: 1.6mm;
+      }
+      .calc {
+        background: var(--safran-soft);
+        border: 0.3mm solid #f1d9a2;
+        border-radius: 3.5mm;
+        padding: 4.5mm;
+      }
+      .calc h3 {
+        margin-bottom: 2mm;
+      }
+      .calc .row {
+        display: flex;
+        justify-content: space-between;
+        gap: 3mm;
+        font-size: 8.2pt;
+        padding: 1.2mm 0;
+        border-bottom: 0.3mm dashed #e8cf94;
+      }
+      .calc .row:last-of-type {
+        border-bottom: 0;
+      }
+      .calc .row b {
+        font-weight: 700;
+        white-space: nowrap;
+      }
+      .calc .res {
+        margin-top: 2mm;
+        background: var(--blanc);
+        border-radius: 2.2mm;
+        padding: 2.4mm 3mm;
+        font-size: 8.2pt;
+      }
+      .calc .res strong {
+        font-family: 'Bricolage Grotesque', sans-serif;
+        font-size: 13pt;
+        color: var(--vert);
+        display: block;
+        line-height: 1.15;
+      }
+      .calc small {
+        display: block;
+        font-size: 6.8pt;
+        color: #7a5a12;
+        margin-top: 2mm;
+        line-height: 1.35;
+      }
+      .contact {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 52mm;
+        background: var(--nuit);
+        color: var(--papier);
+        padding: 8mm 14mm;
+        display: grid;
+        grid-template-columns: 1fr 66mm 30mm;
+        gap: 6mm;
+        align-items: center;
+      }
+      .contact h2 {
+        font-size: 18pt;
+        color: var(--papier);
+      }
+      .contact h2 em {
+        font-style: normal;
+        color: var(--safran);
+      }
+      .contact p {
+        color: #c9dad1;
+        font-size: 8.6pt;
+        margin-top: 2mm;
+      }
+      .contact .who {
+        font-size: 8.6pt;
+        line-height: 1.6;
+        border-left: 0.5mm solid var(--safran);
+        padding-left: 4mm;
+      }
+      .contact .who strong {
+        font-size: 10.5pt;
+        display: block;
+      }
+      .contact .qr {
+        width: 30mm;
+        height: 30mm;
+        border: 0.5mm dashed #5e7f71;
+        border-radius: 2.5mm;
+        display: grid;
+        place-items: center;
+        text-align: center;
+        font-size: 6.5pt;
+        color: #9fb8ac;
+        padding: 2mm;
+      }
+      .contact .qr .ico {
+        width: 8mm;
+        height: 8mm;
+        margin: 0 auto 1mm;
+        display: block;
+      }
+      .folio {
+        position: absolute;
+        bottom: 7mm;
+        right: 14mm;
+        font-size: 7pt;
+        color: var(--gris);
+      }
+      .folio.left {
+        left: 14mm;
+        right: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5" /></symbol>
+      <symbol id="i-wallet" viewBox="0 0 24 24">
+        <path
+          d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"
+        />
+        <path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4" />
+      </symbol>
+      <symbol id="i-file" viewBox="0 0 24 24">
+        <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+        <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+        <path d="M10 9H8" />
+        <path d="M16 13H8" />
+        <path d="M16 17H8" />
+      </symbol>
+      <symbol id="i-clipboard" viewBox="0 0 24 24">
+        <rect width="8" height="4" x="8" y="2" rx="1" />
+        <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+        <path d="m9 14 2 2 4-4" />
+      </symbol>
+      <symbol id="i-users" viewBox="0 0 24 24">
+        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+        <circle cx="9" cy="7" r="4" />
+        <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+        <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+      </symbol>
+      <symbol id="i-shield" viewBox="0 0 24 24">
+        <path
+          d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"
+        />
+        <path d="m9 12 2 2 4-4" />
+      </symbol>
+      <symbol id="i-phone" viewBox="0 0 24 24">
+        <rect width="14" height="20" x="5" y="2" rx="2" />
+        <path d="M12 18h.01" />
+      </symbol>
+      <symbol id="i-wifi-off" viewBox="0 0 24 24">
+        <path d="M12 20h.01" />
+        <path d="M8.5 16.43a5 5 0 0 1 7 0" />
+        <path d="M5 12.86a10 10 0 0 1 5.17-2.69" />
+        <path d="M19 12.86a10 10 0 0 0-2-1.52" />
+        <path d="M2 8.82a15 15 0 0 1 4.18-2.64" />
+        <path d="M22 8.82a15 15 0 0 0-11.29-3.76" />
+        <path d="m2 2 20 20" />
+      </symbol>
+      <symbol id="i-lock" viewBox="0 0 24 24">
+        <rect width="18" height="11" x="3" y="11" rx="2" />
+        <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+      </symbol>
+      <symbol id="i-qr" viewBox="0 0 24 24">
+        <rect width="5" height="5" x="3" y="3" rx="1" />
+        <rect width="5" height="5" x="16" y="3" rx="1" />
+        <rect width="5" height="5" x="3" y="16" rx="1" />
+        <path d="M21 16h-3a2 2 0 0 0-2 2v3" />
+        <path d="M21 21v.01" />
+        <path d="M12 7v3a2 2 0 0 1-2 2H7" />
+        <path d="M3 12h.01" />
+        <path d="M12 3h.01" />
+        <path d="M12 16v.01" />
+        <path d="M16 12h1" />
+        <path d="M21 12v.01" />
+        <path d="M12 21v-1" />
+      </symbol>
+      <symbol id="i-history" viewBox="0 0 24 24">
+        <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+        <path d="M3 3v5h5" />
+        <path d="M12 7v5l4 2" />
+      </symbol>
+      <symbol id="i-db" viewBox="0 0 24 24">
+        <ellipse cx="12" cy="5" rx="9" ry="3" />
+        <path d="M3 5v14a9 3 0 0 0 18 0V5" />
+        <path d="M3 12a9 3 0 0 0 18 0" />
+      </symbol>
+      <symbol id="i-msg" viewBox="0 0 24 24">
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+      </symbol>
+      <symbol id="i-eye" viewBox="0 0 24 24">
+        <path
+          d="M2.06 12.35a1 1 0 0 1 0-.7 10.75 10.75 0 0 1 19.88 0 1 1 0 0 1 0 .7 10.75 10.75 0 0 1-19.88 0"
+        />
+        <circle cx="12" cy="12" r="3" />
+      </symbol>
+      <symbol id="i-cap" viewBox="0 0 24 24">
+        <path
+          d="M21.42 10.92a1 1 0 0 0-.02-1.84L12.83 5.18a2 2 0 0 0-1.66 0L2.6 9.08a1 1 0 0 0 0 1.83l8.57 3.91a2 2 0 0 0 1.66 0z"
+        />
+        <path d="M22 10v6" />
+        <path d="M6 12.5V16a6 3 0 0 0 12 0v-3.5" />
+      </symbol>
+      <symbol id="i-briefcase" viewBox="0 0 24 24">
+        <path d="M16 20V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
+        <rect width="20" height="14" x="2" y="6" rx="2" />
+      </symbol>
+      <symbol id="i-pen" viewBox="0 0 24 24">
+        <path d="M12 20h9" />
+        <path
+          d="M16.38 3.62a1 1 0 0 1 3 3L7.37 18.64a2 2 0 0 1-.85.5l-2.87.84a.5.5 0 0 1-.62-.62l.84-2.87a2 2 0 0 1 .5-.85z"
+        />
+      </symbol>
+      <symbol id="i-heart" viewBox="0 0 24 24">
+        <path
+          d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"
+        />
+      </symbol>
+      <symbol id="i-home" viewBox="0 0 24 24">
+        <path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8" />
+        <path
+          d="M3 10a2 2 0 0 1 .71-1.53l7-6a2 2 0 0 1 2.58 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"
+        />
+      </symbol>
+      <symbol id="i-gavel" viewBox="0 0 24 24">
+        <path d="m14.5 12.5-8 8a2.12 2.12 0 1 1-3-3l8-8" />
+        <path d="m16 16 6-6" />
+        <path d="m8 8 6-6" />
+        <path d="m9 7 8 8" />
+        <path d="m21 11-8-8" />
+      </symbol>
+      <symbol id="i-layout" viewBox="0 0 24 24">
+        <rect width="7" height="9" x="3" y="3" rx="1" />
+        <rect width="7" height="5" x="14" y="3" rx="1" />
+        <rect width="7" height="9" x="14" y="12" rx="1" />
+        <rect width="7" height="5" x="3" y="16" rx="1" />
+      </symbol>
+      <symbol id="i-coins" viewBox="0 0 24 24">
+        <circle cx="8" cy="8" r="6" />
+        <path d="M18.09 10.37A6 6 0 1 1 10.34 18" />
+        <path d="M7 6h1v4" />
+        <path d="m16.71 13.88.7.71-2.82 2.82" />
+      </symbol>
+    </svg>
+
+    <!-- =============== PAGE 1 : COUVERTURE =============== -->
+    <section class="page cover">
+      <div class="cover-top">
+        <div class="brand">
+          <div class="mark">É</div>
+          <div>
+            <div class="name">Ecole</div>
+            <div class="tag">Gestion scolaire · Cameroun</div>
+          </div>
+        </div>
+
+        <h1>Toute votre école, <em>dans votre téléphone.</em></h1>
+        <p class="lead">
+          Inscriptions, appel, notes et bulletins, scolarité et Mobile Money, portail des parents :
+          une seule application, pensée pour les collèges et lycées du Cameroun.
+        </p>
+        <div class="chips">
+          <span>MTN MoMo et Orange Money</span>
+          <span>Relances par SMS</span>
+          <span>Bulletins vérifiables</span>
+          <span>Rien à installer</span>
+        </div>
+
+        <div class="phone p2">
+          <img
+            src="images/tableau-de-bord-telephone.jpg"
+            alt="Tableau de bord de la direction sur téléphone"
+          />
+        </div>
+        <div class="phone p1">
+          <img
+            src="images/portail-parent.jpg"
+            alt="Accueil du portail des parents : reste à payer et dernières notes"
+          />
+        </div>
+      </div>
+
+      <div class="cover-bottom">
+        <div class="kicker">Trois raisons de choisir Ecole</div>
+        <div class="reasons">
+          <div class="reason">
+            <div class="n">
+              <svg class="ico"><use href="#i-wallet" /></svg>
+            </div>
+            <h3>Mieux encaisser la scolarité</h3>
+            <p>
+              Échéancier par tranche, impayés suivis en temps réel, relances SMS automatiques et
+              paiement par Mobile Money depuis le téléphone des parents.
+            </p>
+          </div>
+          <div class="reason">
+            <div class="n">
+              <svg class="ico"><use href="#i-file" /></svg>
+            </div>
+            <h3>Des bulletins justes et à l’heure</h3>
+            <p>
+              Moyennes, rangs avec ex æquo et propositions du conseil calculés sans erreur. Bulletin
+              PDF officiel avec QR code de vérification.
+            </p>
+          </div>
+          <div class="reason">
+            <div class="n">
+              <svg class="ico"><use href="#i-users" /></svg>
+            </div>
+            <h3>Des parents informés et rassurés</h3>
+            <p>
+              Absences, notes, devoirs et reste à payer sur leur téléphone. Connexion par un simple
+              code reçu par SMS, sans mot de passe.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="attn">
+        <div>
+          Document remis à l’attention de<br /><strong
+            >Madame, Monsieur le Chef d’établissement</strong
+          >
+        </div>
+        <div style="text-align: right">
+          Captures d’écran réelles de l’application<br />(établissement de démonstration)
+        </div>
+      </div>
+    </section>
+
+    <!-- =============== PAGE 2 : CE QUI CHANGE =============== -->
+    <section class="page">
+      <div class="pad">
+        <div class="kicker">Ce qui change dans votre établissement</div>
+        <h2>Moins de cahiers, moins d’erreurs,<br />plus de temps pour l’essentiel.</h2>
+        <p class="lead">
+          Ecole remplace les registres, les fichiers Excel et les reçus manuscrits par une
+          application unique, utilisée par toute l’équipe et par les familles.
+        </p>
+
+        <div class="blocks">
+          <div class="block">
+            <div class="head">
+              <svg class="ico"><use href="#i-wallet" /></svg>
+              <h3>Scolarité et caisse</h3>
+            </div>
+            <div class="before">
+              <b>Aujourd’hui</b> Reçus manuscrits, impayés découverts en fin de trimestre, caisse
+              difficile à contrôler.
+            </div>
+            <div class="after-label">Avec Ecole</div>
+            <ul class="checks">
+              <li>
+                <svg class="ico"><use href="#i-check" /></svg
+                ><span
+                  >Encaissement en quelques touches : espèces avec monnaie à rendre, banque ou
+                  Mobile Money.</span
+                >
+              </li>
+              <li>
+                <svg class="ico"><use href="#i-check" /></svg
+                ><span>Reçu numéroté, vérifiable par QR code.</span>
+              </li>
+              <li>
+                <svg class="ico"><use href="#i-check" /></svg
+                ><span>Impayés par classe et par élève, à jour à chaque paiement.</span>
+              </li>
+              <li>
+                <svg class="ico"><use href="#i-check" /></svg
+                ><span
+                  >Relances SMS automatiques aux parents 5, 15 et 30 jours après l’échéance.</span
+                >
+              </li>
+              <li>
+                <svg class="ico"><use href="#i-check" /></svg
+                ><span
+                  >Contrôle à quatre yeux : clôture de caisse et annulation validées par une autre
+                  personne.</span
+                >
+              </li>
+            </ul>
+          </div>
+
+          <div class="block">
+            <div class="head">
+              <svg class="ico"><use href="#i-file" /></svg>
+              <h3>Notes et bulletins</h3>
+            </div>
+            <div class="before">
+              <b>Aujourd’hui</b> Des nuits de calcul, des erreurs de moyenne ou de rang, des
+              réclamations de parents.
+            </div>
+            <div class="after-label">Avec Ecole</div>
+            <ul class="checks">
+              <li>
+                <svg class="ico"><use href="#i-check" /></svg
+                ><span
+                  >Saisie par l’enseignant, sur téléphone ou ordinateur ; une note hors barème est
+                  refusée.</span
+                >
+              </li>
+              <li>
+                <svg class="ico"><use href="#i-check" /></svg
+                ><span
+                  >Moyennes, rangs avec ex æquo et appréciations calculés à chaque saisie.</span
+                >
+              </li>
+              <li>
+                <svg class="ico"><use href="#i-check" /></svg
+                ><span
+                  >Propositions du conseil (tableau d’honneur, encouragements, félicitations,
+                  passage, redoublement) : le conseil garde le dernier mot.</span
+                >
+              </li>
+              <li>
+                <svg class="ico"><use href="#i-check" /></svg
+                ><span
+                  >Bulletin A4 à en-tête officiel bilingue, avec QR code, figé après
+                  publication.</span
+                >
+              </li>
+            </ul>
+          </div>
+
+          <div class="block">
+            <div class="head">
+              <svg class="ico"><use href="#i-clipboard" /></svg>
+              <h3>Assiduité et discipline</h3>
+            </div>
+            <div class="before">
+              <b>Aujourd’hui</b> Appel sur papier, parents prévenus trop tard, justificatifs égarés.
+            </div>
+            <div class="after-label">Avec Ecole</div>
+            <ul class="checks">
+              <li>
+                <svg class="ico"><use href="#i-check" /></svg
+                ><span>Appel en classe en quelques secondes : présent, absent, en retard.</span>
+              </li>
+              <li>
+                <svg class="ico"><use href="#i-check" /></svg
+                ><span
+                  >SMS aux parents pour toute absence non justifiée, une heure après le cours (délai
+                  réglable).</span
+                >
+              </li>
+              <li>
+                <svg class="ico"><use href="#i-check" /></svg
+                ><span
+                  >Justificatifs déposés par les parents depuis leur téléphone, validés par la vie
+                  scolaire.</span
+                >
+              </li>
+              <li>
+                <svg class="ico"><use href="#i-check" /></svg
+                ><span>Registre des incidents et alerte en cas d’absences répétées.</span>
+              </li>
+            </ul>
+          </div>
+
+          <div class="block">
+            <div class="head">
+              <svg class="ico"><use href="#i-users" /></svg>
+              <h3>Relation avec les familles</h3>
+            </div>
+            <div class="before">
+              <b>Aujourd’hui</b> Convocations perdues, parents qui découvrent les résultats le jour
+              du bulletin.
+            </div>
+            <div class="after-label">Avec Ecole</div>
+            <ul class="checks">
+              <li>
+                <svg class="ico"><use href="#i-check" /></svg
+                ><span
+                  >Portail des parents sur téléphone : un code SMS suffit pour se connecter.</span
+                >
+              </li>
+              <li>
+                <svg class="ico"><use href="#i-check" /></svg
+                ><span>Notes, bulletins, absences, devoirs, calendrier et messages.</span>
+              </li>
+              <li>
+                <svg class="ico"><use href="#i-check" /></svg
+                ><span>Reste à payer, paiement Mobile Money, reçus et historique.</span>
+              </li>
+              <li>
+                <svg class="ico"><use href="#i-check" /></svg
+                ><span
+                  >Un seul compte pour tous les enfants, même inscrits dans plusieurs écoles.</span
+                >
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="proof">
+          <div>
+            <div class="browser">
+              <div class="bar">
+                <i></i><i></i><i></i><span>Saisie des notes · 4e A · Mathématiques</span>
+              </div>
+              <img
+                src="images/grille-notes.jpg"
+                alt="Grille de saisie des notes avec moyenne, rang et appréciation"
+              />
+            </div>
+            <div class="caption">
+              La grille de notes de l’enseignant : moyenne, rang et appréciation se calculent
+              pendant la saisie.
+            </div>
+          </div>
+          <div class="note">
+            <h3>Des calculs vérifiés</h3>
+            <div class="stat">
+              <span class="big">0</span
+              ><span class="small"
+                >écart sur 90 bulletins<br />recalculés de façon indépendante</span
+              >
+            </div>
+            <p>
+              Une année complète d’une classe de 30 élèves, avec les cas difficiles : ex æquo, élève
+              à 9,99, dispense, arrivée en cours d’année, devoirs notés sur 40.
+            </p>
+            <p>
+              Les seuils (passage, tableau d’honneur, encouragements, félicitations) se règlent
+              selon le règlement de votre établissement.
+            </p>
+          </div>
+        </div>
+      </div>
+      <div class="folio">2</div>
+    </section>
+
+    <!-- =============== PAGE 3 : ÉQUIPE ET MODULES =============== -->
+    <section class="page">
+      <div class="pad">
+        <div class="kicker">Un outil pour toute l’équipe</div>
+        <h2>Chacun son écran, chacun ses droits.</h2>
+        <p class="lead">
+          Chaque personne arrive directement sur ses tâches du jour. Ce qu’elle n’a pas le droit de
+          voir n’apparaît pas.
+        </p>
+
+        <div class="showcase">
+          <div>
+            <div class="browser">
+              <div class="bar">
+                <i></i><i></i><i></i><span>Tableau de bord de la direction</span>
+              </div>
+              <img
+                src="images/tableau-de-bord.jpg"
+                alt="Tableau de bord de la direction sur ordinateur"
+              />
+            </div>
+          </div>
+          <div class="phone" style="border-radius: 7mm; padding: 1.6mm">
+            <img
+              src="images/notes-telephone.jpg"
+              alt="Saisie des notes sur téléphone"
+              style="border-radius: 5.6mm"
+            />
+          </div>
+        </div>
+        <div class="caption">
+          La même application sur ordinateur et sur téléphone : effectif, recouvrement, impayés,
+          absences et actions à valider pour la direction ; saisie des notes au téléphone pour
+          l’enseignant.
+        </div>
+
+        <div class="roles">
+          <div class="role">
+            <h3>
+              <svg class="ico"><use href="#i-layout" /></svg>Direction
+            </h3>
+            <p>
+              Tableau de bord, validations, publication des bulletins. Journal de toutes les
+              opérations sensibles.
+            </p>
+          </div>
+          <div class="role">
+            <h3>
+              <svg class="ico"><use href="#i-file" /></svg>Censeur
+            </h3>
+            <p>
+              Suivi des grilles de notes, bulletins et relevés, emploi du temps avec conflits
+              signalés, examens.
+            </p>
+          </div>
+          <div class="role">
+            <h3>
+              <svg class="ico"><use href="#i-coins" /></svg>Économat
+            </h3>
+            <p>Caisse, impayés, journal des paiements, clôtures. Comptabilité et paie en option.</p>
+          </div>
+          <div class="role">
+            <h3>
+              <svg class="ico"><use href="#i-pen" /></svg>Secrétariat
+            </h3>
+            <p>
+              Inscriptions avec détection des doublons, import Excel, certificats, attestations,
+              cartes d’élève.
+            </p>
+          </div>
+          <div class="role">
+            <h3>
+              <svg class="ico"><use href="#i-gavel" /></svg>Surveillance
+            </h3>
+            <p>
+              Appel, justificatifs d’absence, registre des incidents, alertes d’absences répétées.
+            </p>
+          </div>
+          <div class="role">
+            <h3>
+              <svg class="ico"><use href="#i-cap" /></svg>Enseignants
+            </h3>
+            <p>
+              « Ma journée », appel, notes, cahier de texte. Accès limité à leurs propres classes.
+            </p>
+          </div>
+          <div class="role">
+            <h3>
+              <svg class="ico"><use href="#i-heart" /></svg>Infirmerie
+            </h3>
+            <p>Fiche santé chiffrée, ouverte sur motif, chaque consultation enregistrée.</p>
+          </div>
+          <div class="role parents">
+            <h3>
+              <svg class="ico"><use href="#i-home" /></svg>Parents
+            </h3>
+            <p>
+              Notes, bulletins, absences, devoirs, reste à payer, paiement Mobile Money, messages.
+            </p>
+          </div>
+        </div>
+        <p class="note-line">
+          La direction règle les droits de chaque rôle et peut créer des rôles propres à
+          l’établissement. Une même personne peut cumuler plusieurs rôles.
+        </p>
+
+        <div class="modules">
+          <h3>13 modules : vous activez ceux dont vous avez besoin</h3>
+          <p class="sub">
+            Commencez par l’essentiel, ajoutez le reste quand votre équipe est prête.
+          </p>
+          <div class="modchips">
+            <span>Élèves et inscriptions</span>
+            <span>Appel et discipline</span>
+            <span>Notes et bulletins</span>
+            <span>Scolarité et caisse</span>
+            <span>Portail des parents</span>
+            <span>Annonces, messages et calendrier</span>
+            <span>Emploi du temps</span>
+            <span>Examens <b>·</b> salles, surveillances, anonymat, convocations</span>
+            <span>Documents administratifs</span>
+            <span>Comptabilité SYSCOHADA</span>
+            <span>Ressources humaines et paie</span>
+            <span>Transport scolaire <b>·</b> appel du car</span>
+            <span>Bibliothèque, stock et uniformes</span>
+          </div>
+        </div>
+      </div>
+      <div class="folio">3</div>
+    </section>
+
+    <!-- =============== PAGE 4 : CONFIANCE, DÉMARRAGE, OFFRE =============== -->
+    <section class="page">
+      <div class="pad">
+        <div class="kicker">Confiance et simplicité</div>
+        <h2>Vos données protégées, votre équipe accompagnée.</h2>
+
+        <div class="two">
+          <div class="panel">
+            <h3>
+              <svg class="ico"><use href="#i-shield" /></svg>Sécurité et contrôle
+            </h3>
+            <ul>
+              <li>
+                <svg class="ico"><use href="#i-lock" /></svg
+                ><span
+                  ><b>Données cloisonnées :</b> votre établissement ne voit que ses données, et
+                  personne d’autre ne voit les vôtres.</span
+                >
+              </li>
+              <li>
+                <svg class="ico"><use href="#i-history" /></svg
+                ><span
+                  ><b>Rien ne s’efface :</b> un paiement ne se modifie jamais, une correction laisse
+                  une trace ; un bulletin publié est figé.</span
+                >
+              </li>
+              <li>
+                <svg class="ico"><use href="#i-eye" /></svg
+                ><span><b>Journal d’audit :</b> la direction sait qui a fait quoi, et quand.</span>
+              </li>
+              <li>
+                <svg class="ico"><use href="#i-qr" /></svg
+                ><span
+                  ><b>Documents infalsifiables :</b> bulletins, reçus et certificats portent un QR
+                  code vérifiable en ligne.</span
+                >
+              </li>
+              <li>
+                <svg class="ico"><use href="#i-shield" /></svg
+                ><span
+                  ><b>Accès protégés :</b> double authentification pour les comptes sensibles ;
+                  fiches santé et pièces du dossier chiffrées.</span
+                >
+              </li>
+              <li>
+                <svg class="ico"><use href="#i-db" /></svg
+                ><span><b>Sauvegarde chaque nuit</b>, conservée 30 jours.</span>
+              </li>
+            </ul>
+          </div>
+          <div class="panel">
+            <h3>
+              <svg class="ico"><use href="#i-phone" /></svg>Pensé pour le terrain
+            </h3>
+            <ul>
+              <li>
+                <svg class="ico"><use href="#i-phone" /></svg
+                ><span
+                  ><b>Le téléphone d’abord :</b> un smartphone ordinaire suffit ; l’application
+                  s’installe sur l’écran d’accueil.</span
+                >
+              </li>
+              <li>
+                <svg class="ico"><use href="#i-wifi-off" /></svg
+                ><span
+                  ><b>Connexion faible ou coupée :</b> application légère ; parents et enseignants
+                  consultent les dernières données même sans réseau.</span
+                >
+              </li>
+              <li>
+                <svg class="ico"><use href="#i-msg" /></svg
+                ><span
+                  ><b>Parents sans smartphone :</b> ils reçoivent les SMS d’absence, de relance et
+                  de publication du bulletin.</span
+                >
+              </li>
+              <li>
+                <svg class="ico"><use href="#i-cap" /></svg
+                ><span
+                  ><b>Adapté au Cameroun :</b> FCFA, notes sur 20, séquences et trimestres, classes
+                  d’examen (BEPC, Probatoire, Bac, GCE).</span
+                >
+              </li>
+              <li>
+                <svg class="ico"><use href="#i-briefcase" /></svg
+                ><span
+                  ><b>Rien à installer à l’école :</b> pas de serveur ni de logiciel à acheter ; un
+                  navigateur suffit sur les ordinateurs.</span
+                >
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="kicker" style="margin-top: 7mm">Démarrer, pas à pas</div>
+        <div class="steps">
+          <div class="step">
+            <div class="num">1</div>
+            <h3>Démonstration</h3>
+            <p>30 minutes dans votre établissement, sur votre propre téléphone.</p>
+          </div>
+          <div class="step">
+            <div class="num">2</div>
+            <h3>Paramétrage</h3>
+            <p>
+              Classes, matières, coefficients, frais et tranches ; import de vos listes d’élèves
+              depuis Excel.
+            </p>
+          </div>
+          <div class="step">
+            <div class="num">3</div>
+            <h3>Formation</h3>
+            <p>
+              Sur place, par rôle : direction, censeur, caisse, enseignants. Guide remis aux
+              parents.
+            </p>
+          </div>
+          <div class="step">
+            <div class="num">4</div>
+            <h3>Accompagnement</h3>
+            <p>
+              Assistance par téléphone et WhatsApp. Démarrage possible au début de chaque trimestre.
+            </p>
+          </div>
+        </div>
+
+        <div class="offer">
+          <div class="panel">
+            <h3>
+              <svg class="ico"><use href="#i-coins" /></svg>Un abonnement annuel simple
+            </h3>
+            <ul>
+              <li>
+                <svg class="ico"><use href="#i-check" /></svg
+                ><span
+                  >Tarif <b>par élève inscrit et par an</b>, ou <b>par module</b> choisi : vous ne
+                  payez que ce que vous utilisez.</span
+                >
+              </li>
+              <li>
+                <svg class="ico"><use href="#i-check" /></svg
+                ><span
+                  >Aucun matériel à acheter : hébergement, sauvegardes et mises à jour sont
+                  compris.</span
+                >
+              </li>
+              <li>
+                <svg class="ico"><use href="#i-check" /></svg
+                ><span
+                  >Vos données restent la propriété de l’établissement et vous sont restituées sur
+                  simple demande.</span
+                >
+              </li>
+              <li>
+                <svg class="ico"><use href="#i-check" /></svg
+                ><span
+                  >Devis gratuit selon votre effectif et vos modules ; fiche tarifaire jointe.</span
+                >
+              </li>
+            </ul>
+          </div>
+          <div class="calc">
+            <h3>Faites le calcul</h3>
+            <div class="row"><span>Élèves inscrits</span><b>600</b></div>
+            <div class="row"><span>Scolarité annuelle moyenne</span><b>100 000 FCFA</b></div>
+            <div class="row"><span>Total à encaisser</span><b>60 000 000 FCFA</b></div>
+            <div class="res">
+              Chaque point d’impayé récupéré rapporte<strong>600 000 FCFA</strong>
+            </div>
+            <small
+              >Exemple indicatif : remplacez ces chiffres par ceux de votre établissement.</small
+            >
+          </div>
+        </div>
+      </div>
+
+      <div class="contact">
+        <div>
+          <h2>Demandez votre <em>démonstration gratuite.</em></h2>
+          <p>Nous venons vous présenter Ecole dans votre établissement, avec votre équipe.</p>
+        </div>
+        <div class="who">
+          <strong>[Prénom Nom]</strong>
+          [Fonction]<br />
+          Tél. et WhatsApp : [+237 6XX XX XX XX]<br />
+          [adresse@domaine.cm]<br />
+          [site web]
+        </div>
+        <div class="qr">
+          <div>
+            <svg class="ico"><use href="#i-qr" /></svg>QR code<br />démonstration
+          </div>
+        </div>
+      </div>
+    </section>
+  </body>
+</html>

@@ -371,10 +371,21 @@ class PrismaLifecycle implements OnApplicationShutdown {
   }
 }
 
+/**
+ * Délais des transactions interactives (5 s par défaut chez Prisma) : une base distante, par exemple
+ * Neon depuis une construction Vercel en Amérique, met plus de temps à répondre à chaque requête.
+ */
+export const TRANSACTION_OPTIONS = { maxWait: 10_000, timeout: 30_000 } as const;
+
+/** Client Prisma de l'application : délais des transactions adaptés à une base distante. */
+export function newPrismaClient(): PrismaClient {
+  return new PrismaClient({ transactionOptions: TRANSACTION_OPTIONS });
+}
+
 @Global()
 @Module({
   providers: [
-    { provide: BASE_PRISMA, useFactory: () => new PrismaClient() },
+    { provide: BASE_PRISMA, useFactory: () => newPrismaClient() },
     { provide: DB, useFactory: (base: PrismaClient) => createDb(base), inject: [BASE_PRISMA] },
     PrismaLifecycle,
   ],

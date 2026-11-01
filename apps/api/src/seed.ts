@@ -2,8 +2,7 @@ import 'reflect-metadata';
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { permissionsForRoles, type StaffRole } from '@ecole/shared';
-import { PrismaClient } from '@prisma/client';
-import { createDb } from './common/prisma';
+import { createDb, newPrismaClient } from './common/prisma';
 import { randomUUID } from 'node:crypto';
 import { env, loadDotEnv } from './config/env';
 import { encrypt } from './common/crypto';
@@ -94,7 +93,7 @@ async function main(): Promise<void> {
   loadDotEnv();
   const logger = new Logger('Seed');
   // Accès direct en mode système journalisé : la Row-Level Security s'applique au rôle applicatif.
-  const base = createDb(new PrismaClient());
+  const base = createDb(newPrismaClient());
   if (await base.school.findUnique({ where: { slug: 'college-demo' } })) {
     logger.log('Données de démonstration déjà présentes : rien à faire.');
     await base.$disconnect();
@@ -931,6 +930,16 @@ async function main(): Promise<void> {
     data: { status: 'FAILED', lastError: 'Jeu de démonstration' },
   });
 
+  // Jeu complet : la préparation d'un déploiement reconnaît ainsi un jeu interrompu en cours de route.
+  await base.school.update({
+    where: { id: schoolId },
+    data: {
+      settings: {
+        ...((school.settings ?? {}) as Record<string, unknown>),
+        demoSeededAt: new Date().toISOString(),
+      },
+    },
+  });
   logger.log(
     `Collège Démo créé : ${all.length} élèves, ${staffDefs.length} comptes du personnel (mot de passe ${DEMO_PASSWORD}).`,
   );

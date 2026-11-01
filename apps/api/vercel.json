@@ -6,10 +6,11 @@
   "outputDirectory": "public",
   "regions": ["fra1"],
   "functions": {
-    "api/index.js": { "maxDuration": 60, "includeFiles": "dist/**" }
+    "api/index.js": { "maxDuration": 300, "includeFiles": "dist/**" }
   },
   "rewrites": [{ "source": "/(.*)", "destination": "/api" }],
   "crons": [
+    { "path": "/jobs/seedDemo", "schedule": "0 9 * * *" },
     { "path": "/jobs/accounting", "schedule": "0 2 * * *" },
     { "path": "/jobs/reconcile", "schedule": "0 5 * * *" },
     { "path": "/jobs/alerts", "schedule": "30 5 * * *" },

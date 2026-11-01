@@ -11,6 +11,7 @@ import { ModuleRef } from '@nestjs/core';
 import { ApiExcludeController } from '@nestjs/swagger';
 import { SkipThrottle } from '@nestjs/throttler';
 import { createHash, timingSafeEqual } from 'node:crypto';
+import { runAsSystem } from '../../common/context';
 import { Public } from '../../common/decorators';
 import { env } from '../../config/env';
 import { JOBS, runJob } from '../../jobs';
@@ -38,13 +39,18 @@ export class JobsController {
     const secret = env().CRON_SECRET;
     if (!secret || !sameSecret(authorization ?? '', `Bearer ${secret}`))
       throw new NotFoundException();
-    if (!Object.hasOwn(JOBS, name)) throw new NotFoundException('Tâche inconnue');
+    // Préproduction seulement : chargement du jeu de démonstration depuis la région de la base
+    // (trop lent depuis la construction, qui tourne loin de la base).
+    const seed = name === 'seedDemo' && env().DEPLOY_STAGE === 'preprod';
+    if (!seed && !Object.hasOwn(JOBS, name)) throw new NotFoundException('Tâche inconnue');
     // Services des autres modules : recherche dans toute l'application.
     const app = {
       get: (token: unknown) => this.moduleRef.get(token as never, { strict: false }),
     } as unknown as INestApplicationContext;
     const started = Date.now();
-    const result = await runJob(app, name);
+    const result = seed
+      ? await import('../../seed').then(({ seedDemo }) => runAsSystem('seed', () => seedDemo(app)))
+      : await runJob(app, name);
     return { job: name, ms: Date.now() - started, result: result ?? null };
   }
 }

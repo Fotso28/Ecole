@@ -1,8 +1,10 @@
 /* eslint-disable @typescript-eslint/no-require-imports -- fichier CommonJS exécuté tel quel par Node et par Vercel */
 /**
- * Préparation au déploiement Vercel, après la compilation : base Neon (rôles, migrations, droits)
- * et, en préproduction, jeu de démonstration. Sans base gérée (ni APP_SECRET ni APP_DB_PASSWORD), ne
- * fait que créer le dossier statique attendu par Vercel.
+ * Préparation au déploiement Vercel, après la compilation : base Neon (rôles, migrations, droits).
+ * Sans base gérée (ni APP_SECRET ni APP_DB_PASSWORD), ne fait que créer le dossier statique attendu
+ * par Vercel. Le jeu de démonstration de la préproduction se charge à l'exécution (tâche
+ * `/jobs/seedDemo`) : la construction tourne loin de la base et chaque requête y coûte un aller-retour
+ * transatlantique.
  */
 const { execFileSync } = require('node:child_process');
 const { mkdirSync } = require('node:fs');
@@ -60,30 +62,10 @@ async function main() {
     '--url',
     env.MIGRATION_DATABASE_URL,
   ]);
-  if (env.DEPLOY_STAGE === 'preprod') {
-    // Jeu interrompu lors d'une construction précédente (école présente, marque de fin absente) :
-    // la base de préproduction ne contient que la démonstration, on la vide pour la recharger.
-    const check = new PrismaClient({ datasourceUrl: env.MIGRATION_DATABASE_URL });
-    try {
-      const rows = await check.$queryRawUnsafe(
-        `SELECT settings->>'demoSeededAt' AS done FROM "School" WHERE slug = 'college-demo'`,
-      );
-      if (rows.length > 0 && !rows[0].done) {
-        console.log(
-          '[préparation] Jeu de démonstration incomplet : remise à zéro avant de le recharger',
-        );
-        const tables = await check.$queryRawUnsafe(
-          `SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename <> '_prisma_migrations'`,
-        );
-        const list = tables.map((t) => `"${t.tablename.replace(/"/g, '""')}"`).join(', ');
-        await check.$executeRawUnsafe(`TRUNCATE TABLE ${list} RESTART IDENTITY CASCADE`);
-      }
-    } finally {
-      await check.$disconnect();
-    }
-    console.log('[préparation] Jeu de démonstration (ignoré s’il est déjà complet)');
-    run('node', ['dist/seed.js']);
-  }
+  if (env.DEPLOY_STAGE === 'preprod')
+    console.log(
+      '[préparation] Jeu de démonstration : chargé par la tâche planifiée /jobs/seedDemo (Vercel → Settings → Cron Jobs → Run).',
+    );
 }
 
 main().catch((error) => {

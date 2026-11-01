@@ -23,8 +23,15 @@ production.
    `NEON` ou aucun, les deux sont reconnus.
 2. À chaque construction, `scripts/vercel-prepare.cjs` prépare la base avec le rôle propriétaire
    fourni par Neon : rôles `ecole_app` (connexion de l'API, soumise à la Row-Level Security) et
-   `ecole_system` (mode système), migrations, droits, puis jeu de démonstration s'il n'existe pas.
-3. À l'exécution, `src/config/platform-env.ts` déduit l'adresse du rôle `ecole_app` (pool de
+   `ecole_system` (mode système), migrations et droits.
+3. Le jeu de démonstration se charge à l'exécution, depuis la fonction (région `fra1`, à côté de la
+   base) : tâche planifiée `/jobs/seedDemo`, une fois par jour, sans effet si le jeu est complet.
+   Pour le charger tout de suite après le premier déploiement : **ecole-preprod-api → Settings →
+   Cron Jobs → `/jobs/seedDemo` → Run** (environ une minute). Un jeu interrompu est effacé puis
+   rechargé ; un verrou empêche deux chargements simultanés. Cette tâche n'existe qu'en
+   préproduction. Depuis la construction (Washington), chaque requête traversait l'Atlantique et le
+   même chargement dépassait une demi-heure.
+4. À l'exécution, `src/config/platform-env.ts` déduit l'adresse du rôle `ecole_app` (pool de
    connexions de Neon) et celle du propriétaire (migrations) à partir des variables de Neon et de
    `APP_DB_PASSWORD`.
 

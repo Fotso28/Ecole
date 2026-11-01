@@ -51,5 +51,8 @@ describe('tâches planifiées de l’hébergeur (Vercel Cron)', () => {
     await http().get('/jobs/accounting').set('Authorization', SECRET).expect(200);
     await http().get('/jobs/inconnue').set('Authorization', SECRET).expect(404);
     await http().get('/jobs/constructor').set('Authorization', SECRET).expect(404);
+    // Le chargement du jeu de démonstration n'existe qu'en préproduction.
+    await http().get('/jobs/seedDemo').set('Authorization', SECRET).expect(404);
+    expect(await prisma.school.count({ where: { slug: 'college-demo' } })).toBe(0);
   });
 });

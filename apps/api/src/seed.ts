@@ -1,6 +1,7 @@
 import 'reflect-metadata';
-import { Logger } from '@nestjs/common';
+import { Logger, type INestApplicationContext } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { PrismaClient } from '@prisma/client';
 import { permissionsForRoles, type StaffRole } from '@ecole/shared';
 import { createDb, newPrismaClient } from './common/prisma';
 import { randomUUID } from 'node:crypto';
@@ -89,15 +90,93 @@ const LAST = [
 
 const SEED_REASON = 'seed';
 
-async function main(): Promise<void> {
-  loadDotEnv();
+export interface SeedResult {
+  /** Jeu chargé par cet appel. */
+  created: boolean;
+  /** Jeu interrompu effacé avant d'être rechargé (préproduction). */
+  reset?: boolean;
+  /** Un autre chargement est déjà en cours (préproduction). */
+  busy?: boolean;
+  students?: number;
+}
+
+/** Hôte et base d'une adresse PostgreSQL, sans le suffixe du pool de connexions de Neon. */
+function databaseOf(url: string): string {
+  const u = new URL(url);
+  return `${u.hostname.replace('-pooler.', '.')}:${u.port || '5432'}${u.pathname}`;
+}
+
+/**
+ * Connexion propriétaire réservée à la préproduction (verrou et remise à zéro), sinon null. Elle doit
+ * viser la même base que l'API : jamais de remise à zéro d'une autre base.
+ */
+function preprodOwner(logger: Logger): PrismaClient | null {
+  const url = process.env.MIGRATION_DATABASE_URL;
+  const appUrl = process.env.DATABASE_URL;
+  if (env().DEPLOY_STAGE !== 'preprod' || !url || !appUrl) return null;
+  if (databaseOf(url) !== databaseOf(appUrl)) {
+    logger.warn(
+      'MIGRATION_DATABASE_URL et DATABASE_URL visent deux bases : ni verrou ni remise à zéro.',
+    );
+    return null;
+  }
+  // Une seule connexion : le verrou consultatif de session reste sur la même connexion.
+  const single = new URL(url);
+  single.searchParams.set('connection_limit', '1');
+  return new PrismaClient({ datasourceUrl: single.toString() });
+}
+
+/**
+ * Préproduction : un jeu interrompu (école présente, marque de fin absente) est effacé pour être
+ * rechargé. La base de préproduction ne contient que la démonstration.
+ */
+async function resetIncompleteDemo(owner: PrismaClient, logger: Logger): Promise<boolean> {
+  const rows = await owner.$queryRaw<{ done: string | null }[]>`
+    SELECT settings->>'demoSeededAt' AS done FROM "School" WHERE slug = 'college-demo'`;
+  if (rows.length === 0 || rows[0]?.done) return false;
+  logger.warn('Jeu de démonstration incomplet : remise à zéro avant de le recharger');
+  const tables = await owner.$queryRaw<{ tablename: string }[]>`
+    SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename <> '_prisma_migrations'`;
+  const list = tables.map((t) => `"${t.tablename.replace(/"/g, '""')}"`).join(', ');
+  await owner.$executeRawUnsafe(`TRUNCATE TABLE ${list} RESTART IDENTITY CASCADE`);
+  return true;
+}
+
+/**
+ * Charge le Collège Démo s'il est absent (sans effet sinon). À appeler en mode système. Réutilise
+ * l'application fournie (tâche `seedDemo` de l'API), sinon crée son propre contexte (ligne de
+ * commande). En préproduction, un verrou empêche deux chargements simultanés.
+ */
+export async function seedDemo(provided?: INestApplicationContext): Promise<SeedResult> {
   const logger = new Logger('Seed');
+  const owner = preprodOwner(logger);
+  if (!owner) return seedDemoUnlocked(provided, logger, false);
+  try {
+    const [lock] = await owner.$queryRaw<{ ok: boolean }[]>`
+      SELECT pg_try_advisory_lock(hashtext('ecole-demo-seed')) AS ok`;
+    if (!lock?.ok) {
+      logger.warn('Chargement du jeu de démonstration déjà en cours.');
+      return { created: false, busy: true };
+    }
+    const reset = await resetIncompleteDemo(owner, logger);
+    return await seedDemoUnlocked(provided, logger, reset);
+  } finally {
+    // La déconnexion libère aussi le verrou de session.
+    await owner.$disconnect();
+  }
+}
+
+async function seedDemoUnlocked(
+  provided: INestApplicationContext | undefined,
+  logger: Logger,
+  reset: boolean,
+): Promise<SeedResult> {
   // Accès direct en mode système journalisé : la Row-Level Security s'applique au rôle applicatif.
   const base = createDb(newPrismaClient());
   if (await base.school.findUnique({ where: { slug: 'college-demo' } })) {
     logger.log('Données de démonstration déjà présentes : rien à faire.');
     await base.$disconnect();
-    return;
+    return { created: false, reset };
   }
   const { AppModule } = await import('./app.module');
   const { AuthService } = await import('./modules/auth/auth.service');
@@ -110,7 +189,9 @@ async function main(): Promise<void> {
   const { StockService } = await import('./modules/library/stock.service');
   const { PayrollService } = await import('./modules/hr/payroll.service');
   const { EmployeesService } = await import('./modules/hr/employees.service');
-  const app = await NestFactory.createApplicationContext(AppModule, { logger: ['error', 'warn'] });
+  const app =
+    provided ??
+    (await NestFactory.createApplicationContext(AppModule, { logger: ['error', 'warn'] }));
   const students = app.get(StudentsService);
   const finance = app.get(FinanceService);
   const grades = app.get(GradesService);
@@ -943,11 +1024,16 @@ async function main(): Promise<void> {
   logger.log(
     `Collège Démo créé : ${all.length} élèves, ${staffDefs.length} comptes du personnel (mot de passe ${DEMO_PASSWORD}).`,
   );
-  await app.close();
+  if (!provided) await app.close();
   await base.$disconnect();
+  return { created: true, reset, students: all.length };
 }
 
-runAsSystem(SEED_REASON, main).catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+// Ligne de commande : `node dist/seed.js` (pnpm db:seed).
+if (require.main === module) {
+  loadDotEnv();
+  runAsSystem(SEED_REASON, () => seedDemo()).catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
+}

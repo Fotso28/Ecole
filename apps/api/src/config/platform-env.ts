@@ -10,7 +10,34 @@
  * Sans APP_DB_PASSWORD (Docker, développement, tests), rien ne change.
  */
 
+import { hkdfSync } from 'node:crypto';
+
 const APP_ROLE = 'ecole_app';
+
+/**
+ * Secrets dérivés d'un seul secret maître (APP_SECRET), saisi par l'exploitant dans l'hébergeur :
+ * chacun est obtenu par HKDF-SHA256 avec son propre nom, et seulement s'il n'est pas déjà défini.
+ * Changer APP_SECRET change tous ces secrets : la clé de chiffrement rendrait illisibles les
+ * données déjà chiffrées. Taille en octets (rendus en hexadécimal).
+ */
+const DERIVED_SECRETS = {
+  JWT_SECRET: 32,
+  OTP_SECRET: 32,
+  DATA_ENCRYPTION_KEY: 32,
+  APP_DB_PASSWORD: 24,
+  MOBILE_MONEY_WEBHOOK_SECRET: 24,
+} as const;
+
+export function deriveSecrets(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const master = env.APP_SECRET;
+  if (!master) return env;
+  if (master.length < 32) throw new Error('APP_SECRET doit faire au moins 32 caractères');
+  for (const [name, bytes] of Object.entries(DERIVED_SECRETS)) {
+    if (env[name]) continue;
+    env[name] = Buffer.from(hkdfSync('sha256', master, 'ecole', name, bytes)).toString('hex');
+  }
+  return env;
+}
 
 function firstUrl(env: NodeJS.ProcessEnv, keys: readonly string[]): string | undefined {
   for (const key of keys) {
@@ -28,6 +55,7 @@ function firstUrl(env: NodeJS.ProcessEnv, keys: readonly string[]): string | und
 }
 
 export function applyPlatformEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  deriveSecrets(env);
   const password = env.APP_DB_PASSWORD;
   if (!password) return env;
   const pooled = firstUrl(env, [

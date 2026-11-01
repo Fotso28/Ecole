@@ -30,21 +30,30 @@ production.
 
 ## Variables d'environnement
 
-API (`ecole-preprod-api`, environnement Production) :
+API (`ecole-preprod-api`, environnements Production et Preview).
 
-| Variable                                | Valeur en préproduction                        |
-| --------------------------------------- | ---------------------------------------------- |
-| `DEPLOY_STAGE`                          | `preprod`                                      |
-| `APP_DB_PASSWORD`                       | secret aléatoire (mot de passe de `ecole_app`) |
-| `JWT_SECRET`, `OTP_SECRET`              | secrets aléatoires (32 caractères au moins)    |
-| `DATA_ENCRYPTION_KEY`                   | 64 caractères hexadécimaux aléatoires          |
-| `CRON_SECRET`                           | secret aléatoire (tâches planifiées)           |
-| `SMS_PROVIDER`, `EMAIL_PROVIDER`        | `console` (messages écrits dans les journaux)  |
-| `MOBILE_MONEY_PROVIDER`                 | `simulator`                                    |
-| `MOBILE_MONEY_WEBHOOK_SECRET`           | secret aléatoire                               |
-| `QUEUES_ENABLED`                        | `false` (pas de Redis : tâches planifiées)     |
-| `WEB_ORIGIN`, `PUBLIC_VERIFY_URL`       | adresse du site, et `…/verifier`               |
-| `STORAGE_PROVIDER`, `STORAGE_LOCAL_DIR` | `local`, `/tmp/ecole-storage` (temporaire)     |
+Deux secrets sont saisis par l'exploitant dans Vercel (type « Sensitive »), jamais dans le dépôt :
+
+| Variable      | Rôle                                                                        |
+| ------------- | --------------------------------------------------------------------------- |
+| `APP_SECRET`  | secret maître, 32 caractères au moins ; ne plus jamais le changer ensuite   |
+| `CRON_SECRET` | secret des tâches planifiées (Vercel l'envoie dans l'en-tête Authorization) |
+
+Les autres secrets en sont dérivés au démarrage (HKDF-SHA256, `src/config/platform-env.ts`) :
+`JWT_SECRET`, `OTP_SECRET`, `DATA_ENCRYPTION_KEY`, `APP_DB_PASSWORD` (mot de passe du rôle
+`ecole_app`) et `MOBILE_MONEY_WEBHOOK_SECRET`. Changer `APP_SECRET` les change tous : les données
+déjà chiffrées deviendraient illisibles et toutes les sessions seraient fermées.
+
+Variables ordinaires :
+
+| Variable                                | Valeur en préproduction                       |
+| --------------------------------------- | --------------------------------------------- |
+| `DEPLOY_STAGE`                          | `preprod`                                     |
+| `SMS_PROVIDER`, `EMAIL_PROVIDER`        | `console` (messages écrits dans les journaux) |
+| `MOBILE_MONEY_PROVIDER`                 | `simulator`                                   |
+| `QUEUES_ENABLED`                        | `false` (pas de Redis : tâches planifiées)    |
+| `WEB_ORIGIN`, `PUBLIC_VERIFY_URL`       | adresse du site, et `…/verifier`              |
+| `STORAGE_PROVIDER`, `STORAGE_LOCAL_DIR` | `local`, `/tmp/ecole-storage` (temporaire)    |
 
 Site (`ecole-preprod`) : `API_URL` (adresse de l'API), `NEXT_PUBLIC_DEPLOY_STAGE=preprod` (bandeau
 « Préproduction »), `NEXT_PUBLIC_MOBILE_MONEY_SIMULATOR=true`.

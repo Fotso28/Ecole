@@ -182,7 +182,8 @@ test.describe('emploi du temps', () => {
     await expect(
       page.getByText('Tous vos cours de la semaine, toutes classes confondues.'),
     ).toBeVisible();
-    const mine = page.locator('[data-lesson]', { hasText: '4e A · Mathématiques' });
+    // Vue affichée seulement : la liste du téléphone reste dans la page, masquée, sur ordinateur.
+    const mine = page.locator('[data-lesson]:visible', { hasText: '4e A · Mathématiques' });
     if (isMobile(info)) {
       for (const d of ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi']) {
         await page.getByRole('tab', { name: d }).click();

@@ -1,8 +1,8 @@
 /* eslint-disable @typescript-eslint/no-require-imports -- fichier CommonJS exécuté tel quel par Node et par Vercel */
 /**
  * Préparation au déploiement Vercel, après la compilation : base Neon (rôles, migrations, droits)
- * et, en préproduction, jeu de démonstration. Sans base gérée (APP_DB_PASSWORD absent), ne fait que
- * créer le dossier statique attendu par Vercel.
+ * et, en préproduction, jeu de démonstration. Sans base gérée (ni APP_SECRET ni APP_DB_PASSWORD), ne
+ * fait que créer le dossier statique attendu par Vercel.
  */
 const { execFileSync } = require('node:child_process');
 const { mkdirSync } = require('node:fs');
@@ -12,14 +12,19 @@ const root = join(__dirname, '..');
 mkdirSync(join(root, 'public'), { recursive: true });
 
 async function main() {
-  if (!process.env.APP_DB_PASSWORD) {
-    console.log('[préparation] Pas de base gérée (APP_DB_PASSWORD absent) : rien à préparer.');
-    return;
-  }
+  // Secrets dérivés de APP_SECRET, puis adresses de la base Neon (src/config/platform-env.ts).
   const { applyPlatformEnv } = require('../dist/config/platform-env.js');
   const env = applyPlatformEnv(process.env);
+  if (!env.APP_DB_PASSWORD) {
+    console.log(
+      '[préparation] Pas de base gérée (ni APP_SECRET ni APP_DB_PASSWORD) : rien à faire.',
+    );
+    return;
+  }
   if (!env.MIGRATION_DATABASE_URL)
-    throw new Error('Base Neon introuvable : connectez-la au projet.');
+    throw new Error(
+      'Base Neon introuvable : connectez-la au projet (Storage → Neon), puis relancez le déploiement.',
+    );
   const { PrismaClient } = require('@prisma/client');
   const owner = new PrismaClient({ datasourceUrl: env.MIGRATION_DATABASE_URL });
   const literal = (s) => `'${String(s).replace(/'/g, "''")}'`;

@@ -7,11 +7,13 @@
  * transatlantique.
  */
 const { execFileSync } = require('node:child_process');
-const { mkdirSync } = require('node:fs');
+const { mkdirSync, writeFileSync } = require('node:fs');
 const { join } = require('node:path');
 
 const root = join(__dirname, '..');
+// Vercel refuse un dossier de sortie vide ; l'API ne doit pas être indexée par les moteurs.
 mkdirSync(join(root, 'public'), { recursive: true });
+writeFileSync(join(root, 'public', 'robots.txt'), 'User-agent: *\nDisallow: /\n');
 
 async function main() {
   // Secrets dérivés de APP_SECRET, puis adresses de la base Neon (src/config/platform-env.ts).

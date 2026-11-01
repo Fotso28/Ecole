@@ -10,6 +10,7 @@ coverage/
 playwright-report/
 test-results/
 apps/api/storage/
+apps/api/public/
 deploy/backups/
 deploy/backup-status/
 deploy/.deploy/

@@ -78,5 +78,9 @@ Site (`ecole-preprod`) : `API_URL` (adresse de l'API), `NEXT_PUBLIC_DEPLOY_STAGE
 ## Vérifier un déploiement
 
 `node deploy/preprod-smoke.mjs <adresse de l’API> <CRON_SECRET>` (test de fumée : santé, en-têtes de
-sécurité, routes fermées, connexion, recherche, PDF, limitation des tentatives). Les mêmes contrôles
+sécurité, routes fermées, connexion, recherche, PDF, limitation des tentatives).
+`node deploy/preprod-exports.mjs <adresse de l’API>` produit chaque export (PDF, Excel, CSV) : un
+fichier chargé dynamiquement et absent de la fonction n'apparaît qu'à ce moment-là (cas des polices
+de pdfkit, voir `src/common/pdf-fonts.ts`). `node deploy/preprod-site.mjs <adresse du site>` vérifie
+les pages, la réécriture `/api` vers l'API et la session par cookie. Les mêmes contrôles
 ont été joués en local contre la fonction serverless en mode production avant le premier déploiement.

@@ -2,6 +2,8 @@ import 'reflect-metadata';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { NestFactory } from '@nestjs/core';
 import { env, loadDotEnv } from './config/env';
+// Embarque les polices standard de pdfkit dans la fonction (voir common/pdf-fonts.ts).
+import './common/pdf-fonts';
 
 type Handler = (req: IncomingMessage, res: ServerResponse) => void;
 

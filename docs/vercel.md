@@ -16,6 +16,12 @@ La configuration de chaque projet est dans son `vercel.json` (installation pnpm 
 compilation de `@ecole/shared`, région `fra1`). Les deux projets déploient la même branche en
 production.
 
+Adresses publiques : celles de production de chaque projet, `https://ecole-preprod.vercel.app` (site)
+et `https://ecole-preprod-api.vercel.app` (API). Les autres adresses (`…-<équipe>.vercel.app`, une
+par déploiement) restent derrière l'authentification Vercel (protection standard) : ne pas les
+mettre dans `WEB_ORIGIN` ni dans `PUBLIC_VERIFY_URL`, sinon les QR des documents mèneraient à une
+page de connexion Vercel.
+
 ## Base de données (Neon)
 
 1. Dans Vercel, **Storage → Create Database → Neon**, région **Frankfurt (eu-central-1)**, puis
@@ -59,7 +65,7 @@ Variables ordinaires :
 | `SMS_PROVIDER`, `EMAIL_PROVIDER`        | `console` (messages écrits dans les journaux) |
 | `MOBILE_MONEY_PROVIDER`                 | `simulator`                                   |
 | `QUEUES_ENABLED`                        | `false` (pas de Redis : tâches planifiées)    |
-| `WEB_ORIGIN`, `PUBLIC_VERIFY_URL`       | adresse du site, et `…/verifier`              |
+| `WEB_ORIGIN`, `PUBLIC_VERIFY_URL`       | adresse publique du site, et `…/verifier`     |
 | `STORAGE_PROVIDER`, `STORAGE_LOCAL_DIR` | `local`, `/tmp/ecole-storage` (temporaire)    |
 
 Site (`ecole-preprod`) : `API_URL` (adresse de l'API), `NEXT_PUBLIC_DEPLOY_STAGE=preprod` (bandeau

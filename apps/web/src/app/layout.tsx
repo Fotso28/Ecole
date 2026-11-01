@@ -21,6 +21,14 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="fr">
       <body>
+        {process.env.NEXT_PUBLIC_DEPLOY_STAGE === 'preprod' ? (
+          <p
+            role="note"
+            className="bg-saffron px-4 py-1.5 text-center text-[13px] font-semibold text-ink"
+          >
+            Préproduction : données de démonstration, aucun SMS n’est envoyé.
+          </p>
+        ) : null}
         <Providers>{children}</Providers>
       </body>
     </html>

@@ -17,6 +17,7 @@ import { CalendarModule } from './modules/calendar/calendar.module';
 import { CommunicationModule } from './modules/communication/communication.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { DevModule } from './modules/dev/dev.module';
+import { JobsModule } from './modules/jobs/jobs.module';
 import { FilesModule } from './modules/files/files.module';
 import { ExamsModule } from './modules/exams/exams.module';
 import { FinanceModule } from './modules/finance/finance.module';
@@ -76,6 +77,7 @@ import { LibraryModule } from './modules/library/library.module';
     ExamsModule,
     AccountingModule,
     DevModule,
+    JobsModule,
     DocumentsModule,
     DisciplineModule,
     ReenrollmentModule,

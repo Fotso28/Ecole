@@ -1,0 +1,21 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "pnpm install --frozen-lockfile",
+  "buildCommand": "pnpm --filter @ecole/shared build && pnpm --filter @ecole/api build && node scripts/vercel-prepare.cjs",
+  "outputDirectory": "public",
+  "regions": ["fra1"],
+  "functions": {
+    "api/index.js": { "maxDuration": 60, "includeFiles": "dist/**" }
+  },
+  "rewrites": [{ "source": "/(.*)", "destination": "/api" }],
+  "crons": [
+    { "path": "/jobs/accounting", "schedule": "0 2 * * *" },
+    { "path": "/jobs/reconcile", "schedule": "0 5 * * *" },
+    { "path": "/jobs/alerts", "schedule": "30 5 * * *" },
+    { "path": "/jobs/reminders", "schedule": "0 7 * * *" },
+    { "path": "/jobs/libraryReminders", "schedule": "0 8 * * *" },
+    { "path": "/jobs/outbox", "schedule": "30 8 * * *" },
+    { "path": "/jobs/eventReminders", "schedule": "0 17 * * *" }
+  ]
+}

@@ -1,8 +1,16 @@
 import { MAX_FILE_BYTES } from '@ecole/shared';
 import { z } from 'zod';
+import { applyPlatformEnv } from './platform-env';
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  /**
+   * Étape de déploiement : `preprod` (données de démonstration, SMS écrits dans les journaux au
+   * lieu d'être envoyés) ou `production` (passerelle SMS obligatoire).
+   */
+  DEPLOY_STAGE: z.enum(['production', 'preprod']).default('production'),
+  /** Secret des tâches planifiées de Vercel (en-tête Authorization: Bearer). Absent : route fermée. */
+  CRON_SECRET: z.string().min(16).optional(),
   PORT: z.coerce.number().int().positive().default(4000),
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().default('redis://localhost:6379'),
@@ -120,7 +128,10 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     }
     // Le fournisseur « console » écrit chaque SMS, codes de connexion des parents compris, dans
     // les journaux ; « memory » les garde en mémoire sans les envoyer.
-    if (parsed.data.SMS_PROVIDER !== 'http') {
+    // Préproduction : SMS écrits dans les journaux (données de démonstration seulement).
+    const preprodConsole =
+      parsed.data.DEPLOY_STAGE === 'preprod' && parsed.data.SMS_PROVIDER === 'console';
+    if (parsed.data.SMS_PROVIDER !== 'http' && !preprodConsole) {
       throw new Error('SMS_PROVIDER=http obligatoire en production (passerelle SMS)');
     }
   }
@@ -149,4 +160,6 @@ export function loadDotEnv(path = '.env'): void {
   } catch {
     // Pas de fichier .env : les variables viennent de l'environnement.
   }
+  // Hébergement géré (Vercel + Neon) : adresses du rôle applicatif et du propriétaire.
+  applyPlatformEnv(process.env);
 }

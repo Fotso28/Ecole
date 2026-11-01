@@ -9,3 +9,9 @@ onlyBuiltDependencies:
   - esbuild
   - prisma
   - sharp
+# Versions corrigées imposées aux dépendances indirectes (avis de sécurité) :
+# multer (Nest, envoi de fichiers), postcss (Next), js-yaml (documentation Swagger).
+overrides:
+  multer: 2.5.0
+  postcss@<8.5.23: 8.5.30
+  js-yaml@>=5.0.0 <5.4.1: 5.4.3

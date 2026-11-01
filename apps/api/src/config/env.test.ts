@@ -20,4 +20,17 @@ describe('configuration de production', () => {
       expect(() => loadEnv({ ...production, SMS_PROVIDER })).toThrow(/SMS_PROVIDER=http/);
     }
   });
+
+  it('préproduction : SMS écrits dans les journaux, jamais gardés en mémoire', () => {
+    const preprod = { ...production, DEPLOY_STAGE: 'preprod' };
+    expect(loadEnv({ ...preprod, SMS_PROVIDER: 'console' }).DEPLOY_STAGE).toBe('preprod');
+    expect(() => loadEnv({ ...preprod, SMS_PROVIDER: 'memory' })).toThrow(/SMS_PROVIDER=http/);
+    expect(() => loadEnv({ ...production, DEPLOY_STAGE: 'recette' })).toThrow();
+  });
+
+  it('secret des tâches planifiées : 16 caractères au moins', () => {
+    const base = { ...production, SMS_PROVIDER: 'http' };
+    expect(loadEnv(base).CRON_SECRET).toBeUndefined();
+    expect(() => loadEnv({ ...base, CRON_SECRET: 'court' })).toThrow();
+  });
 });
